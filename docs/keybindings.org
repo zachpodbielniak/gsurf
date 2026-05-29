@@ -35,6 +35,15 @@ Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is
 provided by the =modal= module (enabled by default), not the core table, so it
 is mode-aware and won't interfere with typing.
 
+*Link hinting (vimium-style).* In normal mode, =f= overlays a short chord label
+on every clickable element (links, buttons, inputs, ...). Labels are drawn from
+=modules.modal.hint_chars= (default =asdfghjkl=) and grow from 1 to 2/3/4
+characters as the number of targets increases. Type the chord to narrow the
+set; as soon as one target remains it is clicked. =F= opens the chosen link in a
+new view, and =Escape= cancels. Configure the keys/colors under
+=modules.modal= (=hint_key=, =hint_key_newview=, =hint_chars=, =hint_bg=,
+=hint_fg=).
+
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
 

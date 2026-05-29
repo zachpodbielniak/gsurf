@@ -26,7 +26,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 
 | Module        | surf lineage        | Status  |
 |---------------+---------------------+---------|
-| =modal=       | modal / vim keys    | implemented (default) |
+| =modal=       | modal / vim keys + vimium link hints | implemented (default) |
 | =adblock=     | (new; high value)   | implemented |
 | =playexternal=| playexternal        | implemented |
 | =omnibar=     | omnibar             | implemented |
