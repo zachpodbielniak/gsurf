@@ -1,0 +1,70 @@
+#+TITLE: gsurf Module System
+#+OPTIONS: toc:2 num:nil
+
+* Concept
+
+Each surf "patch" is a runtime-loaded =.so= module. A module is a =GsurfModule=
+subclass that implements one or more hook-point GInterfaces. =GsurfModuleManager=
+loads modules from the module directory (=$GSURF_MODULE_PATH=, then
+=<exe-dir>/modules= in a dev tree, then the installed =MODULEDIR=), reads each
+module's =enabled:= flag and options from the YAML =modules:= map, activates the
+enabled ones, and dispatches hooks in priority order.
+
+* Anatomy of a module
+
+#+begin_src c
+#include <gsurf/gsurf.h>
+#include <gmodule.h>
+
+#define GSURF_TYPE_FOO_MODULE (gsurf_foo_module_get_type())
+G_DECLARE_FINAL_TYPE(GsurfFooModule, gsurf_foo_module, GSURF, FOO_MODULE, GsurfModule)
+
+struct _GsurfFooModule { GsurfModule parent_instance; /* state */ };
+
+static void gsurf_foo_uri_handler_init(GsurfUriHandlerInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfFooModule, gsurf_foo_module, GSURF_TYPE_MODULE,
+    G_IMPLEMENT_INTERFACE(GSURF_TYPE_URI_HANDLER, gsurf_foo_uri_handler_init))
+
+/* hook vfuncs ... */
+
+static const gchar *gsurf_foo_get_name(GsurfModule *m) { return "foo"; }
+static void gsurf_foo_configure(GsurfModule *m, gpointer config_ptr) {
+    GsurfConfig *config = config_ptr;
+    YamlNode *node = gsurf_config_get_module_node(config, "foo");
+    /* parse node ... */
+}
+
+static void gsurf_foo_module_class_init(GsurfFooModuleClass *k) {
+    GsurfModuleClass *mc = GSURF_MODULE_CLASS(k);
+    mc->get_name = gsurf_foo_get_name;
+    mc->configure = gsurf_foo_configure;
+    /* mc->activate / mc->deactivate / mc->get_description ... */
+}
+static void gsurf_foo_module_init(GsurfFooModule *self) { }
+
+G_MODULE_EXPORT GType gsurf_module_register(void) { return GSURF_TYPE_FOO_MODULE; }
+#+end_src
+
+Build it by copying =modules/search_engines/Makefile= (the module name is derived
+from the directory). Add an =enabled:= block under =modules:= in
+=data/default-config.yaml= and a row in =builtin_modules[]= in =src/main.c=.
+
+* Hook-point interfaces (src/interfaces/)
+
+| Interface              | vfunc(s)                                  | Fired when / used by                          | Consumable        |
+|------------------------+-------------------------------------------+-----------------------------------------------+-------------------|
+| =GsurfInputHandler=    | =handle_key_event=, =handle_mouse_event=  | key/button before default binds (modal, tabs) | first TRUE wins   |
+| =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
+| =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed= | navigation lifecycle (history, homepage) | =before=: veto    |
+
+More interfaces (request-filter for adblock, download-handler, status-provider,
+script-injector, permission-handler, cert-handler, context-menu-provider,
+render-overlay, setting-provider) follow the same =G_DECLARE_INTERFACE= +
+manager-dispatch pattern and are added as their modules are implemented.
+
+* Lifecycle
+
+=configure(config)= → (manager reads =enabled=) → =activate()= if enabled →
+hooks dispatched while =is_active= → =deactivate()= on shutdown. Set hook
+priority with =gsurf_module_set_priority()= (lower runs first).

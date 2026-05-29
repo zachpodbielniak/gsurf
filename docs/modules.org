@@ -1,0 +1,62 @@
+#+TITLE: gsurf Modules
+#+OPTIONS: toc:2 num:nil
+
+Modules are loadable =.so= extensions — gsurf's equivalent of surf patches. Each
+is enabled under the =modules:= section of the config. See [[file:module-system.org][module-system.org]] to
+write one. =gsurf --list-modules= prints the registry.
+
+Status: *implemented* modules ship and are tested; *planned* modules are designed
+(registry entry + config schema present) and follow the established pattern.
+
+* Tier 1 — essential
+
+| Module           | surf lineage         | Hook interface(s)                | Status      |
+|------------------+----------------------+----------------------------------+-------------|
+| =search_engines= | searchengines        | =GsurfUriHandler=                | implemented |
+| =history=        | history              | =GsurfNavigationHook=            | implemented |
+| =homepage=       | homepage             | =GsurfInputHandler=              | implemented |
+| =toggles=        | toggle keybinds      | =GsurfInputHandler=              | implemented |
+| =tabs=           | tabbed(1)            | =GsurfInputHandler=              | implemented |
+| =chromebar=      | (address bar)        | =GsurfInputHandler= + window chrome | implemented |
+| =adblock=        | (new; high value)    | =GsurfNavigationHook=            | implemented |
+| =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |
+| =find_bar=       | WebKit find          | =GsurfInputHandler=             | implemented |
+
+* Tier 2 — important
+
+| Module        | surf lineage        | Status  |
+|---------------+---------------------+---------|
+| =modal=       | modal / vim keys    | implemented (default) |
+| =adblock=     | (new; high value)   | implemented |
+| =playexternal=| playexternal        | implemented |
+| =omnibar=     | omnibar             | implemented |
+| =bookmarks=   | bookmarking         | implemented |
+| =externalpipe=| externalpipe        | implemented |
+| =downloads=   | dlconsole/download  | implemented |
+| =userscripts= | script.js           | implemented |
+| =site_styles= | styles[]            | implemented |
+| =uri_params=  | uriparams[]         | implemented |
+| =cert_manager=| certs[]             | implemented |
+| =useragent=   | useragent           | implemented |
+| =notifications= | notifications     | implemented |
+| =mcp=         | (new; AI control)   | implemented (=MCP=1=) |
+
+* Tier 3 — nice-to-have
+
+=spacesearch=, =inspector=, =dark_mode=, =status_bar=, =geolocation=,
+=session=, and =proxy_switch= are implemented. =webgl_toggle= and
+=dlconsole= are intentionally folded into =toggles= and =downloads=
+respectively (they were redundant catalog entries).
+
+All 29 modules build with =make= (the =mcp= module requires =MCP=1=).
+
+* AI modules (deferred)
+
+A future =AI=1= build flag (mirroring gst's =ai-glib= path) would add AI-powered
+modules such as page-summary and chat. The architecture reserves room for it
+(hook interfaces are already general enough); no AI modules are built yet.
+
+* Per-module documentation
+
+Detailed docs live under =docs/modules/<name>.org= as each module lands. The
+=search_engines= and =mcp= modules are the reference implementations.

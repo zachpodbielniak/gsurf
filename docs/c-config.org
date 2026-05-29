@@ -1,0 +1,53 @@
+#+TITLE: gsurf C Configuration
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+In addition to YAML, gsurf can run a *compiled C config*: =~/.config/gsurf/config.c=.
+It is compiled to a cached shared object (via [[file:../deps/crispy][crispy]], keyed by content hash) and
+loaded after the YAML, so it can override anything programmatically with full
+access to the gsurf API.
+
+Generate a template:
+
+#+begin_src sh
+gsurf --generate-c-config > ~/.config/gsurf/config.c
+#+end_src
+
+* The init function
+
+#+begin_src c
+#include <gsurf/gsurf.h>
+
+G_MODULE_EXPORT gboolean
+gsurf_config_init(void)
+{
+    GsurfConfig *config = gsurf_config_get_default();
+    if (config == NULL)
+        return FALSE;
+
+    g_free(config->homepage);
+    config->homepage = g_strdup("https://duckduckgo.com");
+    config->default_zoom = 1.25;
+    config->settings->webgl = FALSE;
+    gsurf_settings_set_user_agent(config->settings, "MyAgent/1.0");
+
+    g_hash_table_replace(config->keybinds, g_strdup("Ctrl+m"),
+                         GUINT_TO_POINTER(GSURF_ACTION_RELOAD));
+    return TRUE;
+}
+#+end_src
+
+* CRISPY_PARAMS
+
+An optional =#define CRISPY_PARAMS "..."= near the top supplies extra compiler
+flags (e.g. extra includes/libraries). gsurf already adds the include paths for
+=<gsurf/gsurf.h>=.
+
+* Flags
+
+- =gsurf --c-config PATH= — use a specific C config file.
+- =gsurf --no-c-config= — skip C-config compilation/loading.
+
+The compiled =.so= is cached under =$XDG_CACHE_HOME/gsurf/cconfig/<hash>.so= and
+only recompiled when the source changes.

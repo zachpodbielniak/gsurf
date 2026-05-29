@@ -1,0 +1,111 @@
+#+TITLE: gsurf — GObject Surf
+#+AUTHOR: Zach Podbielniak
+#+OPTIONS: toc:2 num:nil
+
+* gsurf
+
+A GLib/GObject web browser — a port of suckless [[https://surf.suckless.org][surf]] built the
+same way [[../gst][gst]] ports =st=. gsurf is *library-first*: the browser lives in
+=libgsurf.so= so it can be embedded in other applications (eventually the
+[[../cmacs][cmacs]] Emacs fork), and every feature that would be a /surf patch/ is a
+runtime-loaded =.so= module.
+
+Design pillars:
+
+- *Library-first* — =libgsurf.so= holds all logic; the =gsurf= binary is a thin
+  shell around it. GObject Introspection (=make BUILD_GIR=1=) exposes the API to
+  other languages.
+- *Backend-abstracted* — an abstract =GsurfView= / =GsurfWindow= sit over the web
+  engine. A build-time =GTK_BACKEND= flag selects WebKit2GTK 4.1 / GTK3 (default)
+  or WebKitGTK 6.0 / GTK4. Core code never touches GTK/WebKit directly.
+- *Modular* — surf patches become loadable modules implementing GObject hook
+  interfaces (=GsurfUriHandler=, =GsurfInputHandler=, =GsurfNavigationHook=, …).
+- *Two-layer config* — YAML (via [[file:deps/yaml-glib][yaml-glib]]) plus an optional compiled C config
+  (via [[file:deps/crispy][crispy]]).
+- *AI-ready* — an MCP server module (=make MCP=1=) lets agents drive the browser.
+- *Vim by default* — modal, keyboard-driven navigation.
+
+* Status
+
+Working today:
+
+- Three-file build system with =GTK_BACKEND= / =MCP= / =AI= flags, dependency
+  auto-detection, install/uninstall, GIR, AppImage hooks.
+- =libgsurf.so= + =libgsurf.a= + =gsurf= binary (GTK3 / WebKit2GTK 4.1), with a
+  GObject Introspection typelib (=make BUILD_GIR=1=).
+- Core object model: =GsurfApplication=, abstract =GsurfView=/=GsurfWindow= with a
+  GTK3 backend, =GsurfConfig= (YAML), =GsurfSettings=, =GsurfConfigCompiler= (C
+  config via crispy).
+- Module system: =GsurfModule= base, =GsurfModuleManager= (GModule loading,
+  interface auto-detection, priority hook dispatch), 8 hook interfaces.
+- *29 modules* covering the common surf patches + an MCP server — search engines,
+  history, homepage, vim modal navigation, tabs, an address bar, adblock,
+  cookie policy, toggles, find, downloads, userscripts, site styles, per-URI
+  params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,
+  playexternal, dark mode, status bar, inspector, geolocation/notification
+  policy, proxy switching, session, spacesearch, and =mcp= (=MCP=1=).
+  See [[file:docs/modules.org][docs/modules.org]].
+- Embedded default config + =--generate-yaml-config= / =--generate-c-config= /
+  =--list-modules=.
+
+The GTK4 / WebKitGTK 6.0 backend (=src/backend/gtk4/=) is written and
+compile-guarded; it builds with =make GTK_BACKEND=gtk4= once =webkitgtk-6.0= is
+installed. The AI module path (=AI=1=) is reserved for the future.
+
+See [[file:docs/index.org][docs/]] for the full documentation set.
+
+* Building
+
+#+begin_src sh
+git submodule update --init --recursive   # deps/{yaml-glib,crispy,mcp-glib}
+make                                       # GTK3 / WebKit2GTK 4.1 (default)
+make MCP=1                                 # + the MCP server module
+make GTK_BACKEND=gtk4                      # WebKitGTK 6.0 / GTK4
+make DEBUG=1                               # debug build
+make test                                  # run the test suite
+sudo make install                          # install to /usr/local
+#+end_src
+
+Install build dependencies automatically (Fedora/Debian/Arch are detected):
+
+#+begin_src sh
+make install-deps          # add MCP=1 / GTK_BACKEND=gtk4 to include those deps
+make check-deps            # report what is present
+make show-config           # dump the resolved build configuration
+#+end_src
+
+* Running
+
+#+begin_src sh
+./build/release/gsurf https://suckless.org
+./build/release/gsurf --version
+./build/release/gsurf --list-modules
+./build/release/gsurf --generate-yaml-config > ~/.config/gsurf/config.yaml
+#+end_src
+
+Configuration is loaded from =~/.config/gsurf/config.yaml= (then a compiled
+=~/.config/gsurf/config.c= if present). See [[file:docs/configuration.org][docs/configuration.org]] and
+[[file:docs/keybindings.org][docs/keybindings.org]].
+
+* Repository layout
+
+#+begin_example
+src/
+  gsurf.h  gsurf-enums.*  gsurf-types.h  gsurf-version.*  main.c
+  core/        application, abstract web-view, backend factory, init
+  window/      abstract window
+  backend/gtk3 GTK3 / WebKit2GTK 4.1 concrete view + window
+  backend/gtk4 GTK4 / WebKitGTK 6.0 (compile-guarded)
+  config/      GsurfConfig (YAML), GsurfSettings, GsurfConfigCompiler (crispy)
+  module/      GsurfModule, GsurfModuleManager
+  interfaces/  hook-point GInterfaces
+modules/       one directory per loadable module (.so)
+data/          default-config.yaml + default-config.c (embedded)
+deps/          yaml-glib, crispy, mcp-glib (git submodules)
+docs/          documentation (Org mode)
+tests/         GLib test suite
+#+end_example
+
+* License
+
+AGPL-3.0-or-later. See [[file:LICENSE][LICENSE]].

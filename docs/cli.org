@@ -1,0 +1,34 @@
+#+TITLE: gsurf CLI Reference
+#+OPTIONS: toc:nil num:nil
+
+* Usage
+
+#+begin_example
+gsurf [OPTIONS] [URI]
+#+end_example
+
+If no URI is given, the configured homepage is opened.
+
+* Options
+
+| Option                   | Description                                           |
+|--------------------------+-------------------------------------------------------|
+| =-c, --config PATH=      | Use a specific YAML config file                       |
+| =--c-config PATH=        | Use a specific C config file                          |
+| =--no-yaml-config=       | Skip YAML loading (built-in defaults only)            |
+| =--no-c-config=          | Skip C-config compilation/loading                     |
+| =--no-modules=           | Do not load any modules                               |
+| =-f, --fullscreen=       | Start in fullscreen                                   |
+| =--generate-yaml-config= | Print the default YAML config and exit                |
+| =--generate-c-config=    | Print the default C config and exit                   |
+| =--list-modules=         | List available modules and exit                       |
+| =-v, --version=          | Print version (and active backend) and exit           |
+
+* Environment
+
+| Variable             | Effect                                             |
+|----------------------+----------------------------------------------------|
+| =GSURF_MODULE_PATH=  | Directory to load modules from (overrides default) |
+| =GSURF_CONFIG_C=     | Path to a C config file                            |
+| =XDG_CONFIG_HOME=    | Base for =gsurf/config.yaml= and =config.c=        |
+| =XDG_RUNTIME_DIR=    | Where the MCP module's Unix socket is created      |

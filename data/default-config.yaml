@@ -1,0 +1,375 @@
+# gsurf Default Configuration
+# ~/.config/gsurf/config.yaml
+#
+# A GObject/GLib port of suckless surf. Settings here mirror surf's
+# config.def.h (defconfig parameters, searchengines, styles, certs,
+# uriparams) plus a modules: map (one entry per loadable .so module).
+#
+# Dump this file with:  gsurf --generate-yaml-config
+# List modules with:    gsurf --list-modules
+
+# Set to true to ignore this config file entirely (use built-in defaults).
+# ignore_yaml: false
+
+# ===== Browser / general settings (core library) =====
+browser:
+  homepage: "about:blank"          # startup URI when none given on the CLI
+  new_view_uri: "about:blank"      # URI for newly opened views/tabs
+  default_zoom: 1.0                # 1.0 = 100%
+  smooth_scroll: true
+  fullscreen_on_start: false
+
+# Default user agent. Empty string = engine default UA.
+user_agent: ""
+
+# ===== Web engine defaults (core; mirrors surf defconfig) =====
+webkit:
+  javascript: true
+  images: true
+  webgl: false
+  webaudio: true
+  media: true                      # HTML5 audio/video
+  media_stream: false              # getUserMedia (camera/mic)
+  webrtc: false
+  plugins: false
+  smooth_scrolling: true
+  caret_browsing: false
+  dns_prefetch: false
+  hyperlink_auditing: false
+  site_quirks: true
+  developer_extras: false          # web inspector availability
+  default_font_size: 16
+  default_monospace_font_size: 13
+  default_charset: "UTF-8"
+  javascript_can_open_windows: false
+  javascript_can_access_clipboard: false
+
+# ===== TLS / security (core) =====
+tls:
+  strict: true                     # reject invalid certs by default
+
+# ===== Storage / paths (core) =====
+storage:
+  cache_dir: "~/.cache/gsurf"
+  data_dir: "~/.local/share/gsurf"
+  download_dir: "~/Downloads"
+  cookie_jar: "~/.local/share/gsurf/cookies.sqlite"
+  enable_disk_cache: true
+
+# ===== Network (core) =====
+network:
+  proxy:
+    mode: default                  # default (system), none, custom
+    uri: ""                        # e.g. socks5://127.0.0.1:9050
+  do_not_track: true
+
+# ===== Window (core) =====
+window:
+  title: gsurf
+  geometry: 1024x768
+  show_in_title: uri               # uri, title, both
+
+# ===== Keybinds (core table) =====
+# Keys use GDK keyval names ("r", "slash", "Return") with optional
+# "Ctrl+" / "Alt+" / "Shift+" / "Super+" modifier prefixes.
+#
+# Bare-letter vim navigation (hjkl, gg, G, H/L) is provided by the
+# `modal` module (enabled below), which is mode-aware so those keys do
+# not interfere with typing in INSERT mode. The core table therefore
+# binds only modified/chrome keys.
+keybinds:
+  "Ctrl+r": reload
+  "Ctrl+Shift+r": reload-nocache
+  "Escape": stop
+  "Alt+Left": back
+  "Alt+Right": forward
+  "Ctrl+plus": zoom-in
+  "Ctrl+minus": zoom-out
+  "Ctrl+0": zoom-reset
+  "Ctrl+f": find
+  "Ctrl+g": find-next
+  "Ctrl+Shift+g": find-prev
+  "F11": toggle-fullscreen
+  "Ctrl+q": quit
+
+# ===== Mousebinds (core) =====
+mousebinds:
+  "Button8": back                  # back thumb button
+  "Button9": forward               # forward thumb button
+  "Ctrl+Button1": open-new-view
+  "Button2": open-new-view         # middle-click link -> new tab
+
+# ===== Search engines (search-engines module) =====
+search_engines:
+  default: ddg
+  engines:
+    ddg:    { prefix: "d ", url: "https://duckduckgo.com/?q=%s" }
+    google: { prefix: "g ", url: "https://www.google.com/search?q=%s" }
+    wiki:   { prefix: "w ", url: "https://en.wikipedia.org/w/index.php?search=%s" }
+    gh:     { prefix: "gh ", url: "https://github.com/search?q=%s" }
+
+# ===== Per-URI parameter rules (uri-params module; surf uriparams[]) =====
+uri_params:
+  rules: []
+  # - regex: ".*://(www\\.)?example\\.com/.*"
+  #   settings: { javascript: false }
+
+# ===== Site-specific styles (site-styles module; surf styles[]) =====
+site_styles:
+  default: ""
+  rules: []
+
+# ===== Certificate pins / exceptions (cert-manager module; surf certs[]) =====
+cert_pins: {}
+
+# ===== Modules =====
+modules:
+
+  # ---------- Tier 1: core/essential ----------
+
+  search_engines:
+    enabled: true
+    default: ddg
+    default_is_search: true        # bare words -> default engine
+    engines:
+      ddg:    { prefix: "d ", url: "https://duckduckgo.com/?q=%s" }
+      google: { prefix: "g ", url: "https://www.google.com/search?q=%s" }
+
+  chromebar:
+    enabled: true
+    key_focus: "Ctrl+l"
+    position: top                  # top or bottom
+    bg_color: "#1e1e2e"
+    fg_color: "#cdd6f4"
+    accent_color: "#89b4fa"
+
+  history:
+    enabled: true
+    file: "~/.local/share/gsurf/history"
+    max_entries: 10000
+    log_titles: true
+    dmenu_cmd: "dmenu -l 20 -i"
+
+  homepage:
+    enabled: true
+    uri: "about:blank"
+    new_tab_uri: "about:blank"
+    key_home: "Ctrl+Home"
+
+  toggles:
+    enabled: true
+    notify_on_toggle: true
+    keys:
+      javascript: "Ctrl+Shift+s"
+      images: "Ctrl+Shift+m"
+      caret_browsing: "Ctrl+i"
+      strict_tls: "Ctrl+Shift+t"
+      dark_mode: "Ctrl+Shift+d"
+      geolocation: "Ctrl+Shift+g"
+      webgl: "Ctrl+Shift+w"
+
+  adblock:
+    enabled: false
+    default_action: allow          # allow or block
+    block_lists:
+      - "~/.config/gsurf/adblock/easylist.txt"
+    host_files:
+      - "~/.config/gsurf/adblock/hosts"
+    block_third_party: false
+    update_interval_hours: 24
+    whitelist: []
+
+  cookie_policy:
+    enabled: true
+    policy: no-third-party         # always, never, no-third-party
+    key_toggle: "Ctrl+Shift+at"
+    per_site: {}
+
+  tabs:
+    enabled: true
+    position: top                  # top or bottom
+    show_single: false             # hide bar when only one view
+    key_new: "Ctrl+t"
+    key_close: "Ctrl+w"
+    key_next: "Ctrl+Tab"
+    key_prev: "Ctrl+Shift+Tab"
+    key_reopen: "Ctrl+Shift+t"
+    bg_color: "#181825"
+    active_color: "#313244"
+    fg_color: "#cdd6f4"
+
+  find_bar:
+    enabled: true
+    key_open: "slash"
+    key_next: "n"
+    key_prev: "N"
+    match_case: false
+    wrap_around: true
+    highlight_color: "#f9e2af"
+
+  # ---------- Tier 2: important ----------
+
+  modal:
+    enabled: true                  # vim-style navigation by default
+    start_mode: normal             # normal or insert
+    key_insert: "i"
+    key_normal: "Escape"
+    scroll_step: 40
+    hint_key: "f"
+    hint_key_newview: "F"
+    hint_chars: "asdfghjkl"
+    hint_bg: "#ffd700"
+    hint_fg: "#000000"
+    hint_alpha: 230
+
+  omnibar:
+    enabled: false
+    max_results: 12
+    rank: frecency                 # freq, recency, frecency
+    match: fuzzy                   # fuzzy or prefix
+
+  bookmarks:
+    enabled: false
+    file: "~/.local/share/gsurf/bookmarks"
+    key_add: "Ctrl+d"
+    key_open: "Ctrl+Shift+d"
+    prefix: "b "                   # type "b name" in the bar to recall
+    dmenu_cmd: "dmenu -l 20 -i"
+
+  externalpipe:
+    enabled: false
+    commands: []
+    # - key: "Ctrl+Shift+l"
+    #   command: "linkextract | dmenu -l 20 | xargs -r gsurf"
+    #   input: html                # html, text, uri, selection
+
+  playexternal:
+    enabled: false
+    command: "mpv --"
+    key: "Ctrl+m"
+    also_links: true
+    context_menu_entry: true
+
+  downloads:
+    enabled: true
+    dir: "~/Downloads"
+    ask_destination: false
+    key_list: "Ctrl+j"
+    notify_complete: true
+    open_when_done: false
+
+  userscripts:
+    enabled: false
+    global: "~/.config/gsurf/script.js"
+    dir: "~/.config/gsurf/scripts"
+    inject_time: end               # start or end
+    rules: {}
+
+  site_styles:
+    enabled: true
+    default: ""
+    rules: []
+
+  uri_params:
+    enabled: false
+    rules: []
+
+  cert_manager:
+    enabled: false
+    store: "~/.config/gsurf/certs"
+    strict: true
+    key_show: "Ctrl+Shift+x"
+    allow_exceptions: true
+    pins: {}
+
+  useragent:
+    enabled: false
+    default: ""
+    key_cycle: "Ctrl+Shift+u"
+    presets:
+      default: ""
+      firefox: "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0"
+    rules: []
+
+  notifications:
+    enabled: true
+    allow_web_notifications: ask    # allow, deny, ask
+    urgency: normal                 # low, normal, critical
+    timeout: -1
+    notify_downloads: true
+
+  # ---------- MCP (requires the MCP=1 build flag) ----------
+
+  mcp:
+    enabled: false
+    transport: unix-socket          # unix-socket, http, stdio
+    # socket_name: myproject        # gsurf-mcp-NAME.sock (default: PID-based)
+    # port: 8808                     # only used with transport: http
+    # host: "127.0.0.1"              # only used with transport: http
+
+    # Per-tool enable/disable (all default to false for safety)
+    tools:
+      navigate: false
+      get_current_uri: false
+      get_title: false
+      go_back: false
+      go_forward: false
+      reload: false
+      stop: false
+      get_page_text: false
+      get_page_html: false
+      get_links: false
+      find_text: false
+      execute_javascript: false     # arbitrary JS in page context
+      click_link: false
+      scroll: false
+      list_views: false
+      switch_view: false
+      open_view: false
+      close_view: false
+      screenshot: false
+      save_screenshot: false
+      get_history: false
+      get_cookies: false
+      get_config: false
+      list_modules: false
+      set_config: false
+      set_setting: false
+      toggle_module: false
+
+  # ---------- Tier 3: nice-to-have ----------
+
+  inspector:
+    enabled: false
+    key: "Ctrl+Shift+i"
+    detached: false
+
+  spacesearch:
+    enabled: false
+    engine: default
+
+  dark_mode:
+    enabled: false
+    mode: auto                      # auto, light, dark
+    key_toggle: "Ctrl+Shift+d"
+    force_dark_css: false
+
+  status_bar:
+    enabled: false
+    position: bottom
+    show_progress: true
+    show_tls: true
+    show_mode: true
+
+  geolocation:
+    enabled: false
+    default: deny                   # allow, deny, ask
+    per_site: {}
+
+  session:
+    enabled: false
+    auto_restore: false
+    file: "~/.local/share/gsurf/session"
+    key_save: "Ctrl+Shift+s"
+
+  # --- AI modules (require the AI=1 build flag; deferred / not yet built) ---

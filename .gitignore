@@ -1,0 +1,40 @@
+# Build output (objects, libs, binary, modules, GIR, AppImage, generated
+# embedded-config header all live under build/)
+/build/
+
+# Generated version header (produced from src/gsurf-version.h.in)
+/src/gsurf-version.h
+
+# clangd / language-server tooling
+/compile_commands.json
+/.cache/
+/.ccls-cache/
+
+# Compiled / intermediate artifacts
+*.o
+*.d
+*.lo
+*.la
+*.so
+*.so.*
+*.a
+
+# Logs and crash artifacts (anchored to the repo root so they never match
+# the src/core/ directory or similar)
+*.log
+/core
+/core.*
+/vgcore.*
+
+# Editor / OS cruft
+*~
+*.swp
+*.orig
+*.rej
+tags
+TAGS
+.DS_Store
+
+# Local Claude Code settings (a shared .claude/settings.json may still be
+# committed explicitly with `git add -f`)
+/.claude/settings.local.json

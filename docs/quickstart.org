@@ -1,0 +1,39 @@
+#+TITLE: gsurf Quickstart
+#+OPTIONS: toc:nil num:nil
+
+* Build and run
+
+#+begin_src sh
+git submodule update --init --recursive
+make install-deps          # Fedora/Debian/Arch auto-detected (sudo)
+make                       # GTK3 / WebKit2GTK 4.1
+./build/release/gsurf https://suckless.org
+#+end_src
+
+Optional builds:
+
+#+begin_src sh
+make MCP=1                 # build the MCP server module
+make GTK_BACKEND=gtk4      # WebKitGTK 6.0 / GTK4 (needs webkitgtk-6.0)
+make DEBUG=1               # debug symbols, -O0
+make test                  # run the test suite
+sudo make install          # install to /usr/local
+#+end_src
+
+* First config
+
+#+begin_src sh
+mkdir -p ~/.config/gsurf
+gsurf --generate-yaml-config > ~/.config/gsurf/config.yaml
+$EDITOR ~/.config/gsurf/config.yaml
+#+end_src
+
+* Useful commands
+
+#+begin_src sh
+gsurf --version
+gsurf --list-modules
+gsurf --generate-c-config > ~/.config/gsurf/config.c
+gsurf --no-modules https://example.com    # disable all modules
+make show-config                          # resolved build configuration
+#+end_src

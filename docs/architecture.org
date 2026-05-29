@@ -1,0 +1,71 @@
+#+TITLE: gsurf Architecture
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+All browser logic lives in =libgsurf.so=. The =gsurf= binary (=src/main.c=) only
+parses options, loads config, builds the application, and runs the GLib main
+loop. This keeps gsurf embeddable: a host application can drive its own main loop
+and link =libgsurf= directly.
+
+* Object model
+
+| Type                  | Kind                | Role                                              |
+|-----------------------+---------------------+---------------------------------------------------|
+| =GsurfApplication=    | final GObject       | Session: owns config, module manager, windows.    |
+| =GsurfWindow=         | abstract derivable  | Container of N views; backend subclasses.         |
+| =GsurfView=           | abstract derivable  | One web view; backend subclasses.                 |
+| =GsurfConfig=         | final (public struct)| YAML configuration + retained =modules:= mapping. |
+| =GsurfSettings=       | final (public struct)| Backend-agnostic web engine settings.             |
+| =GsurfConfigCompiler= | final GObject       | Compiles =config.c= via crispy, calls init.       |
+| =GsurfModule=         | abstract derivable  | Base class for loadable modules.                  |
+| =GsurfModuleManager=  | final GObject       | Loads modules, dispatches hooks.                  |
+
+The abstract =GsurfView= exposes =load_uri=, =reload=, =go_back/forward=,
+=get_uri/title=, =run_javascript_async=, =apply_settings=, =get_native_widget=
+(as =gpointer=), etc., plus signals =load-changed=, =uri-changed=,
+=title-changed=, =progress-changed=, =web-process-terminated=.
+
+* Backend abstraction
+
+The web engine is reached only through =GsurfView= / =GsurfWindow=. Exactly one
+backend compiles per build (=GTK_BACKEND=):
+
+- =gtk3= → =GsurfWebkit2View= + =GsurfGtk3Window= (WebKit2GTK 4.1 / GTK3).
+- =gtk4= → =GsurfWebkit6View= + =GsurfGtk4Window= (WebKitGTK 6.0 / GTK4).
+
+=src/core/gsurf-backend.c= is the only file that knows both backends, behind
+=#ifdef GSURF_BACKEND_*=. It provides the =gsurf_view_new()= /
+=gsurf_window_new()= factories and =gsurf_backend_init()=. GTK/WebKit headers
+appear only under =src/backend/<backend>/=.
+
+* Event flow
+
+#+begin_example
+main.c
+  └ parse options; load GsurfConfig (embedded default, then YAML file)
+  └ compile + load config.c (crispy) -> gsurf_config_init()
+  └ GsurfApplication
+  └ GsurfModuleManager: load MODULEDIR, read each module's enabled+config,
+                        activate enabled modules
+  └ GsurfWindow + GsurfView; apply settings; connect signals
+  └ load URI (URI-handler modules may rewrite it)
+  └ g_main_loop_run()           (GLib main context; no GTK-main assumption)
+
+key press → window "key-press"
+  └ module manager dispatch_key_event (modal/hints/tabs modules)  [first TRUE wins]
+  └ else core keybind table (GsurfConfig) -> GsurfAction -> execute
+
+navigation/load → view signals
+  └ dispatch_load_changed / dispatch_after_navigate to navigation-hook modules
+#+end_example
+
+* Configuration pipeline
+
+1. =GsurfConfig= is created with built-in defaults.
+2. The embedded =default-config.yaml= is parsed.
+3. The user's =~/.config/gsurf/config.yaml= is merged over it.
+4. An optional =~/.config/gsurf/config.c= is compiled (crispy) and its
+   =gsurf_config_init()= runs against =gsurf_config_get_default()=, overriding
+   anything.
+5. Modules read their own section via =gsurf_config_get_module_node()=.

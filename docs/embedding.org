@@ -1,0 +1,57 @@
+#+TITLE: Embedding gsurf
+#+OPTIONS: toc:2 num:nil
+
+* libgsurf
+
+gsurf is library-first: link =libgsurf.so= and use its GObject API. A
+=gsurf.pc= pkg-config file is installed.
+
+#+begin_src sh
+pkg-config --cflags --libs gsurf
+#+end_src
+
+* Minimal embed
+
+#+begin_src c
+#include <gsurf/gsurf.h>
+
+int main(int argc, char **argv)
+{
+    gsurf_init(&argc, &argv);
+    gsurf_backend_init(&argc, &argv, NULL);
+
+    GsurfConfig *config = gsurf_config_new();
+    GsurfApplication *app = gsurf_application_new(config);
+
+    GsurfWindow *window = gsurf_window_new();   /* compiled-in backend */
+    GsurfView   *view   = gsurf_view_new();
+    gsurf_window_add_view(window, view);
+    gsurf_application_add_window(app, window);
+
+    gsurf_view_load_uri(view, "https://example.com");
+    gsurf_window_present(window);
+
+    gsurf_application_run(app);   /* or drive your own GLib main loop */
+    return 0;
+}
+#+end_src
+
+* Embedding the widget in another GTK app
+
+=gsurf_view_get_native_widget()= / =gsurf_window_get_native_widget()= return the
+underlying =GtkWidget*= as an opaque =gpointer= so the abstract API never leaks a
+GTK type. A GTK-aware host casts it and packs it into its own container instead
+of calling =gsurf_window_present()=.
+
+* GObject Introspection
+
+=make BUILD_GIR=1= produces =Gsurf-0.1.gir= / =Gsurf-0.1.typelib=, so gsurf can be
+called from any introspected language. The abstract API exposes no GTK/WebKit
+types, keeping the typelib backend-agnostic.
+
+* cmacs (future)
+
+gsurf's clean GLib/GObject API and GTK-free abstract surface are designed so a
+=GsurfView= widget can later be embedded as a buffer/overlay in the cmacs Emacs
+fork via GObject Introspection. The library makes no GTK-main-loop assumption
+(it uses the default GLib main context), which a host event loop can integrate.

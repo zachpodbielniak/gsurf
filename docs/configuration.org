@@ -1,0 +1,65 @@
+#+TITLE: gsurf Configuration
+#+OPTIONS: toc:2 num:nil
+
+* Files and order
+
+Configuration is merged in this order (later overrides earlier):
+
+1. Built-in defaults (embedded =data/default-config.yaml=).
+2. =$XDG_CONFIG_HOME/gsurf/config.yaml= (or =--config PATH=, or =/etc/gsurf/config.yaml=).
+3. =$XDG_CONFIG_HOME/gsurf/config.c= compiled and run (see [[file:c-config.org][C configuration]]).
+
+Generate a starting point:
+
+#+begin_src sh
+gsurf --generate-yaml-config > ~/.config/gsurf/config.yaml
+gsurf --generate-c-config   > ~/.config/gsurf/config.c
+#+end_src
+
+* Core sections
+
+#+begin_src yaml
+browser:
+  homepage: "about:blank"
+  new_view_uri: "about:blank"
+  default_zoom: 1.0
+  smooth_scroll: true
+  fullscreen_on_start: false
+
+user_agent: ""                 # "" = engine default
+
+webkit:                        # web engine defaults (surf defconfig analogue)
+  javascript: true
+  images: true
+  webgl: false
+  caret_browsing: false
+  developer_extras: false
+  default_font_size: 16
+  default_charset: "UTF-8"
+  # ... see --generate-yaml-config for the full list
+
+window:
+  title: gsurf
+  geometry: 1024x768
+
+keybinds:                      # "Mods+Key" -> action (see keybindings.org)
+  "Ctrl+r": reload
+  "Alt+Left": back
+  "j": scroll-down
+
+modules:                       # one block per module; `enabled:` gates it
+  search_engines:
+    enabled: true
+    default: ddg
+    engines:
+      g: { prefix: "g ", url: "https://www.google.com/search?q=%s" }
+  mcp:
+    enabled: false
+    # ...
+#+end_src
+
+The =modules:= map is parsed by the core for the =enabled:= flag; each module
+reads its own options from its section (=gsurf_config_get_module_node=).
+
+Sections that map to surf concepts: =search_engines= (searchengines patch),
+=uri_params= (=uriparams[]=), =site_styles= (=styles[]=), =cert_pins= (=certs[]=).

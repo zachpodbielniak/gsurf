@@ -1,0 +1,88 @@
+/*
+ * gsurf-version.h.in - GSURF Version Information Template
+ *
+ * Copyright (C) 2026 Zach Podbielniak
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * This file is processed by the build system to generate gsurf-version.h
+ */
+
+#ifndef GSURF_VERSION_H
+#define GSURF_VERSION_H
+
+#include <glib.h>
+
+G_BEGIN_DECLS
+
+/**
+ * GSURF_VERSION_MAJOR:
+ *
+ * The major version component of the GSURF library.
+ */
+#ifndef GSURF_VERSION_MAJOR
+#define GSURF_VERSION_MAJOR (@GSURF_VERSION_MAJOR@)
+#endif
+
+/**
+ * GSURF_VERSION_MINOR:
+ *
+ * The minor version component of the GSURF library.
+ */
+#ifndef GSURF_VERSION_MINOR
+#define GSURF_VERSION_MINOR (@GSURF_VERSION_MINOR@)
+#endif
+
+/**
+ * GSURF_VERSION_MICRO:
+ *
+ * The micro version component of the GSURF library.
+ */
+#ifndef GSURF_VERSION_MICRO
+#define GSURF_VERSION_MICRO (@GSURF_VERSION_MICRO@)
+#endif
+
+/**
+ * GSURF_VERSION_STRING:
+ *
+ * The full version string of the GSURF library.
+ */
+#define GSURF_VERSION_STRING "@GSURF_VERSION@"
+
+/**
+ * GSURF_CHECK_VERSION:
+ * @major: the major version to check for
+ * @minor: the minor version to check for
+ * @micro: the micro version to check for
+ *
+ * Checks whether the GSURF library version is at least the
+ * requested version.
+ *
+ * Returns: %TRUE if the version is satisfied
+ */
+#define GSURF_CHECK_VERSION(major, minor, micro) \
+    ((GSURF_VERSION_MAJOR > (major)) || \
+     (GSURF_VERSION_MAJOR == (major) && GSURF_VERSION_MINOR > (minor)) || \
+     (GSURF_VERSION_MAJOR == (major) && GSURF_VERSION_MINOR == (minor) && GSURF_VERSION_MICRO >= (micro)))
+
+/**
+ * gsurf_get_version:
+ * @major: (out) (optional): location for major version
+ * @minor: (out) (optional): location for minor version
+ * @micro: (out) (optional): location for micro version
+ *
+ * Retrieves the runtime version of the GSURF library.
+ */
+void gsurf_get_version(guint *major, guint *minor, guint *micro);
+
+/**
+ * gsurf_get_version_string:
+ *
+ * Retrieves the runtime version string of the GSURF library.
+ *
+ * Returns: (transfer none): the version string
+ */
+const gchar *gsurf_get_version_string(void);
+
+G_END_DECLS
+
+#endif /* GSURF_VERSION_H */

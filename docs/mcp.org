@@ -1,0 +1,55 @@
+#+TITLE: gsurf MCP Server
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+The =mcp= module exposes the browser as an [[https://modelcontextprotocol.io][MCP]] server so AI agents can drive
+it. It is built only with =make MCP=1= (requires =libsoup-3.0=, =libdex-1=,
+=libpng= via [[file:../deps/mcp-glib][mcp-glib]]) and is disabled until enabled in config. Every tool
+defaults *off* and must be turned on individually.
+
+* Enabling
+
+#+begin_src yaml
+modules:
+  mcp:
+    enabled: true
+    transport: unix-socket          # in-process transport (default)
+    # socket_name: myproject        # -> $XDG_RUNTIME_DIR/gsurf-mcp-myproject.sock
+                                     #    (default: gsurf-mcp-<pid>.sock)
+    tools:
+      get_current_uri: true
+      get_title: true
+      navigate: true
+      get_page_text: true
+      list_views: true
+      # execute_javascript: true    # powerful; enable deliberately
+#+end_src
+
+On activation the module prints the socket path it is listening on.
+
+* Tools
+
+| Tool                  | Args                  | Description                                  |
+|-----------------------+-----------------------+----------------------------------------------|
+| =navigate=            | =uri=                 | Load a URI in the active view                |
+| =get_current_uri=     | —                     | Current URI                                  |
+| =get_title=           | —                     | Current page title                           |
+| =go_back= / =go_forward= | —                  | History navigation                           |
+| =reload=              | =bypass_cache?=       | Reload the active view                       |
+| =stop=                | —                     | Stop loading                                 |
+| =get_page_text=       | —                     | Rendered =innerText= of the page             |
+| =get_page_html=       | —                     | Full serialized HTML                         |
+| =get_links=           | —                     | JSON array of ={text, href}=                 |
+| =execute_javascript=  | =code=                | Run JS in the page, return the result        |
+| =scroll=              | =direction=           | up / down / top / bottom                     |
+| =list_views=          | —                     | JSON of open views/tabs                      |
+
+Content/scripting tools run JavaScript synchronously via a nested main loop so
+the MCP handler can return the result.
+
+* Security
+
+=execute_javascript= grants full page control; =get_page_text/html/links= expose
+page content. Enable only the tools an agent needs. The server binds a
+user-private Unix socket under =$XDG_RUNTIME_DIR=.

@@ -1,0 +1,55 @@
+#+TITLE: gsurf Keybindings
+#+OPTIONS: toc:2 num:nil
+
+* Syntax
+
+Bind keys under =keybinds:= in the config. A key string is an optional set of
+modifier prefixes plus a [[https://gitlab.gnome.org/GNOME/gtk/-/blob/main/gdk/gdkkeysyms.h][GDK keyval name]]:
+
+#+begin_example
+"Ctrl+r"        "Alt+Left"      "Ctrl+Shift+g"      "slash"      "j"
+#+end_example
+
+Modifiers: =Ctrl= (=Control=), =Alt= (=Mod1=), =Shift=, =Super= (=Logo=/=Mod4=).
+Order and case are normalized, so =ctrl+shift+g= and =Shift+Ctrl+g= match.
+
+Values are action nicks (see =gsurf --generate-yaml-config=). Both =-= and =_=
+separators are accepted (=reload-nocache= or =reload_nocache=).
+
+* Default bindings (core table)
+
+| Key            | Action            |
+|----------------+-------------------|
+| =Ctrl+r=       | reload            |
+| =Ctrl+Shift+r= | reload-nocache    |
+| =Escape=       | stop              |
+| =Alt+Left=     | back              |
+| =Alt+Right=    | forward           |
+| =Ctrl+plus/minus/0= | zoom in/out/reset |
+| =Ctrl+f=       | find              |
+| =Ctrl+g= / =Ctrl+Shift+g= | find next/prev |
+| =F11=          | toggle-fullscreen |
+| =Ctrl+q=       | quit              |
+
+Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is
+provided by the =modal= module (enabled by default), not the core table, so it
+is mode-aware and won't interfere with typing.
+
+The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
+(new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
+
+* Actions
+
+Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
+=open-prompt=, =open-new-view=. Scroll: =scroll-{up,down,left,right,top,bottom}=,
+=page-{up,down}=, =half-page-{up,down}=. Zoom: =zoom-{in,out,reset}=. Find:
+=find=, =find-next=, =find-prev=. Tabs: =tab-{new,close,next,prev,reopen}=.
+Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
+=toggle-fullscreen=, =copy-url=, =paste-url=, =quit=.
+
+* Modal / vim navigation
+
+Bare-letter bindings (=j=, =k=, =f=, =/=) act as commands by default. The =modal=
+module adds proper vim modes — insert mode (=i=) where keys pass to the page,
+normal mode (=Escape=), and link hinting (=f=) — so plain keys don't interfere
+with form fields. Enable it under =modules.modal=.

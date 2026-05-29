@@ -1,0 +1,109 @@
+/*
+ * gsurf-inspector-module.c - Toggle the web inspector
+ *
+ * Copyright (C) 2026 Zach Podbielniak
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Implements #GsurfInputHandler: a configurable key opens the web
+ * inspector / developer tools on the active view.
+ */
+
+#include <gsurf/gsurf.h>
+#include <gmodule.h>
+#include <yaml-glib.h>
+
+#define GSURF_TYPE_INSPECTOR_MODULE (gsurf_inspector_module_get_type())
+G_DECLARE_FINAL_TYPE(GsurfInspectorModule, gsurf_inspector_module,
+                     GSURF, INSPECTOR_MODULE, GsurfModule)
+
+struct _GsurfInspectorModule
+{
+	GsurfModule parent_instance;
+	gchar *key;
+};
+
+static void gsurf_inspector_input_init(GsurfInputHandlerInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfInspectorModule, gsurf_inspector_module,
+	GSURF_TYPE_MODULE,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_inspector_input_init))
+
+static gboolean
+gsurf_inspector_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
+                                 guint keyval, guint keycode, guint state, GsurfModePolicy mode)
+{
+	GsurfInspectorModule *self = GSURF_INSPECTOR_MODULE(handler);
+
+	if (view == NULL || self->key == NULL)
+		return FALSE;
+	if (!gsurf_keys_match(keyval, state, self->key))
+		return FALSE;
+
+	gsurf_view_show_inspector(view);
+	return TRUE;
+}
+
+static void
+gsurf_inspector_input_init(GsurfInputHandlerInterface *iface)
+{
+	iface->handle_key_event = gsurf_inspector_handle_key_event;
+}
+
+static const gchar *gsurf_inspector_get_name(GsurfModule *m) { return "inspector"; }
+static const gchar *gsurf_inspector_get_description(GsurfModule *m)
+{
+	return "Toggle the web inspector / developer tools";
+}
+
+static void
+gsurf_inspector_configure(GsurfModule *module, gpointer config_ptr)
+{
+	GsurfInspectorModule *self = GSURF_INSPECTOR_MODULE(module);
+	GsurfConfig *config = config_ptr;
+	YamlNode *node;
+	YamlMapping *m;
+
+	node = gsurf_config_get_module_node(config, "inspector");
+	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
+		return;
+	m = yaml_node_get_mapping(node);
+	if (yaml_mapping_has_member(m, "key")) {
+		g_free(self->key);
+		self->key = g_strdup(yaml_mapping_get_string_member(m, "key"));
+	}
+}
+
+static gboolean gsurf_inspector_activate(GsurfModule *m) { return TRUE; }
+
+static void
+gsurf_inspector_module_finalize(GObject *object)
+{
+	GsurfInspectorModule *self = GSURF_INSPECTOR_MODULE(object);
+	g_clear_pointer(&self->key, g_free);
+	G_OBJECT_CLASS(gsurf_inspector_module_parent_class)->finalize(object);
+}
+
+static void
+gsurf_inspector_module_class_init(GsurfInspectorModuleClass *klass)
+{
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+	GsurfModuleClass *module_class = GSURF_MODULE_CLASS(klass);
+
+	object_class->finalize = gsurf_inspector_module_finalize;
+	module_class->activate = gsurf_inspector_activate;
+	module_class->get_name = gsurf_inspector_get_name;
+	module_class->get_description = gsurf_inspector_get_description;
+	module_class->configure = gsurf_inspector_configure;
+}
+
+static void
+gsurf_inspector_module_init(GsurfInspectorModule *self)
+{
+	self->key = g_strdup("Ctrl+Shift+i");
+}
+
+G_MODULE_EXPORT GType
+gsurf_module_register(void)
+{
+	return GSURF_TYPE_INSPECTOR_MODULE;
+}

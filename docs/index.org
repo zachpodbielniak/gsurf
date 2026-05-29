@@ -1,0 +1,22 @@
+#+TITLE: gsurf Documentation
+#+OPTIONS: toc:nil num:nil
+
+* gsurf documentation
+
+gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
+
+** Getting started
+- [[file:quickstart.org][Quickstart]] — install, build, first run.
+- [[file:cli.org][CLI reference]] — command-line options.
+
+** Configuration
+- [[file:configuration.org][Configuration]] — the YAML schema.
+- [[file:keybindings.org][Keybindings]] — actions, defaults, modal vim navigation.
+- [[file:c-config.org][C configuration]] — compiled config via crispy.
+
+** Extending
+- [[file:architecture.org][Architecture]] — the object model and event flow.
+- [[file:module-system.org][Module system]] — writing modules and the hook interfaces.
+- [[file:modules.org][Modules]] — the module catalog (surf-patch lineage).
+- [[file:mcp.org][MCP server]] — AI agent control of the browser.
+- [[file:embedding.org][Embedding]] — using libgsurf in another application.
