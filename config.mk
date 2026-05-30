@@ -147,8 +147,16 @@ LDFLAGS_DEPS := $(shell $(PKG_CONFIG) --libs $(DEPS_REQUIRED) 2>/dev/null)
 
 # crispy (C-config compiler) is built via its own Makefile and its static
 # archive is linked into libgsurf. Only referenced objects are pulled in.
+# The crispy-lib target runs `make -C deps/crispy`, and DEBUG propagates to
+# that sub-make via MAKEFLAGS — so crispy lands in build/debug when we build
+# DEBUG=1 and build/release otherwise. Track the same path here, or the
+# libgsurf.a/binary link looks for the archive in the wrong directory.
 CRISPY_DIR := deps/crispy
+ifeq ($(DEBUG),1)
+CRISPY_BUILD := $(CRISPY_DIR)/build/debug
+else
 CRISPY_BUILD := $(CRISPY_DIR)/build/release
+endif
 CRISPY_LIB := $(CRISPY_BUILD)/libcrispy.a
 
 # Include paths
