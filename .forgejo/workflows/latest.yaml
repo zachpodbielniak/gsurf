@@ -27,7 +27,7 @@ jobs:
             webkit2gtk4.1-devel gtk3-devel javascriptcoregtk4.1-devel \
             glib2-devel gobject-introspection-devel \
             libsoup3-devel libdex-devel libpng-devel json-glib-devel \
-            libyaml-devel make gcc pkgconf
+            libyaml-devel readline-devel make gcc pkgconf
 
       - name: Download appimagetool
         run: |

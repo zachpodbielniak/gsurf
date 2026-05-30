@@ -28,7 +28,7 @@ jobs:
             webkit2gtk4.1-devel gtk3-devel javascriptcoregtk4.1-devel \
             glib2-devel gobject-introspection-devel \
             libsoup3-devel libdex-devel libpng-devel json-glib-devel \
-            libyaml-devel make gcc pkgconf xorg-x11-server-Xvfb
+            libyaml-devel readline-devel make gcc pkgconf xorg-x11-server-Xvfb
 
       - name: Show configuration
         run: make MCP=1 show-config
