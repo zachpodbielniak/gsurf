@@ -19,7 +19,14 @@ Three-file Makefile system (mirrors gst):
 - `Makefile` — driver; auto-discovers `src/**/*.c` via wildcards.
 
 Key flags: `DEBUG=1`, `ASAN=1`, `MCP=1`, `AI=1` (reserved/deferred),
-`GTK_BACKEND=gtk3|gtk4`, `BUILD_GIR=1`, `BUILD_TESTS=0`.
+`GTK_BACKEND=gtk3|gtk4`, `BUILD_GIR=1`, `BUILD_TESTS=0`, `STATIC=1`.
+
+`STATIC=1` links `libgsurf.a` into the `gsurf` binary (no runtime
+`libgsurf.so` dependency); system libs (GTK/WebKit/…) stay dynamic since
+WebKit can't be statically linked. The binary is linked `--export-dynamic`
+with the gsurf+yaml-glib objects `--whole-archive`d, and modules drop their
+own `libgsurf` link (`LIBGSURF_LINK=`) so they resolve `gsurf_*`/`yaml_*`
+from the executable — one library instance, no duplicate GType registration.
 
 ```sh
 make                 # build lib + binary + modules (GTK3 default)

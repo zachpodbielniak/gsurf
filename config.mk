@@ -168,6 +168,21 @@ LIB_SHARED := lib$(LIB_NAME).so
 LIB_SHARED_FULL := lib$(LIB_NAME).so.$(VERSION)
 LIB_SHARED_MAJOR := lib$(LIB_NAME).so.$(VERSION_MAJOR)
 
+# Static build (STATIC=1): link libgsurf.a directly into the gsurf binary
+# instead of libgsurf.so, so the binary has no runtime dependency on the
+# shared library. System libraries (GTK/WebKit/GLib/...) stay dynamic —
+# WebKit cannot be statically linked, so a fully-static binary is not
+# possible. Modules remain runtime .so plugins; the binary is linked with
+# --export-dynamic and the modules link no libgsurf of their own, so they
+# resolve gsurf_* symbols from the executable (one library instance, no
+# duplicate GType registrations). See rules.mk for the link recipes.
+STATIC ?= 0
+ifeq ($(STATIC),1)
+    STATIC_MODULE_FLAGS := LIBGSURF_LINK=
+else
+    STATIC_MODULE_FLAGS :=
+endif
+
 # GIR settings
 GIR_NAMESPACE := Gsurf
 GIR_VERSION := $(VERSION_MAJOR).$(VERSION_MINOR)
@@ -207,6 +222,7 @@ show-config:
 	@echo "MODULEDIR:         $(MODULEDIR)"
 	@echo "DEBUG:             $(DEBUG)"
 	@echo "ASAN:              $(ASAN)"
+	@echo "STATIC:            $(STATIC)"
 	@echo "BUILD_GIR:         $(BUILD_GIR)"
 	@echo "BUILD_TESTS:       $(BUILD_TESTS)"
 	@echo "BUILD_MODULES:     $(BUILD_MODULES)"

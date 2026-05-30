@@ -8,6 +8,10 @@ MODULE_NAME := mcp
 SRCS := $(wildcard *.c)
 CC ?= gcc
 
+# libgsurf link flags. Empty for STATIC=1 builds, where the binary is
+# linked --export-dynamic and modules resolve gsurf_* from the executable.
+LIBGSURF_LINK ?= -L$(LIBDIR) -lgsurf
+
 MCP_RPATH := -Wl,-rpath,$(abspath $(LIBDIR)/../../deps/mcp-glib/build)
 
 all: $(OUTDIR)/$(MODULE_NAME).so
@@ -15,7 +19,7 @@ all: $(OUTDIR)/$(MODULE_NAME).so
 $(OUTDIR)/$(MODULE_NAME).so: $(SRCS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(MCP_CFLAGS) $(LDFLAGS) -o $@ $(SRCS) \
-		-L$(LIBDIR) -lgsurf $(MCP_LDFLAGS) $(MCP_RPATH)
+		$(LIBGSURF_LINK) $(MCP_LDFLAGS) $(MCP_RPATH)
 
 clean:
 	rm -f $(OUTDIR)/$(MODULE_NAME).so

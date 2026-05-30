@@ -53,9 +53,25 @@ $(OUTDIR)/$(LIB_SHARED_FULL): $(LIB_OBJS) $(YAMLGLIB_OBJS) $(CRISPY_LIB) | $(OUT
 	cd $(OUTDIR) && ln -sf $(LIB_SHARED_FULL) $(LIB_SHARED_MAJOR)
 	cd $(OUTDIR) && ln -sf $(LIB_SHARED_MAJOR) $(LIB_SHARED)
 
-# Executable linking (rpath $ORIGIN so it finds libgsurf.so beside it)
+# Executable linking.
+ifeq ($(STATIC),1)
+# Static: link the library objects directly into the binary. The gsurf and
+# yaml-glib objects are pulled in --whole-archive so every GType/boxed/enum
+# registration and yaml_* symbol the runtime modules rely on is present even
+# when main.c doesn't reference it; crispy is linked normally (only the
+# config-compiler objects it actually needs, not its readline-based REPL).
+# --export-dynamic exposes those symbols so loaded module .so files resolve
+# gsurf_*/yaml_* against the executable — one library instance, no
+# libgsurf.so runtime dependency.
+$(OUTDIR)/gsurf: $(MAIN_OBJ) $(LIB_OBJS) $(YAMLGLIB_OBJS) $(CRISPY_LIB)
+	$(CC) -o $@ $(MAIN_OBJ) \
+		-Wl,--whole-archive $(LIB_OBJS) $(YAMLGLIB_OBJS) -Wl,--no-whole-archive \
+		$(CRISPY_LIB) $(LDFLAGS) -Wl,--export-dynamic
+else
+# Shared: link libgsurf.so (rpath $ORIGIN so it is found beside the binary).
 $(OUTDIR)/gsurf: $(MAIN_OBJ) $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $(MAIN_OBJ) -L$(OUTDIR) -lgsurf $(LDFLAGS) -Wl,-rpath,'$$ORIGIN'
+endif
 
 # GIR generation
 $(OUTDIR)/$(GIR_FILE): $(LIB_SRCS) $(LIB_HDRS) | $(OUTDIR)/$(LIB_SHARED_FULL)
@@ -160,11 +176,20 @@ install: install-gsurf-mcp
 endif
 endif
 
+ifeq ($(STATIC),1)
+install-bin: $(MAIN_OBJ) $(LIB_OBJS) $(YAMLGLIB_OBJS) $(CRISPY_LIB)
+	$(MKDIR_P) $(DESTDIR)$(BINDIR)
+	$(CC) -o $(DESTDIR)$(BINDIR)/gsurf $(MAIN_OBJ) \
+		-Wl,--whole-archive $(LIB_OBJS) $(YAMLGLIB_OBJS) -Wl,--no-whole-archive \
+		$(CRISPY_LIB) $(LDFLAGS) -Wl,--export-dynamic
+	chmod 755 $(DESTDIR)$(BINDIR)/gsurf
+else
 install-bin: $(MAIN_OBJ) $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(MKDIR_P) $(DESTDIR)$(BINDIR)
 	$(CC) -o $(DESTDIR)$(BINDIR)/gsurf $(MAIN_OBJ) \
 		-L$(OUTDIR) -lgsurf $(LDFLAGS) -Wl,-rpath,$(LIBDIR)
 	chmod 755 $(DESTDIR)$(BINDIR)/gsurf
+endif
 
 install-lib: $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(MKDIR_P) $(DESTDIR)$(LIBDIR)

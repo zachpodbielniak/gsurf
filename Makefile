@@ -141,7 +141,8 @@ modules: lib $(OUTDIR)/modules
 				CFLAGS="$(MODULE_CFLAGS)" \
 				LDFLAGS="$(MODULE_LDFLAGS)" \
 				MCP_CFLAGS="$(MCP_CFLAGS)" \
-				MCP_LDFLAGS="$(MCP_LDFLAGS)"; \
+				MCP_LDFLAGS="$(MCP_LDFLAGS)" \
+				$(STATIC_MODULE_FLAGS); \
 		fi \
 	done
 
@@ -239,6 +240,7 @@ help:
 	@echo "Build options (set on command line):"
 	@echo "  DEBUG=1            - Enable debug build"
 	@echo "  ASAN=1             - Enable AddressSanitizer"
+	@echo "  STATIC=1           - Link libgsurf statically into the binary"
 	@echo "  PREFIX=path        - Set installation prefix"
 	@echo "  GTK_BACKEND=gtk3   - WebKit2GTK 4.1 / GTK3 (default)"
 	@echo "  GTK_BACKEND=gtk4   - WebKitGTK 6.0 / GTK4"
