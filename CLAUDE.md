@@ -27,6 +27,11 @@ WebKit can't be statically linked. The binary is linked `--export-dynamic`
 with the gsurf+yaml-glib objects `--whole-archive`d, and modules drop their
 own `libgsurf` link (`LIBGSURF_LINK=`) so they resolve `gsurf_*`/`yaml_*`
 from the executable — one library instance, no duplicate GType registration.
+All three vendored `deps/` are statically linked in this mode: yaml-glib
+(compiled into the binary), crispy (`libcrispy.a` into the binary), and —
+with `MCP=1` — mcp-glib (`libmcp-glib-1.0.a`, built `-fPIC`, embedded into
+the `mcp` module instead of its shared `.so`). Only true system libraries
+(GTK/WebKit/GLib, plus libyaml/libsoup/libdex/libpng) remain dynamic.
 
 ```sh
 make                 # build lib + binary + modules (GTK3 default)

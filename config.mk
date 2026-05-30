@@ -203,7 +203,15 @@ MODULE_LDFLAGS := -shared -fPIC
 # MCP module flags (extra includes/libs for mcp-glib)
 ifeq ($(MCP_AVAILABLE),1)
 MCP_CFLAGS := -I$(CURDIR)/deps/mcp-glib/src $(shell $(PKG_CONFIG) --cflags $(DEPS_MCP) json-glib-1.0 2>/dev/null)
+ifeq ($(STATIC),1)
+# Static: embed the vendored mcp-glib archive (built -fPIC) into the mcp
+# module so it carries no libmcp-glib-1.0.so runtime dependency, matching
+# how yaml-glib (compiled in) and crispy (libcrispy.a) are statically linked.
+# Its own deps (libsoup/libdex/libpng/json-glib) stay system-dynamic.
+MCP_LDFLAGS := $(CURDIR)/deps/mcp-glib/build/libmcp-glib-1.0.a $(shell $(PKG_CONFIG) --libs $(DEPS_MCP) json-glib-1.0 2>/dev/null)
+else
 MCP_LDFLAGS := -L$(CURDIR)/deps/mcp-glib/build -lmcp-glib-1.0 $(shell $(PKG_CONFIG) --libs $(DEPS_MCP) json-glib-1.0 2>/dev/null)
+endif
 endif
 
 # Print configuration (for debugging)
