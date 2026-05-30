@@ -179,6 +179,23 @@ follow_press(GsurfModalModule *self, GsurfView *view, const gchar *name)
 	}
 }
 
+/* A bare modifier keypress (Shift/Ctrl/Alt/Super/...) arrives as its own
+ * key event. It is never a modal command and must not disturb a pending
+ * chord — e.g. typing `gT` is g, then Shift-down, then t, and the Shift
+ * event would otherwise clear the pending `g`. */
+static gboolean
+is_modifier_name(const gchar *name)
+{
+	return g_str_has_prefix(name, "Shift") ||
+	       g_str_has_prefix(name, "Control") ||
+	       g_str_has_prefix(name, "Alt") ||
+	       g_str_has_prefix(name, "Meta") ||
+	       g_str_has_prefix(name, "Super") ||
+	       g_str_has_prefix(name, "Hyper") ||
+	       g_strcmp0(name, "Caps_Lock") == 0 ||
+	       g_strcmp0(name, "ISO_Level3_Shift") == 0;
+}
+
 /* Rotate the active view in the active window by @delta (vim gt/gT). Works
  * directly on the window's view list, so it does not depend on the tabs
  * module being loaded. No-op with fewer than two views. */
@@ -217,6 +234,11 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	g_autofree gchar *js = NULL;
 
 	if (name == NULL || view == NULL)
+		return FALSE;
+
+	/* Stay transparent to bare modifier presses so they neither act as
+	 * commands nor reset a pending chord (keeps `gT`, `gg`, etc. intact). */
+	if (is_modifier_name(name))
 		return FALSE;
 
 	/* FOLLOW (link-hint) mode owns all keys until a match or cancel. */
