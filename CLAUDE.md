@@ -27,11 +27,14 @@ WebKit can't be statically linked. The binary is linked `--export-dynamic`
 with the gsurf+yaml-glib objects `--whole-archive`d, and modules drop their
 own `libgsurf` link (`LIBGSURF_LINK=`) so they resolve `gsurf_*`/`yaml_*`
 from the executable — one library instance, no duplicate GType registration.
-All three vendored `deps/` are statically linked in this mode: yaml-glib
-(compiled into the binary), crispy (`libcrispy.a` into the binary), and —
-with `MCP=1` — mcp-glib (`libmcp-glib-1.0.a`, built `-fPIC`, embedded into
-the `mcp` module instead of its shared `.so`). Only true system libraries
-(GTK/WebKit/GLib, plus libyaml/libsoup/libdex/libpng) remain dynamic.
+The vendored `deps/` are statically embedded in **every** build (not just
+`STATIC=1`): yaml-glib is compiled into `libgsurf`, crispy is linked from
+`libcrispy.a`, and mcp-glib is linked from `libmcp-glib-1.0.a` (built
+`-fPIC`) into the `mcp` module — so we always ship our pinned versions and
+never load an external `libmcp-glib-1.0.so`/`libcrispy.so`. `STATIC=1`
+additionally folds `libgsurf` itself into the binary; only true system
+libraries (GTK/WebKit/GLib, plus libyaml/libsoup/libdex/libpng) ever stay
+dynamic.
 
 ```sh
 make                 # build lib + binary + modules (GTK3 default)
@@ -44,7 +47,9 @@ make show-config     # dump resolved configuration
 Vendored deps build into `libgsurf`: **yaml-glib** sources are compiled in;
 **crispy** is built via its own Makefile and its static archive is merged into
 `libgsurf` (used by the C-config compiler). **mcp-glib** is built separately and
-linked only by the `mcp` module (`MCP=1`).
+its `-fPIC` static archive (`libmcp-glib-1.0.a`) is linked into the `mcp` module
+(`MCP=1`). All three are statically embedded, so no built artifact depends on a
+vendored `deps/` shared object at runtime — the pinned versions ship with us.
 
 On this dev machine: `webkit2gtk-4.1` + `gtk+-3.0` are installed; `webkitgtk-6.0`
 (GTK4) is **not** — so `GTK_BACKEND=gtk4` won't build here until it is installed.
