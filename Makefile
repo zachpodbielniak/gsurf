@@ -225,6 +225,10 @@ compile-commands:
 		first=0; \
 		printf '  {"directory": "%s", "file": "%s", "command": "%s %s -c %s"}' \
 			"$(CURDIR)" "$(CURDIR)/$$src" "$(CC)" "$(CFLAGS)" "$$src" >> compile_commands.json; \
+	done; \
+	for src in $(TEST_SRCS); do \
+		printf ',\n  {"directory": "%s", "file": "%s", "command": "%s %s -c %s"}' \
+			"$(CURDIR)" "$(CURDIR)/$$src" "$(CC)" "$(TEST_CFLAGS)" "$$src" >> compile_commands.json; \
 	done
 	@printf '\n]\n' >> compile_commands.json
 	@echo "Wrote compile_commands.json ($$(grep -c '\"file\"' compile_commands.json) entries)"

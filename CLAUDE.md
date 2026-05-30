@@ -87,9 +87,18 @@ module that runs its own server lifecycle on `activate()`.
 ## Tests / running
 
 ```sh
-make test                                   # headless GLib tests
+make test                                   # headless GLib tests (38 cases)
 xvfb-run -a ./build/release/gsurf about:blank   # headless GUI smoke test
 ```
+
+Test layout (`tests/test-*.c`, auto-discovered): `test-version`, `test-enums`
+(action<->string, GType registration), `test-keys` (canonicalize/normalize/
+match), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
+keybind lookup, module nodes, bad-input handling), `test-manager` (loading,
+enabled gating, priority, input passthrough, default verdicts, and every hook
+dispatch through the real module .so files), `test-modules` (search-engines/
+history/adblock). The GTK/WebKit view+window layer needs a display and web
+process, so it is exercised by ad-hoc Xvfb harnesses rather than `make test`.
 
 The `/run`, `/verify`, and `/code-review` skills are available for driving and
 reviewing the app.
