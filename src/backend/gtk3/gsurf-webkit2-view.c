@@ -364,10 +364,12 @@ gsurf_webkit2_view_apply_settings(GsurfView *view, GsurfSettings *s)
 	webkit_settings_set_enable_media_stream(ws, s->media_stream);
 	webkit_settings_set_enable_smooth_scrolling(ws, s->smooth_scrolling);
 	webkit_settings_set_enable_caret_browsing(ws, s->caret_browsing);
-	/* These two are deprecated in newer WebKitGTK but harmless. */
+	/* Deprecated but still functional. (hyperlink-auditing is intentionally
+	 * not set here: WebKitGTK >= 2.32 made its setter a no-op that emits a
+	 * runtime warning on every call — the s->hyperlink_auditing config field
+	 * is retained for documentation and other backends.) */
 	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 	webkit_settings_set_enable_dns_prefetching(ws, s->dns_prefetch);
-	webkit_settings_set_enable_hyperlink_auditing(ws, s->hyperlink_auditing);
 	G_GNUC_END_IGNORE_DEPRECATIONS
 	webkit_settings_set_enable_site_specific_quirks(ws, s->site_quirks);
 	webkit_settings_set_enable_developer_extras(ws, s->developer_extras);
