@@ -1,0 +1,214 @@
+# gsurf — sensible starter configuration
+#
+# A curated, privacy-leaning daily-driver config. Unlike the exhaustive
+# reference (data/default-config.yaml, dumped by `gsurf --generate-yaml-config`),
+# this enables a practical set of modules with good defaults.
+#
+# Install:  cp data/sensible-config.yaml ~/.config/gsurf/config.yaml
+# Every key here matches what the core/modules actually read; modules not
+# listed are simply left disabled (run `gsurf --list-modules` for the rest).
+
+# ===== Browser / general =====
+browser:
+  homepage: "https://duckduckgo.com"
+  new_view_uri: "https://duckduckgo.com"
+  default_zoom: 1.0
+  smooth_scroll: true
+  fullscreen_on_start: false
+
+# Empty = engine default UA (the useragent module can override per-site).
+user_agent: ""
+
+# ===== Web engine defaults (privacy-leaning) =====
+webkit:
+  javascript: true
+  images: true
+  webgl: false                 # fingerprinting / GPU surface
+  webaudio: true
+  media: true
+  media_stream: false          # camera/mic off until a site is trusted
+  webrtc: false                # avoids local-IP leakage
+  plugins: false
+  smooth_scrolling: true
+  caret_browsing: false
+  dns_prefetch: false
+  hyperlink_auditing: false    # drop <a ping> beacons
+  site_quirks: true
+  developer_extras: false      # the inspector module flips this on demand
+  default_font_size: 16
+  default_monospace_font_size: 13
+  default_charset: "UTF-8"
+  javascript_can_open_windows: false
+  javascript_can_access_clipboard: false
+
+# ===== TLS / storage / network =====
+tls:
+  strict: true
+
+storage:
+  cache_dir: "~/.cache/gsurf"
+  data_dir: "~/.local/share/gsurf"
+  download_dir: "~/Downloads"
+  cookie_jar: "~/.local/share/gsurf/cookies.sqlite"
+  enable_disk_cache: true
+
+network:
+  proxy:
+    mode: default              # default | none | custom
+    uri: ""
+  do_not_track: true
+
+# ===== Window =====
+window:
+  title: gsurf
+  geometry: 1280x800
+  show_in_title: uri
+
+# ===== Core keybinds (modified/chrome keys; vim letters come from `modal`) =====
+keybinds:
+  "Ctrl+r": reload
+  "Ctrl+Shift+r": reload-nocache
+  "Escape": stop
+  "Alt+Left": back
+  "Alt+Right": forward
+  "Ctrl+plus": zoom-in
+  "Ctrl+minus": zoom-out
+  "Ctrl+0": zoom-reset
+  "F11": toggle-fullscreen
+  "Ctrl+q": quit
+
+mousebinds:
+  "Button8": back
+  "Button9": forward
+  "Button2": open-new-view
+  "Ctrl+Button1": open-new-view
+
+# ===== Modules =====
+modules:
+
+  # Vim-style modal navigation + vimium link hinting (press `f`).
+  modal:
+    enabled: true
+    start_mode: normal
+    scroll_step: 60
+    hint_key: "f"              # overlay chord labels on clickable elements
+    hint_key_newview: "F"      # follow a hint in a new view
+    hint_chars: "asdfghjkl"    # home-row alphabet; chords grow with link count
+    hint_bg: "#ffd700"
+    hint_fg: "#000000"
+
+  # Address bar (Ctrl+l to focus; non-URL input falls through to search).
+  chromebar:
+    enabled: true
+    key_focus: "Ctrl+l"
+
+  # Prefix searches ("g cats" -> Google) and bare-word default search.
+  search_engines:
+    enabled: true
+    default: ddg
+    default_is_search: true
+    engines:
+      ddg:    { prefix: "d ",  url: "https://duckduckgo.com/?q=%s" }
+      google: { prefix: "g ",  url: "https://www.google.com/search?q=%s" }
+      wiki:   { prefix: "w ",  url: "https://en.wikipedia.org/w/index.php?search=%s" }
+      gh:     { prefix: "gh ", url: "https://github.com/search?q=%s" }
+
+  # Tabs (Ctrl+t/w, Ctrl+Tab to cycle).
+  tabs:
+    enabled: true
+    key_new: "Ctrl+t"
+    key_close: "Ctrl+w"
+    key_next: "Ctrl+Tab"
+    key_prev: "Ctrl+Shift+Tab"
+
+  # History log (used by chromebar/omnibar; plain text for dmenu/grep).
+  history:
+    enabled: true
+    file: "~/.local/share/gsurf/history"
+    log_titles: true
+
+  # Go-home key.
+  homepage:
+    enabled: true
+    uri: "https://duckduckgo.com"
+    key_home: "Ctrl+Home"
+
+  # Runtime engine toggles (Ctrl+Shift+...).
+  toggles:
+    enabled: true
+    notify_on_toggle: true
+    keys:
+      javascript: "Ctrl+Shift+s"
+      images: "Ctrl+Shift+m"
+      webgl: "Ctrl+Shift+w"
+      caret_browsing: "Ctrl+i"
+      developer_extras: "Ctrl+Shift+d"
+
+  # In-page find: n / N for next / previous.
+  find_bar:
+    enabled: true
+    key_next: "n"
+    key_prev: "N"
+
+  # Cookie policy with @Aa-style cycle toggle.
+  cookie_policy:
+    enabled: true
+    policy: no-third-party
+    key_toggle: "Ctrl+Shift+at"
+
+  # Host-based blocking. Drop hosts files (0.0.0.0-style) into the path
+  # below; with no lists present it simply allows everything.
+  adblock:
+    enabled: true
+    host_files:
+      - "~/.config/gsurf/adblock/hosts"
+    whitelist: []
+
+  # Downloads land in the configured directory.
+  downloads:
+    enabled: true
+    dir: "~/Downloads"
+
+  # Bookmarks: Ctrl+d to add, Ctrl+Shift+d to recall via dmenu.
+  bookmarks:
+    enabled: true
+    file: "~/.local/share/gsurf/bookmarks"
+    dmenu_cmd: "dmenu -l 20 -i"
+    key_add: "Ctrl+d"
+    key_open: "Ctrl+Shift+d"
+
+  # Send the current page/media to mpv (Ctrl+m).
+  playexternal:
+    enabled: true
+    command: "mpv --"
+    key: "Ctrl+m"
+
+  # Web inspector / devtools (Ctrl+Shift+i).
+  inspector:
+    enabled: true
+    key: "Ctrl+Shift+i"
+
+  # Respect the system light/dark preference.
+  dark_mode:
+    enabled: true
+    mode: auto                 # auto | light | dark
+    force_dark_css: false
+
+  # Bottom status bar (URI + load progress).
+  status_bar:
+    enabled: true
+
+  # Deny geolocation by default.
+  geolocation:
+    enabled: true
+    default: deny
+
+  # Ask before allowing Web Notifications.
+  notifications:
+    enabled: true
+    allow_web_notifications: ask
+
+  # --- Opt-in extras (left disabled here) ---
+  # omnibar, externalpipe, userscripts, site_styles, uri_params, useragent,
+  # cert_manager, session, proxy_switch, spacesearch, and the MCP server
+  # (mcp, requires building with MCP=1) — see data/default-config.yaml.
