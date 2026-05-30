@@ -6,7 +6,8 @@
  *
  * Implements #GsurfInputHandler at high priority and tracks its own mode.
  * NORMAL mode: bare keys are navigation commands (hjkl, gg, G, d/u, H/L,
- * r); `i` enters INSERT (keys pass to the page); Escape returns to NORMAL.
+ * r, and gt/gT to switch tabs); `i` enters INSERT (keys pass to the page);
+ * Escape returns to NORMAL.
  * `f` enters FOLLOW mode: vimium-style link hints are overlaid on every
  * clickable element with short chord labels; typing a chord narrows the
  * set and a unique match is clicked. `F` opens the match in a new view.
@@ -178,6 +179,33 @@ follow_press(GsurfModalModule *self, GsurfView *view, const gchar *name)
 	}
 }
 
+/* Rotate the active view in the active window by @delta (vim gt/gT). Works
+ * directly on the window's view list, so it does not depend on the tabs
+ * module being loaded. No-op with fewer than two views. */
+static void
+modal_switch_view(gint delta)
+{
+	GsurfWindow *window = gsurf_module_manager_get_active_window(
+		gsurf_module_manager_get_default());
+	GsurfView *active;
+	gint n, cur = -1, i, next;
+
+	if (window == NULL)
+		return;
+	n = (gint)gsurf_window_get_n_views(window);
+	if (n <= 1)
+		return;
+
+	active = gsurf_window_get_active_view(window);
+	for (i = 0; i < n; i++)
+		if (gsurf_window_get_nth_view(window, i) == active) { cur = i; break; }
+	if (cur < 0)
+		return;
+
+	next = ((cur + delta) % n + n) % n;
+	gsurf_window_set_active_view(window, gsurf_window_get_nth_view(window, next));
+}
+
 static gboolean
 gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
                              guint keyval, guint keycode, guint state,
@@ -234,11 +262,19 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		return FALSE;
 	}
 
-	/* Chord: gg -> top. */
+	/* Chords beginning with 'g': gg -> top, gt -> next tab, gT -> prev tab. */
 	if (self->pending_g) {
 		self->pending_g = FALSE;
 		if (g_strcmp0(name, "g") == 0) {
 			scroll(view, "window.scrollTo(0,0)");
+			return TRUE;
+		}
+		if (g_strcmp0(name, "t") == 0) {
+			modal_switch_view(+1);
+			return TRUE;
+		}
+		if (g_strcmp0(name, "T") == 0) {
+			modal_switch_view(-1);
 			return TRUE;
 		}
 		/* fall through: 'g' then other key — treat the new key normally */
