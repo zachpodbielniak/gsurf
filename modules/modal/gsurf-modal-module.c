@@ -207,6 +207,21 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	if (has_mod)
 		return FALSE;
 
+	/* Focus-aware passthrough: when the page has an editable element
+	 * focused (text input, textarea, contenteditable, select), let keys
+	 * reach it so the user can type without entering INSERT mode. Escape
+	 * blurs the field and returns to command context. This mirrors the
+	 * way vimium/qutebrowser behave. */
+	if (gsurf_view_get_editing(view)) {
+		if (g_strcmp0(name, "Escape") == 0) {
+			gsurf_view_run_javascript_async(view,
+				"document.activeElement&&document.activeElement.blur&&document.activeElement.blur()",
+				NULL, NULL, NULL);
+			return TRUE;
+		}
+		return FALSE;
+	}
+
 	/* Chord: gg -> top. */
 	if (self->pending_g) {
 		self->pending_g = FALSE;

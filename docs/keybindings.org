@@ -58,7 +58,19 @@ Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 
 * Modal / vim navigation
 
-Bare-letter bindings (=j=, =k=, =f=, =/=) act as commands by default. The =modal=
-module adds proper vim modes — insert mode (=i=) where keys pass to the page,
-normal mode (=Escape=), and link hinting (=f=) — so plain keys don't interfere
-with form fields. Enable it under =modules.modal=.
+The =modal= module (enabled by default) provides vim-style navigation. It is
+*focus-aware*, so it never blocks typing:
+
+- When an editable element is focused — a page text field, =textarea=,
+  =contenteditable=, =select=, *or the address bar* — keystrokes go straight to
+  it. You do *not* need to press =i= first. =Escape= blurs the field and returns
+  to command context.
+- When nothing editable is focused (you're reading a page), bare letters are
+  commands: =hjkl= scroll, =gg=/=G= top/bottom, =H=/=L= history, =r= reload,
+  =d=/=u= half-page, =f= link hints (=F= follows in a new view).
+- =i= forces INSERT mode (all keys pass to the page until =Escape=) for the rare
+  web app that wants raw keys without a focused field.
+
+Focus is tracked by a small content script that reports DOM focus changes to the
+browser, so the right behavior happens automatically as you move between the
+page, form fields, and the address bar.

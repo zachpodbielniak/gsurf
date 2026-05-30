@@ -8,7 +8,7 @@
 #include "core/gsurf-view.h"
 
 typedef struct {
-	gpointer reserved;
+	gboolean editing;  /* an editable DOM element is focused in the page */
 } GsurfViewPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfView, gsurf_view, G_TYPE_OBJECT)
@@ -333,6 +333,30 @@ gsurf_view_get_native_widget(GsurfView *self)
 
 	klass = GSURF_VIEW_GET_CLASS(self);
 	return klass->get_native_widget != NULL ? klass->get_native_widget(self) : NULL;
+}
+
+/* --- Editing state --- */
+
+gboolean
+gsurf_view_get_editing(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	priv = gsurf_view_get_instance_private(self);
+	return priv->editing;
+}
+
+void
+gsurf_view_set_editing(GsurfView *self, gboolean editing)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+
+	priv = gsurf_view_get_instance_private(self);
+	priv->editing = editing;
 }
 
 /* --- Extended API --- */

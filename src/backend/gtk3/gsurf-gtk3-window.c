@@ -43,7 +43,16 @@ static gboolean
 on_key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 {
 	GsurfGtk3Window *self = user_data;
-	guint mods = translate_modifiers(event->state);
+	GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(self->window));
+	guint mods;
+
+	/* If a chrome text entry (address bar, find box) has focus, let it
+	 * handle its own keys — don't route them through the keymap/modal
+	 * layer. The web view is not a GtkEditable, so it still routes. */
+	if (focus != NULL && GTK_IS_EDITABLE(focus))
+		return FALSE;
+
+	mods = translate_modifiers(event->state);
 
 	/* Runs before the focused webview, so returning TRUE consumes the
 	 * key (normal-mode commands); FALSE lets the page handle it. */

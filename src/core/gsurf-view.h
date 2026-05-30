@@ -128,6 +128,31 @@ void         gsurf_view_get_snapshot_async(GsurfView *self, GCancellable *cancel
                                            GAsyncReadyCallback callback, gpointer user_data);
 GBytes      *gsurf_view_get_snapshot_finish(GsurfView *self, GAsyncResult *result, GError **error);
 
+/* --- Editing state (DOM focus awareness) --- */
+
+/**
+ * gsurf_view_get_editing:
+ * @self: a #GsurfView
+ *
+ * Whether an editable element (text input, textarea, contenteditable,
+ * select) is currently focused in the page. The backend keeps this
+ * updated from page focus events; modal input handlers use it to pass
+ * keystrokes through to the field instead of treating them as commands.
+ *
+ * Returns: %TRUE if the page has an editable element focused
+ */
+gboolean gsurf_view_get_editing(GsurfView *self);
+
+/**
+ * gsurf_view_set_editing:
+ * @self: a #GsurfView
+ * @editing: whether an editable element is focused
+ *
+ * Sets the editing state. Called by the backend; not normally used
+ * directly.
+ */
+void gsurf_view_set_editing(GsurfView *self, gboolean editing);
+
 /* --- Embedding --- */
 /**
  * gsurf_view_get_native_widget:
