@@ -494,9 +494,14 @@ main(int argc, char *argv[])
 	gsurf_module_manager_set_application(mgr, app);
 	gsurf_module_manager_set_config(mgr, config);
 	if (!opt_no_modules) {
+		/* The binary's policy: $GSURF_MODULE_PATH, else <exe-dir>/modules,
+		 * else the installed system dir (first match). Embedders skip this
+		 * and set their own search paths via the manager API instead. */
 		g_autofree gchar *moddir = find_module_dir();
-		if (moddir != NULL)
-			gsurf_module_manager_load_from_directory(mgr, moddir);
+		if (moddir != NULL) {
+			gsurf_module_manager_add_search_path(mgr, moddir);
+			gsurf_module_manager_load_modules(mgr);
+		}
 	}
 
 	/* Window and initial view. */

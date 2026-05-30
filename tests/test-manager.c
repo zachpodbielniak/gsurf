@@ -100,6 +100,73 @@ test_load_bad_path(void)
 	g_object_unref(mgr);
 }
 
+/* Programmatic search-path management (the embedding API). */
+static void
+test_search_paths(void)
+{
+	GsurfModuleManager *mgr = gsurf_module_manager_new();
+	GPtrArray *paths;
+	const gchar *set[] = { "/one", "/two", "/three", NULL };
+
+	paths = gsurf_module_manager_get_search_paths(mgr);
+	g_assert_nonnull(paths);
+	g_assert_cmpuint(paths->len, ==, 0);
+
+	/* Append + dedup + NULL/empty are ignored. */
+	gsurf_module_manager_add_search_path(mgr, "/a");
+	gsurf_module_manager_add_search_path(mgr, "/a");   /* duplicate */
+	gsurf_module_manager_add_search_path(mgr, NULL);
+	gsurf_module_manager_add_search_path(mgr, "");
+	gsurf_module_manager_add_search_path(mgr, "/b");
+	g_assert_cmpuint(paths->len, ==, 2);
+	g_assert_cmpstr(g_ptr_array_index(paths, 0), ==, "/a");
+	g_assert_cmpstr(g_ptr_array_index(paths, 1), ==, "/b");
+
+	/* set replaces wholesale and preserves order. */
+	gsurf_module_manager_set_search_paths(mgr, set);
+	g_assert_cmpuint(paths->len, ==, 3);
+	g_assert_cmpstr(g_ptr_array_index(paths, 2), ==, "/three");
+
+	/* clear + set(NULL) both empty it. */
+	gsurf_module_manager_clear_search_paths(mgr);
+	g_assert_cmpuint(paths->len, ==, 0);
+	gsurf_module_manager_set_search_paths(mgr, set);
+	gsurf_module_manager_set_search_paths(mgr, NULL);
+	g_assert_cmpuint(paths->len, ==, 0);
+
+	g_assert_nonnull(gsurf_module_manager_get_system_module_dir());
+
+	/* load_modules with no search paths loads nothing and does not crash. */
+	g_assert_cmpuint(gsurf_module_manager_load_modules(mgr), ==, 0);
+
+	g_object_unref(mgr);
+}
+
+/* load_modules pulls .so files from a configured search path. */
+static void
+test_load_modules_from_path(void)
+{
+	g_autofree char *exe = g_file_read_link("/proc/self/exe", NULL);
+	g_autofree char *dir = g_path_get_dirname(exe);
+	g_autofree char *moddir = g_build_filename(dir, "modules", NULL);
+	GsurfModuleManager *mgr;
+	guint n;
+
+	if (!g_file_test(moddir, G_FILE_TEST_IS_DIR)) {
+		g_test_skip("modules dir not built");
+		return;
+	}
+
+	mgr = gsurf_module_manager_new();
+	gsurf_module_manager_add_search_path(mgr, moddir);
+	n = gsurf_module_manager_load_modules(mgr);
+	g_assert_cmpuint(n, >, 0);
+	/* A known module resolved by name. */
+	g_assert_nonnull(gsurf_module_manager_get_module(mgr, "search_engines"));
+
+	g_object_unref(mgr);
+}
+
 static void
 test_priority_api(void)
 {
@@ -247,6 +314,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/defaults-no-modules", test_defaults_no_modules);
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
 	g_test_add_func("/gsurf/manager/load-bad-path", test_load_bad_path);
+	g_test_add_func("/gsurf/manager/search-paths", test_search_paths);
+	g_test_add_func("/gsurf/manager/load-modules-from-path", test_load_modules_from_path);
 	g_test_add_func("/gsurf/manager/priority-api", test_priority_api);
 	g_test_add_func("/gsurf/manager/enabled-gating", test_enabled_gating);
 	g_test_add_func("/gsurf/manager/uri-params", test_uri_params);

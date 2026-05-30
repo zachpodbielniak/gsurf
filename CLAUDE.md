@@ -61,7 +61,13 @@ and `GTlsCertificate` instead.
   one or more hook interfaces from `src/interfaces/`. `GsurfModuleManager` loads
   `.so`s (GModule), reads each module's `enabled:` flag + config from the YAML
   `modules:` map, activates the enabled ones, and dispatches hooks in priority
-  order (first `TRUE`/non-`ALLOW` wins for consumable hooks).
+  order (first `TRUE`/non-`ALLOW` wins for consumable hooks). The manager never
+  loads modules implicitly: a host sets directories via
+  `gsurf_module_manager_add_search_path()` / `_set_search_paths()` and calls
+  `_load_modules()` (first-match-by-filename across paths, like `$PATH`). The
+  `gsurf` binary's `find_module_dir()` env→exe-dir→system fallback is *its* policy,
+  not the library's, so embedders (cmacs) load only the modules they point at —
+  see `docs/embedding.org`.
 - **Config**: `GsurfConfig` (final, public struct) parses YAML via yaml-glib and
   keeps the `modules:` mapping for modules to read their own section
   (`gsurf_config_get_module_node`). `GsurfConfigCompiler` compiles an optional

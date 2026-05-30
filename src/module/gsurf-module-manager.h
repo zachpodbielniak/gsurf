@@ -64,6 +64,75 @@ void               gsurf_module_manager_set_input_passthrough(GsurfModuleManager
  */
 gboolean           gsurf_module_manager_get_input_passthrough(GsurfModuleManager *self);
 
+/* --- Module search paths (for embedders / non-CLI hosts) ---
+ *
+ * The library never loads modules on its own: a host configures one or more
+ * search directories and then calls gsurf_module_manager_load_modules().
+ * An embedding application (e.g. cmacs) therefore loads ONLY the modules it
+ * points the manager at — it will not pick up a system-installed gsurf's
+ * modules, and the GSURF_MODULE_PATH environment variable and the built-in
+ * system directory are *not* consulted automatically (that fallback is the
+ * gsurf command-line binary's own policy, not the library's). An embedder
+ * that explicitly wants the system modules can add
+ * gsurf_module_manager_get_system_module_dir() to the search paths.
+ */
+
+/**
+ * gsurf_module_manager_add_search_path:
+ * @self: a #GsurfModuleManager
+ * @dir: a directory to append to the module search path
+ *
+ * Appends @dir to the ordered list of directories searched by
+ * gsurf_module_manager_load_modules(). Duplicate paths are ignored.
+ */
+void         gsurf_module_manager_add_search_path(GsurfModuleManager *self, const gchar *dir);
+
+/**
+ * gsurf_module_manager_set_search_paths:
+ * @self: a #GsurfModuleManager
+ * @dirs: (array zero-terminated=1) (nullable): the directories, or %NULL to clear
+ *
+ * Replaces the module search path with @dirs (in order).
+ */
+void         gsurf_module_manager_set_search_paths(GsurfModuleManager *self, const gchar *const *dirs);
+
+/**
+ * gsurf_module_manager_clear_search_paths:
+ * @self: a #GsurfModuleManager
+ *
+ * Removes all configured module search paths.
+ */
+void         gsurf_module_manager_clear_search_paths(GsurfModuleManager *self);
+
+/**
+ * gsurf_module_manager_get_search_paths:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (element-type utf8): the ordered search paths.
+ */
+GPtrArray   *gsurf_module_manager_get_search_paths(GsurfModuleManager *self);
+
+/**
+ * gsurf_module_manager_load_modules:
+ * @self: a #GsurfModuleManager
+ *
+ * Loads every `*.so` module from the configured search paths, in path
+ * order. A module file name seen in an earlier path wins: the same
+ * basename in a later path is skipped (first-match, like $PATH).
+ *
+ * Returns: the number of modules loaded.
+ */
+guint        gsurf_module_manager_load_modules(GsurfModuleManager *self);
+
+/**
+ * gsurf_module_manager_get_system_module_dir:
+ *
+ * Returns: (transfer none): the compile-time system module directory
+ *   (`GSURF_MODULEDIR`). Never added to the search path automatically;
+ *   an embedder may add it explicitly to opt in to system modules.
+ */
+const gchar *gsurf_module_manager_get_system_module_dir(void);
+
 /* --- Loading / registration --- */
 GsurfModule *gsurf_module_manager_load_module(GsurfModuleManager *self, const gchar *path, GError **error);
 guint        gsurf_module_manager_load_from_directory(GsurfModuleManager *self, const gchar *dir);

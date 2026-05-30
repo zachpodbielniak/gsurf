@@ -36,6 +36,41 @@ int main(int argc, char **argv)
 }
 #+end_src
 
+* Loading modules (host-controlled)
+
+The library never loads modules on its own. A host decides *where* modules come
+from by configuring the module manager's search path and then asking it to load:
+
+#+begin_src c
+GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+gsurf_module_manager_set_application(mgr, app);
+gsurf_module_manager_set_config(mgr, config);
+
+/* Point at the embedding application's OWN module directory only. */
+gsurf_module_manager_add_search_path(mgr, "/opt/cmacs/lib/gsurf/modules");
+gsurf_module_manager_load_modules(mgr);          /* loads *.so from each path */
+
+gsurf_module_manager_activate_all(mgr);          /* after window/view exist */
+#+end_src
+
+This is the isolation an embedder (e.g. cmacs) wants: an embedded gsurf loads
+=*only*= the modules the host points it at. The =GSURF_MODULE_PATH= environment
+variable and the built-in system module directory are =never= consulted
+automatically — that env/exe/system fallback is the standalone =gsurf= binary's
+own policy (in its =main.c=), not the library's. So an embedded gsurf will not
+pick up a system-installed gsurf's modules, even if one is installed.
+
+Useful calls (see =gsurf-module-manager.h=):
+
+- =gsurf_module_manager_add_search_path()= — append a directory (deduped, ordered).
+- =gsurf_module_manager_set_search_paths()= — replace the whole list (or clear with %NULL).
+- =gsurf_module_manager_clear_search_paths()= — empty the list.
+- =gsurf_module_manager_get_search_paths()= — inspect the current list.
+- =gsurf_module_manager_load_modules()= — load =*.so= from every path, first-match
+  by file name wins (like =$PATH=).
+- =gsurf_module_manager_get_system_module_dir()= — the compile-time system dir,
+  returned for hosts that want to opt in to system modules by adding it explicitly.
+
 * Embedding the widget in another GTK app
 
 =gsurf_view_get_native_widget()= / =gsurf_window_get_native_widget()= return the

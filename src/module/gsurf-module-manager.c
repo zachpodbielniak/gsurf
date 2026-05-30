@@ -27,10 +27,11 @@ struct _GsurfModuleManager
 {
 	GObject parent_instance;
 
-	GPtrArray   *modules;   /* owned refs to GsurfModule, sorted by priority */
-	GHashTable  *by_name;   /* gchar* -> GsurfModule* (borrowed) */
-	GsurfApplication *app;  /* weak */
-	GsurfConfig *config;    /* ref */
+	GPtrArray   *modules;       /* owned refs to GsurfModule, sorted by priority */
+	GHashTable  *by_name;       /* gchar* -> GsurfModule* (borrowed) */
+	GPtrArray   *search_paths;  /* owned gchar* dirs, in search order */
+	GsurfApplication *app;      /* weak */
+	GsurfConfig *config;        /* ref */
 	gboolean     input_passthrough; /* INSERT mode: bare keys go to the page */
 };
 
@@ -192,6 +193,96 @@ gsurf_module_manager_load_module(GsurfModuleManager *self, const gchar *path, GE
 	g_object_unref(module); /* manager holds its own ref */
 
 	return module;
+}
+
+/* --- Module search paths --- */
+
+void
+gsurf_module_manager_add_search_path(GsurfModuleManager *self, const gchar *dir)
+{
+	guint i;
+
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+	if (dir == NULL || *dir == '\0')
+		return;
+
+	for (i = 0; i < self->search_paths->len; i++)
+		if (g_strcmp0(g_ptr_array_index(self->search_paths, i), dir) == 0)
+			return; /* already present */
+
+	g_ptr_array_add(self->search_paths, g_strdup(dir));
+}
+
+void
+gsurf_module_manager_set_search_paths(GsurfModuleManager *self, const gchar *const *dirs)
+{
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+
+	g_ptr_array_set_size(self->search_paths, 0);
+	if (dirs != NULL)
+		for (guint i = 0; dirs[i] != NULL; i++)
+			gsurf_module_manager_add_search_path(self, dirs[i]);
+}
+
+void
+gsurf_module_manager_clear_search_paths(GsurfModuleManager *self)
+{
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+	g_ptr_array_set_size(self->search_paths, 0);
+}
+
+GPtrArray *
+gsurf_module_manager_get_search_paths(GsurfModuleManager *self)
+{
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), NULL);
+	return self->search_paths;
+}
+
+const gchar *
+gsurf_module_manager_get_system_module_dir(void)
+{
+	return GSURF_MODULEDIR;
+}
+
+guint
+gsurf_module_manager_load_modules(GsurfModuleManager *self)
+{
+	g_autoptr(GHashTable) seen = NULL; /* basename -> 1, for first-match wins */
+	guint p, count = 0;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), 0);
+
+	seen = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+
+	for (p = 0; p < self->search_paths->len; p++) {
+		const gchar *dir = g_ptr_array_index(self->search_paths, p);
+		GDir *d = g_dir_open(dir, 0, NULL);
+		const gchar *name;
+
+		if (d == NULL)
+			continue;
+
+		while ((name = g_dir_read_name(d)) != NULL) {
+			g_autofree gchar *path = NULL;
+			g_autoptr(GError) error = NULL;
+
+			if (!g_str_has_suffix(name, ".so"))
+				continue;
+			/* First directory that provides a given file name wins. */
+			if (g_hash_table_contains(seen, name))
+				continue;
+			g_hash_table_add(seen, g_strdup(name));
+
+			path = g_build_filename(dir, name, NULL);
+			if (gsurf_module_manager_load_module(self, path, &error) != NULL)
+				count++;
+			else
+				g_warning("gsurf: %s", error->message);
+		}
+		g_dir_close(d);
+	}
+
+	return count;
 }
 
 guint
@@ -554,6 +645,7 @@ gsurf_module_manager_dispose(GObject *object)
 		gsurf_module_manager_deactivate_all(self);
 	g_clear_pointer(&self->modules, g_ptr_array_unref);
 	g_clear_pointer(&self->by_name, g_hash_table_unref);
+	g_clear_pointer(&self->search_paths, g_ptr_array_unref);
 	g_clear_object(&self->config);
 	gsurf_module_manager_set_application(self, NULL);
 
@@ -571,6 +663,7 @@ gsurf_module_manager_init(GsurfModuleManager *self)
 {
 	self->modules = g_ptr_array_new_with_free_func(g_object_unref);
 	self->by_name = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	self->search_paths = g_ptr_array_new_with_free_func(g_free);
 	self->app = NULL;
 	self->config = NULL;
 }
