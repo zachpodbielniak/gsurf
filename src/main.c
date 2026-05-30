@@ -11,6 +11,7 @@
 #include "gsurf.h"
 
 #include <gdk/gdk.h>
+#include <gdk/gdkkeysyms.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -161,8 +162,20 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	GsurfConfig *config = gsurf_application_get_config(app);
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 	GsurfView *view = gsurf_window_get_active_view(window);
+	gboolean has_mod = (state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0;
+	gboolean is_escape = (keyval == GDK_KEY_Escape);
 	g_autofree gchar *keystr = NULL;
 	GsurfAction action;
+
+	/* While the user is typing — a DOM editable element is focused, or the
+	 * modal module is in INSERT passthrough — bare keys must reach the page
+	 * and not be consumed by any module (e.g. find-bar's n/N) or core
+	 * keybind. Modified keys and Escape still pass through (shortcuts; exit
+	 * insert / blur). */
+	if ((gsurf_module_manager_get_input_passthrough(mgr) ||
+	     (view != NULL && gsurf_view_get_editing(view))) &&
+	    !has_mod && !is_escape)
+		return FALSE;
 
 	/* Modules (modal keymap, hints, tabs) get first crack. */
 	if (gsurf_module_manager_dispatch_key_event(mgr, view, keyval, keycode,

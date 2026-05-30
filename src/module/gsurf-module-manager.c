@@ -27,6 +27,7 @@ struct _GsurfModuleManager
 	GHashTable  *by_name;   /* gchar* -> GsurfModule* (borrowed) */
 	GsurfApplication *app;  /* weak */
 	GsurfConfig *config;    /* ref */
+	gboolean     input_passthrough; /* INSERT mode: bare keys go to the page */
 };
 
 G_DEFINE_FINAL_TYPE(GsurfModuleManager, gsurf_module_manager, G_TYPE_OBJECT)
@@ -95,6 +96,20 @@ gsurf_module_manager_get_active_view(GsurfModuleManager *self)
 
 	window = gsurf_module_manager_get_active_window(self);
 	return window != NULL ? gsurf_window_get_active_view(window) : NULL;
+}
+
+void
+gsurf_module_manager_set_input_passthrough(GsurfModuleManager *self, gboolean passthrough)
+{
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+	self->input_passthrough = passthrough;
+}
+
+gboolean
+gsurf_module_manager_get_input_passthrough(GsurfModuleManager *self)
+{
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), FALSE);
+	return self->input_passthrough;
 }
 
 /* --- Loading / registration --- */

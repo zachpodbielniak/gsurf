@@ -45,6 +45,25 @@ GsurfConfig       *gsurf_module_manager_get_config(GsurfModuleManager *self);
 GsurfView         *gsurf_module_manager_get_active_view(GsurfModuleManager *self);
 GsurfWindow       *gsurf_module_manager_get_active_window(GsurfModuleManager *self);
 
+/**
+ * gsurf_module_manager_set_input_passthrough:
+ * @self: a #GsurfModuleManager
+ * @passthrough: whether bare keys should bypass input-handler modules
+ *
+ * Set by the modal module when it enters a full-passthrough mode (INSERT)
+ * so the host suppresses bare-key dispatch to all modules and lets the
+ * page receive the keys. Modified keys and Escape are unaffected.
+ */
+void               gsurf_module_manager_set_input_passthrough(GsurfModuleManager *self, gboolean passthrough);
+
+/**
+ * gsurf_module_manager_get_input_passthrough:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: whether input passthrough is currently active.
+ */
+gboolean           gsurf_module_manager_get_input_passthrough(GsurfModuleManager *self);
+
 /* --- Loading / registration --- */
 GsurfModule *gsurf_module_manager_load_module(GsurfModuleManager *self, const gchar *path, GError **error);
 guint        gsurf_module_manager_load_from_directory(GsurfModuleManager *self, const gchar *dir);

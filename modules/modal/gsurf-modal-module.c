@@ -50,6 +50,16 @@ scroll(GsurfView *view, const gchar *js)
 	gsurf_view_run_javascript_async(view, js, NULL, NULL, NULL);
 }
 
+/* Change mode and publish INSERT passthrough so the host suppresses
+ * bare-key dispatch to every module (not just this one) while typing. */
+static void
+set_mode(GsurfModalModule *self, GsurfModePolicy mode)
+{
+	self->mode = mode;
+	gsurf_module_manager_set_input_passthrough(
+		gsurf_module_manager_get_default(), mode == GSURF_MODE_INSERT);
+}
+
 /* --- synchronous JS (nested main loop) for the hint round-trips --- */
 typedef struct { GMainLoop *loop; GsurfView *view; gchar *result; } JsCtx;
 
@@ -141,7 +151,7 @@ start_hints(GsurfModalModule *self, GsurfView *view, gboolean newview)
 	g_autofree gchar *res = run_js_sync(view, js);
 
 	if (res != NULL && atoi(res) > 0) {
-		self->mode = GSURF_MODE_FOLLOW;
+		set_mode(self, GSURF_MODE_FOLLOW);
 		self->hint_newview = newview;
 		return TRUE;
 	}
@@ -156,15 +166,15 @@ follow_press(GsurfModalModule *self, GsurfView *view, const gchar *name)
 	g_autofree gchar *res = run_js_sync(view, press);
 
 	if (res == NULL) {
-		self->mode = GSURF_MODE_NORMAL;
+		set_mode(self, GSURF_MODE_NORMAL);
 		return;
 	}
 	if (g_str_has_prefix(res, "open:")) {
 		open_in_new_view(res + 5);
-		self->mode = GSURF_MODE_NORMAL;
+		set_mode(self, GSURF_MODE_NORMAL);
 	} else if (g_strcmp0(res, "more") != 0) {
 		/* "click" or "none": session is over. */
-		self->mode = GSURF_MODE_NORMAL;
+		set_mode(self, GSURF_MODE_NORMAL);
 	}
 }
 
@@ -185,7 +195,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	if (self->mode == GSURF_MODE_FOLLOW) {
 		if (g_strcmp0(name, "Escape") == 0) {
 			run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()");
-			self->mode = GSURF_MODE_NORMAL;
+			set_mode(self, GSURF_MODE_NORMAL);
 			return TRUE;
 		}
 		if (g_strcmp0(name, "BackSpace") == 0 ||
@@ -194,10 +204,12 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		return TRUE; /* consume everything while hinting */
 	}
 
-	/* INSERT mode: only Escape is ours; everything else goes to the page. */
+	/* INSERT mode: only Escape is ours; everything else goes to the page.
+	 * (With passthrough published, the host already suppresses bare-key
+	 * dispatch to all modules; this handles Escape and is a safety net.) */
 	if (self->mode == GSURF_MODE_INSERT) {
 		if (g_strcmp0(name, "Escape") == 0) {
-			self->mode = GSURF_MODE_NORMAL;
+			set_mode(self, GSURF_MODE_NORMAL);
 			return TRUE;
 		}
 		return FALSE;
@@ -242,7 +254,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		return TRUE;
 	}
 
-	if (g_strcmp0(name, "i") == 0) { self->mode = GSURF_MODE_INSERT; return TRUE; }
+	if (g_strcmp0(name, "i") == 0) { set_mode(self, GSURF_MODE_INSERT); return TRUE; }
 	if (g_strcmp0(name, "Escape") == 0) { self->pending_g = FALSE; return TRUE; }
 	if (g_strcmp0(name, "g") == 0) { self->pending_g = TRUE; return TRUE; }
 	if (g_strcmp0(name, "G") == 0) { scroll(view, "window.scrollTo(0,document.body.scrollHeight)"); return TRUE; }
@@ -312,8 +324,8 @@ gsurf_modal_configure(GsurfModule *module, gpointer config_ptr)
 		self->scroll_step = (gint)yaml_mapping_get_int_member(m, "scroll_step");
 	if (yaml_mapping_has_member(m, "start_mode")) {
 		start = yaml_mapping_get_string_member(m, "start_mode");
-		self->mode = g_strcmp0(start, "insert") == 0
-			? GSURF_MODE_INSERT : GSURF_MODE_NORMAL;
+		set_mode(self, g_strcmp0(start, "insert") == 0
+			? GSURF_MODE_INSERT : GSURF_MODE_NORMAL);
 	}
 	dup_member(&self->hint_key, m, "hint_key");
 	dup_member(&self->hint_key_newview, m, "hint_key_newview");
