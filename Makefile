@@ -200,7 +200,7 @@ appimage: all
 	printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport LD_LIBRARY_PATH="$$HERE/usr/lib:$$LD_LIBRARY_PATH"\nexport GSURF_MODULE_PATH="$$HERE/usr/lib/gsurf/modules"\nexec "$$HERE/usr/bin/gsurf" "$$@"\n' > $(APPDIR)/AppRun
 	chmod +x $(APPDIR)/AppRun
 	cp data/gsurf.desktop $(APPDIR)/gsurf.desktop
-	cp data/gsurf.svg $(APPDIR)/gsurf.svg
+	cp data/logo-256.png $(APPDIR)/gsurf.png
 	@if command -v $(APPIMAGETOOL) >/dev/null 2>&1; then \
 		$(APPIMAGETOOL) $(APPDIR) $(OUTDIR)/gsurf-$(VERSION)-x86_64.AppImage && \
 		echo "Wrote $(OUTDIR)/gsurf-$(VERSION)-x86_64.AppImage"; \

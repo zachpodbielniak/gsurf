@@ -234,8 +234,8 @@ install-desktop:
 	$(INSTALL_DATA) data/gsurf.desktop $(DESTDIR)$(DATADIR)/applications/
 
 install-icon:
-	$(MKDIR_P) $(DESTDIR)$(ICONDIR)/scalable/apps
-	$(INSTALL_DATA) data/gsurf.svg $(DESTDIR)$(ICONDIR)/scalable/apps/gsurf.svg
+	$(MKDIR_P) $(DESTDIR)$(ICONDIR)/256x256/apps
+	$(INSTALL_DATA) data/logo-256.png $(DESTDIR)$(ICONDIR)/256x256/apps/gsurf.png
 
 install-man:
 	$(MKDIR_P) $(DESTDIR)$(MANDIR)/man1
@@ -257,5 +257,5 @@ uninstall:
 	rm -f $(DESTDIR)$(TYPELIBDIR)/$(TYPELIB_FILE)
 	rm -rf $(DESTDIR)$(MODULEDIR)
 	rm -f $(DESTDIR)$(DATADIR)/applications/gsurf.desktop
-	rm -f $(DESTDIR)$(ICONDIR)/scalable/apps/gsurf.svg
+	rm -f $(DESTDIR)$(ICONDIR)/256x256/apps/gsurf.png
 	rm -f $(DESTDIR)$(MANDIR)/man1/gsurf.1

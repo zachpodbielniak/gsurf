@@ -127,9 +127,11 @@ display and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb
 harnesses rather than `make test`.
 
 Packaging targets: `make appimage` builds a self-contained AppImage (bundles the
-binary, `libgsurf`, all modules, desktop file + SVG icon; needs `appimagetool` on
-PATH or `APPIMAGETOOL=`). `make install` also installs `data/gsurf.desktop`, the
-`data/gsurf.svg` hicolor icon, and the `data/gsurf.1` man page. CI lives in
+binary, `libgsurf`, all modules, desktop file + 256×256 PNG icon; needs
+`appimagetool` on PATH or `APPIMAGETOOL=`). `make install` also installs
+`data/gsurf.desktop`, the `data/logo-256.png` icon as `hicolor/256x256/apps/gsurf.png`
+(mirroring gst; `data/logo.png` is the 1024² source), and the `data/gsurf.1` man
+page. CI lives in
 `.forgejo/workflows/` (`ci.yaml`: build + `test` + `test-gui`; `latest.yaml`:
 AppImage release).
 
