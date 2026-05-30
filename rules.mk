@@ -146,8 +146,8 @@ clean-all:
 	rm -f deps/crispy/src/crispy-version.h
 
 # Installation rules
-.PHONY: install install-lib install-bin install-headers install-pc install-gir install-modules install-desktop install-gsurf-mcp
-install: install-lib install-bin install-headers install-pc
+.PHONY: install install-lib install-bin install-headers install-pc install-gir install-modules install-desktop install-icon install-man install-gsurf-mcp
+install: install-lib install-bin install-headers install-pc install-desktop install-icon install-man
 ifeq ($(BUILD_GIR),1)
 install: install-gir
 endif
@@ -155,7 +155,9 @@ ifeq ($(BUILD_MODULES),1)
 install: install-modules
 endif
 ifeq ($(MCP_AVAILABLE),1)
+ifneq ($(wildcard tools/gsurf-mcp/Makefile),)
 install: install-gsurf-mcp
+endif
 endif
 
 install-bin: $(MAIN_OBJ) $(OUTDIR)/$(LIB_SHARED_FULL)
@@ -206,6 +208,15 @@ install-desktop:
 	$(MKDIR_P) $(DESTDIR)$(DATADIR)/applications
 	$(INSTALL_DATA) data/gsurf.desktop $(DESTDIR)$(DATADIR)/applications/
 
+install-icon:
+	$(MKDIR_P) $(DESTDIR)$(ICONDIR)/scalable/apps
+	$(INSTALL_DATA) data/gsurf.svg $(DESTDIR)$(ICONDIR)/scalable/apps/gsurf.svg
+
+install-man:
+	$(MKDIR_P) $(DESTDIR)$(MANDIR)/man1
+	sed 's|@DATADIR@|$(DATADIR)|g' data/gsurf.1 > $(DESTDIR)$(MANDIR)/man1/gsurf.1
+	chmod 644 $(DESTDIR)$(MANDIR)/man1/gsurf.1
+
 # Uninstall
 .PHONY: uninstall
 uninstall:
@@ -221,3 +232,5 @@ uninstall:
 	rm -f $(DESTDIR)$(TYPELIBDIR)/$(TYPELIB_FILE)
 	rm -rf $(DESTDIR)$(MODULEDIR)
 	rm -f $(DESTDIR)$(DATADIR)/applications/gsurf.desktop
+	rm -f $(DESTDIR)$(ICONDIR)/scalable/apps/gsurf.svg
+	rm -f $(DESTDIR)$(MANDIR)/man1/gsurf.1

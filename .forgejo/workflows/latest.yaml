@@ -1,0 +1,87 @@
+name: Latest AppImage
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  latest:
+    runs-on: linux-amd64
+    container:
+      image: git.podbielniak.com/zachpodbielniak/build-container:43
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch submodules
+        run: |
+          git config --global url."https://git.podbielniak.com/".insteadOf "git@git-ssh.podbielniak.com:"
+          git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
+          git submodule update --init --recursive
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            webkit2gtk4.1-devel gtk3-devel javascriptcoregtk4.1-devel \
+            glib2-devel gobject-introspection-devel \
+            libsoup3-devel libdex-devel libpng-devel json-glib-devel \
+            libyaml-devel make gcc pkgconf
+
+      - name: Download appimagetool
+        run: |
+          curl -L -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+
+      - name: Build AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          make MCP=1 APPIMAGETOOL=appimagetool appimage
+
+      - name: Update latest release
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          VERSION=$(grep '^VERSION_MAJOR\|^VERSION_MINOR\|^VERSION_MICRO' config.mk \
+            | sed 's/.*:= //' | paste -sd '.' -)
+          APPIMAGE="build/release/gsurf-${VERSION}-x86_64.AppImage"
+          API="${{ github.server_url }}/api/v1/repos/${{ github.repository }}"
+
+          # delete existing latest release if present
+          LATEST_ID=$(curl -s \
+            "${API}/releases/tags/latest" \
+            -H "Authorization: token ${FORGEJO_TOKEN}" | jq -r '.id // empty')
+
+          if [ -n "${LATEST_ID}" ]; then
+            curl -sf -X DELETE \
+              "${API}/releases/${LATEST_ID}" \
+              -H "Authorization: token ${FORGEJO_TOKEN}"
+          fi
+
+          # delete existing latest tag if present
+          curl -s -X DELETE \
+            "${API}/tags/latest" \
+            -H "Authorization: token ${FORGEJO_TOKEN}" || true
+
+          # create new latest release
+          RELEASE_ID=$(curl -sf -X POST \
+            "${API}/releases" \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"tag_name\": \"latest\",
+              \"target_commitish\": \"${{ github.sha }}\",
+              \"name\": \"Latest (v${VERSION})\",
+              \"body\": \"Latest build from master (v${VERSION})\",
+              \"draft\": false,
+              \"prerelease\": false
+            }" | jq -r '.id')
+
+          # upload AppImage
+          curl -sf -X POST \
+            "${API}/releases/${RELEASE_ID}/assets?name=gsurf-latest-x86_64.AppImage" \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -F "attachment=@${APPIMAGE}"

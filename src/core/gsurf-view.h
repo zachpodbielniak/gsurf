@@ -93,6 +93,14 @@ struct _GsurfViewClass
 	void         (*find_previous)               (GsurfView *self);
 	void         (*set_cookie_accept_policy)    (GsurfView *self, gint policy);
 	void         (*set_proxy)                   (GsurfView *self, const gchar *uri);
+	void         (*copy_uri)                    (GsurfView *self);
+	gchar       *(*read_clipboard_text)         (GsurfView *self);
+	void         (*add_user_script_full)        (GsurfView *self, const gchar *source,
+	                                             gboolean at_end, const gchar *const *allow);
+	void         (*add_user_style_full)         (GsurfView *self, const gchar *css,
+	                                             const gchar *const *allow);
+	void         (*add_content_filter)          (GsurfView *self, const gchar *identifier,
+	                                             const gchar *json_rules);
 
 	gpointer padding[8];
 };
@@ -249,11 +257,79 @@ void gsurf_view_set_cookie_accept_policy(GsurfView *self, gint policy);
  */
 void gsurf_view_set_proxy(GsurfView *self, const gchar *uri);
 
+/**
+ * gsurf_view_copy_uri:
+ * @self: a #GsurfView
+ *
+ * Copies the current URI to the clipboard.
+ */
+void gsurf_view_copy_uri(GsurfView *self);
+
+/**
+ * gsurf_view_read_clipboard_text:
+ * @self: a #GsurfView
+ *
+ * Returns: (transfer full) (nullable): the clipboard text
+ */
+gchar *gsurf_view_read_clipboard_text(GsurfView *self);
+
+/**
+ * gsurf_view_add_user_script_for:
+ * @self: a #GsurfView
+ * @source: the JavaScript source
+ * @at_end: inject at document end (%TRUE) or start (%FALSE)
+ * @allow: (nullable) (array zero-terminated=1): URL allow-patterns, %NULL = all
+ *
+ * Injects a user script, optionally scoped to URLs matching @allow.
+ */
+void gsurf_view_add_user_script_for(GsurfView *self, const gchar *source,
+                                    gboolean at_end, const gchar *const *allow);
+
+/**
+ * gsurf_view_add_user_style_for:
+ * @self: a #GsurfView
+ * @css: the CSS source
+ * @allow: (nullable) (array zero-terminated=1): URL allow-patterns, %NULL = all
+ *
+ * Applies a user stylesheet, optionally scoped to URLs matching @allow.
+ */
+void gsurf_view_add_user_style_for(GsurfView *self, const gchar *css, const gchar *const *allow);
+
+/**
+ * gsurf_view_add_content_filter:
+ * @self: a #GsurfView
+ * @identifier: a stable id for the compiled filter
+ * @json_rules: a WebKit content-blocker JSON ruleset
+ *
+ * Compiles and applies a content-blocker ruleset (sub-resource blocking).
+ */
+void gsurf_view_add_content_filter(GsurfView *self, const gchar *identifier, const gchar *json_rules);
+
+/**
+ * gsurf_view_get_hovered_uri:
+ * @self: a #GsurfView
+ *
+ * Returns: (transfer none) (nullable): the link URI under the pointer
+ */
+const gchar *gsurf_view_get_hovered_uri(GsurfView *self);
+
+/**
+ * gsurf_view_set_hovered_uri:
+ * @self: a #GsurfView
+ * @uri: (nullable): the hovered link URI
+ *
+ * Backend setter; emits #GsurfView::hovered-uri-changed.
+ */
+void gsurf_view_set_hovered_uri(GsurfView *self, const gchar *uri);
+
 /* --- Signal emission helpers (for backend subclasses) --- */
 void gsurf_view_emit_load_changed(GsurfView *self, GsurfLoadEvent event);
 void gsurf_view_emit_uri_changed(GsurfView *self, const gchar *uri);
 void gsurf_view_emit_title_changed(GsurfView *self, const gchar *title);
 void gsurf_view_emit_progress_changed(GsurfView *self, gdouble progress);
+void gsurf_view_emit_favicon_changed(GsurfView *self);
+/* Returns a new view to host a popup/new-window, or %NULL to block it. */
+GsurfView *gsurf_view_emit_create_view(GsurfView *self, const gchar *uri);
 void gsurf_view_emit_web_process_terminated(GsurfView *self);
 
 G_END_DECLS

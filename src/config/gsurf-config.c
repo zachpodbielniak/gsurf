@@ -15,6 +15,17 @@ G_DEFINE_TYPE(GsurfConfig, gsurf_config, G_TYPE_OBJECT)
 
 static GsurfConfig *default_config = NULL;
 
+/* Expand a leading "~/" to the user's home directory. */
+static gchar *
+expand_config_path(const gchar *path)
+{
+	if (path == NULL)
+		return NULL;
+	if (path[0] == '~' && path[1] == '/')
+		return g_build_filename(g_get_home_dir(), path + 2, NULL);
+	return g_strdup(path);
+}
+
 /* Reassemble "ctrl+SHIFT+r" into the canonical "Ctrl+Shift+r" so config
  * and dispatch agree regardless of order/case. The key token keeps its
  * original spelling (a GDK keyval name such as "r", "slash", "Return"). */
@@ -135,6 +146,29 @@ parse_keybinds(GsurfConfig *self, YamlMapping *kb)
 }
 
 static void
+parse_mousebinds(GsurfConfig *self, YamlMapping *mb)
+{
+	GList *keys = yaml_mapping_get_members(mb), *l;
+
+	for (l = keys; l != NULL; l = l->next) {
+		const gchar *keystr = l->data;
+		const gchar *action_str = yaml_mapping_get_string_member(mb, keystr);
+		GsurfAction action;
+		gchar *norm;
+
+		if (action_str == NULL)
+			continue;
+		action = gsurf_action_from_string(action_str);
+		if (action == GSURF_ACTION_NONE)
+			continue;
+		norm = normalize_keystring(keystr);
+		if (norm != NULL)
+			g_hash_table_replace(self->mousebinds, norm, GUINT_TO_POINTER(action));
+	}
+	g_list_free(keys);
+}
+
+static void
 parse_root(GsurfConfig *self, YamlMapping *root)
 {
 	YamlMapping *m;
@@ -191,6 +225,53 @@ parse_root(GsurfConfig *self, YamlMapping *root)
 	m = yaml_mapping_get_mapping_member(root, "keybinds");
 	if (m != NULL)
 		parse_keybinds(self, m);
+
+	/* mousebinds: */
+	m = yaml_mapping_get_mapping_member(root, "mousebinds");
+	if (m != NULL)
+		parse_mousebinds(self, m);
+
+	/* storage: */
+	m = yaml_mapping_get_mapping_member(root, "storage");
+	if (m != NULL) {
+		if (yaml_mapping_has_member(m, "cookie_jar")) {
+			g_free(self->cookie_jar);
+			self->cookie_jar = expand_config_path(yaml_mapping_get_string_member(m, "cookie_jar"));
+		}
+		if (yaml_mapping_has_member(m, "data_dir")) {
+			g_free(self->data_dir);
+			self->data_dir = expand_config_path(yaml_mapping_get_string_member(m, "data_dir"));
+		}
+		if (yaml_mapping_has_member(m, "cache_dir")) {
+			g_free(self->cache_dir);
+			self->cache_dir = expand_config_path(yaml_mapping_get_string_member(m, "cache_dir"));
+		}
+		if (yaml_mapping_has_member(m, "enable_disk_cache"))
+			self->enable_disk_cache = yaml_mapping_get_boolean_member(m, "enable_disk_cache");
+	}
+
+	/* network: */
+	m = yaml_mapping_get_mapping_member(root, "network");
+	if (m != NULL) {
+		YamlMapping *proxy = yaml_mapping_get_mapping_member(m, "proxy");
+		if (proxy != NULL) {
+			if (yaml_mapping_has_member(proxy, "mode")) {
+				g_free(self->proxy_mode);
+				self->proxy_mode = g_strdup(yaml_mapping_get_string_member(proxy, "mode"));
+			}
+			if (yaml_mapping_has_member(proxy, "uri")) {
+				g_free(self->proxy_uri);
+				self->proxy_uri = g_strdup(yaml_mapping_get_string_member(proxy, "uri"));
+			}
+		}
+		if (yaml_mapping_has_member(m, "do_not_track"))
+			self->do_not_track = yaml_mapping_get_boolean_member(m, "do_not_track");
+	}
+
+	/* tls: */
+	m = yaml_mapping_get_mapping_member(root, "tls");
+	if (m != NULL && yaml_mapping_has_member(m, "strict"))
+		self->tls_strict = yaml_mapping_get_boolean_member(m, "strict");
 
 	/* modules: (retained for module code to parse its own section) */
 	m = yaml_mapping_get_mapping_member(root, "modules");
@@ -302,6 +383,18 @@ gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keystring)
 	return val != NULL ? (GsurfAction)GPOINTER_TO_UINT(val) : GSURF_ACTION_NONE;
 }
 
+GsurfAction
+gsurf_config_get_mousebind_action(GsurfConfig *self, const gchar *binding)
+{
+	gpointer val;
+
+	g_return_val_if_fail(GSURF_IS_CONFIG(self), GSURF_ACTION_NONE);
+	if (binding == NULL)
+		return GSURF_ACTION_NONE;
+	val = g_hash_table_lookup(self->mousebinds, binding);
+	return val != NULL ? (GsurfAction)GPOINTER_TO_UINT(val) : GSURF_ACTION_NONE;
+}
+
 gpointer
 gsurf_config_get_module_node(GsurfConfig *self, const gchar *module_name)
 {
@@ -336,6 +429,12 @@ gsurf_config_finalize(GObject *object)
 	g_clear_pointer(&self->window_title, g_free);
 	g_clear_pointer(&self->config_path, g_free);
 	g_clear_pointer(&self->keybinds, g_hash_table_unref);
+	g_clear_pointer(&self->mousebinds, g_hash_table_unref);
+	g_clear_pointer(&self->cookie_jar, g_free);
+	g_clear_pointer(&self->data_dir, g_free);
+	g_clear_pointer(&self->cache_dir, g_free);
+	g_clear_pointer(&self->proxy_mode, g_free);
+	g_clear_pointer(&self->proxy_uri, g_free);
 	g_clear_pointer(&self->modules_mapping, yaml_mapping_unref);
 	g_clear_object(&self->settings);
 
@@ -366,8 +465,19 @@ gsurf_config_init(GsurfConfig *self)
 
 	self->settings = gsurf_settings_new();
 	self->keybinds = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	self->mousebinds = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 	self->modules_mapping = NULL;
 	self->config_path = NULL;
+
+	self->cookie_jar = NULL;
+	self->data_dir = NULL;
+	self->cache_dir = NULL;
+	self->enable_disk_cache = TRUE;
+	self->proxy_mode = g_strdup("default");
+	self->proxy_uri = NULL;
+	self->do_not_track = TRUE;
+	self->tls_strict = TRUE;
+	self->ephemeral = FALSE;
 }
 
 GsurfConfig *

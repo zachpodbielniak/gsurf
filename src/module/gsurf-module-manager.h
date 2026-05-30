@@ -88,6 +88,10 @@ void                gsurf_module_manager_dispatch_apply_settings(GsurfModuleMana
 GsurfPermissionVerdict gsurf_module_manager_dispatch_permission(GsurfModuleManager *self, GsurfView *view, const gchar *type, const gchar *origin);
 gchar              *gsurf_module_manager_dispatch_decide_destination(GsurfModuleManager *self, const gchar *uri, const gchar *suggested);
 GsurfTlsDecision    gsurf_module_manager_dispatch_verify_cert(GsurfModuleManager *self, const gchar *host, guint tls_errors);
+GsurfFilterVerdict  gsurf_module_manager_dispatch_filter_request(GsurfModuleManager *self, GsurfView *view, const gchar *uri, gchar **redirect_uri);
+void                gsurf_module_manager_dispatch_populate_menu(GsurfModuleManager *self, GsurfHitTest *hit, GPtrArray *items);
+gchar              *gsurf_module_manager_dispatch_status_text(GsurfModuleManager *self, GsurfView *view);
+void                gsurf_module_manager_dispatch_render_overlay(GsurfModuleManager *self, GsurfView *view, gpointer draw_target);
 
 G_END_DECLS
 

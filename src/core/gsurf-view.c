@@ -8,7 +8,8 @@
 #include "core/gsurf-view.h"
 
 typedef struct {
-	gboolean editing;  /* an editable DOM element is focused in the page */
+	gboolean editing;       /* an editable DOM element is focused in the page */
+	gchar   *hovered_uri;   /* link URI under the pointer, or NULL */
 } GsurfViewPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfView, gsurf_view, G_TYPE_OBJECT)
@@ -19,14 +20,27 @@ enum {
 	SIG_TITLE_CHANGED,
 	SIG_PROGRESS_CHANGED,
 	SIG_WEB_PROCESS_TERMINATED,
+	SIG_HOVERED_URI_CHANGED,
+	SIG_FAVICON_CHANGED,
+	SIG_CREATE_VIEW,
 	N_SIGNALS
 };
 
 static guint signals[N_SIGNALS];
 
 static void
+gsurf_view_finalize(GObject *object)
+{
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(GSURF_VIEW(object));
+	g_clear_pointer(&priv->hovered_uri, g_free);
+	G_OBJECT_CLASS(gsurf_view_parent_class)->finalize(object);
+}
+
+static void
 gsurf_view_class_init(GsurfViewClass *klass)
 {
+	G_OBJECT_CLASS(klass)->finalize = gsurf_view_finalize;
+
 	/**
 	 * GsurfView::load-changed:
 	 * @view: the view
@@ -79,6 +93,40 @@ gsurf_view_class_init(GsurfViewClass *klass)
 		"web-process-terminated", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 0);
+
+	/**
+	 * GsurfView::hovered-uri-changed:
+	 * @view: the view
+	 * @uri: the link URI under the pointer, or %NULL
+	 */
+	signals[SIG_HOVERED_URI_CHANGED] = g_signal_new(
+		"hovered-uri-changed", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 1, G_TYPE_STRING);
+
+	/**
+	 * GsurfView::favicon-changed:
+	 * @view: the view
+	 */
+	signals[SIG_FAVICON_CHANGED] = g_signal_new(
+		"favicon-changed", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 0);
+
+	/**
+	 * GsurfView::create-view:
+	 * @view: the view
+	 * @uri: the requested URI (may be empty)
+	 *
+	 * Emitted to host a popup / new-window request. A handler returns a
+	 * new #GsurfView to use, or %NULL to block it.
+	 *
+	 * Returns: (transfer none) (nullable): the new view, or %NULL
+	 */
+	signals[SIG_CREATE_VIEW] = g_signal_new(
+		"create-view", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_first_wins, NULL, NULL,
+		GSURF_TYPE_VIEW, 1, G_TYPE_STRING);
 }
 
 static void
@@ -376,13 +424,47 @@ gsurf_view_show_inspector(GsurfView *self)
 void
 gsurf_view_add_user_script(GsurfView *self, const gchar *source, gboolean at_end)
 {
-	GSURF_VIEW_VOID_VFUNC(add_user_script) klass->add_user_script(self, source, at_end);
+	GSURF_VIEW_VOID_VFUNC(add_user_script_full) klass->add_user_script_full(self, source, at_end, NULL);
+}
+
+void
+gsurf_view_add_user_script_for(GsurfView *self, const gchar *source, gboolean at_end,
+                               const gchar *const *allow)
+{
+	GSURF_VIEW_VOID_VFUNC(add_user_script_full) klass->add_user_script_full(self, source, at_end, allow);
 }
 
 void
 gsurf_view_add_user_style(GsurfView *self, const gchar *css)
 {
-	GSURF_VIEW_VOID_VFUNC(add_user_style) klass->add_user_style(self, css);
+	GSURF_VIEW_VOID_VFUNC(add_user_style_full) klass->add_user_style_full(self, css, NULL);
+}
+
+void
+gsurf_view_add_user_style_for(GsurfView *self, const gchar *css, const gchar *const *allow)
+{
+	GSURF_VIEW_VOID_VFUNC(add_user_style_full) klass->add_user_style_full(self, css, allow);
+}
+
+void
+gsurf_view_add_content_filter(GsurfView *self, const gchar *identifier, const gchar *json_rules)
+{
+	GSURF_VIEW_VOID_VFUNC(add_content_filter) klass->add_content_filter(self, identifier, json_rules);
+}
+
+void
+gsurf_view_copy_uri(GsurfView *self)
+{
+	GSURF_VIEW_VOID_VFUNC(copy_uri) klass->copy_uri(self);
+}
+
+gchar *
+gsurf_view_read_clipboard_text(GsurfView *self)
+{
+	GsurfViewClass *klass;
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	klass = GSURF_VIEW_GET_CLASS(self);
+	return klass->read_clipboard_text != NULL ? klass->read_clipboard_text(self) : NULL;
 }
 
 void
@@ -422,6 +504,44 @@ gsurf_view_set_proxy(GsurfView *self, const gchar *uri)
 }
 
 #undef GSURF_VIEW_VOID_VFUNC
+
+const gchar *
+gsurf_view_get_hovered_uri(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->hovered_uri;
+}
+
+void
+gsurf_view_set_hovered_uri(GsurfView *self, const gchar *uri)
+{
+	GsurfViewPrivate *priv;
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	priv = gsurf_view_get_instance_private(self);
+	if (g_strcmp0(priv->hovered_uri, uri) == 0)
+		return;
+	g_free(priv->hovered_uri);
+	priv->hovered_uri = g_strdup(uri);
+	g_signal_emit(self, signals[SIG_HOVERED_URI_CHANGED], 0, priv->hovered_uri);
+}
+
+void
+gsurf_view_emit_favicon_changed(GsurfView *self)
+{
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_signal_emit(self, signals[SIG_FAVICON_CHANGED], 0);
+}
+
+GsurfView *
+gsurf_view_emit_create_view(GsurfView *self, const gchar *uri)
+{
+	GsurfView *result = NULL;
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	g_signal_emit(self, signals[SIG_CREATE_VIEW], 0, uri ? uri : "", &result);
+	return result;
+}
 
 /* --- Signal emission helpers --- */
 

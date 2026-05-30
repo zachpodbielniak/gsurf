@@ -87,8 +87,9 @@ module that runs its own server lifecycle on `activate()`.
 ## Tests / running
 
 ```sh
-make test                                   # headless GLib tests (38 cases)
-xvfb-run -a ./build/release/gsurf about:blank   # headless GUI smoke test
+make test                                   # headless GLib tests (45 cases)
+make test-gui                               # xvfb-gated GUI smoke test (skips if no xvfb-run)
+xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 ```
 
 Test layout (`tests/test-*.c`, auto-discovered): `test-version`, `test-enums`
@@ -97,8 +98,17 @@ match), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
 keybind lookup, module nodes, bad-input handling), `test-manager` (loading,
 enabled gating, priority, input passthrough, default verdicts, and every hook
 dispatch through the real module .so files), `test-modules` (search-engines/
-history/adblock). The GTK/WebKit view+window layer needs a display and web
-process, so it is exercised by ad-hoc Xvfb harnesses rather than `make test`.
+history/adblock), `test-boxed` (the boxed value types: new/copy/free, getters,
+setters, deep-copy independence). The GTK/WebKit view+window layer needs a
+display and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb
+harnesses rather than `make test`.
+
+Packaging targets: `make appimage` builds a self-contained AppImage (bundles the
+binary, `libgsurf`, all modules, desktop file + SVG icon; needs `appimagetool` on
+PATH or `APPIMAGETOOL=`). `make install` also installs `data/gsurf.desktop`, the
+`data/gsurf.svg` hicolor icon, and the `data/gsurf.1` man page. CI lives in
+`.forgejo/workflows/` (`ci.yaml`: build + `test` + `test-gui`; `latest.yaml`:
+AppImage release).
 
 The `/run`, `/verify`, and `/code-review` skills are available for driving and
 reviewing the app.

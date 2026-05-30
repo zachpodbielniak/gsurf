@@ -27,10 +27,22 @@
 #include "config/gsurf-config.h"
 #include "config/gsurf-config-compiler.h"
 
+/* Boxed types */
+#include "boxed/gsurf-hit-test.h"
+#include "boxed/gsurf-certificate.h"
+#include "boxed/gsurf-navigation-action.h"
+#include "boxed/gsurf-menu-item.h"
+#include "boxed/gsurf-uri-parameters.h"
+#include "boxed/gsurf-keybind.h"
+#include "boxed/gsurf-mousebind.h"
+
 /* Core classes */
 #include "core/gsurf-view.h"
 #include "core/gsurf-backend.h"
 #include "core/gsurf-application.h"
+#include "core/gsurf-download.h"
+#include "core/gsurf-find-controller.h"
+#include "core/gsurf-permission-request.h"
 
 /* Window */
 #include "window/gsurf-window.h"
@@ -48,15 +60,13 @@
 #include "interfaces/gsurf-permission-handler.h"
 #include "interfaces/gsurf-download-handler.h"
 #include "interfaces/gsurf-cert-handler.h"
+#include "interfaces/gsurf-request-filter.h"
+#include "interfaces/gsurf-status-provider.h"
+#include "interfaces/gsurf-context-menu-provider.h"
+#include "interfaces/gsurf-render-overlay.h"
 
 /* Utilities */
 #include "util/gsurf-keys.h"
-
-/*
- * Additional subsystem headers are added here as they are implemented:
- *   boxed/   more interfaces/   util/
- * (see the project plan for the full layout)
- */
 
 #undef GSURF_INSIDE
 

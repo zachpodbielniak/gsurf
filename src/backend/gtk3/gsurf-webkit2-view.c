@@ -7,6 +7,8 @@
 
 #include "backend/gtk3/gsurf-webkit2-view.h"
 #include "module/gsurf-module-manager.h"
+#include "boxed/gsurf-hit-test.h"
+#include "boxed/gsurf-menu-item.h"
 
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
@@ -93,6 +95,86 @@ on_download_started(WebKitWebContext *context, WebKitDownload *download, gpointe
 {
 	g_signal_connect(download, "decide-destination",
 		G_CALLBACK(on_download_decide_destination), user_data);
+}
+
+/* A context-menu item contributed by a module: run its shell command. */
+static void
+on_menu_action_activate(GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	const gchar *command = g_object_get_data(G_OBJECT(action), "gsurf-command");
+	g_autoptr(GError) error = NULL;
+
+	if (command != NULL && !g_spawn_command_line_async(command, &error))
+		g_warning("gsurf context-menu: %s", error ? error->message : "spawn failed");
+}
+
+/* Build a GsurfHitTest from a WebKit hit-test result. */
+static GsurfHitTest *
+hit_test_from_webkit(WebKitHitTestResult *r)
+{
+	GsurfHitTest *ht = gsurf_hit_test_new();
+	guint ctx = 0;
+
+	if (webkit_hit_test_result_context_is_link(r)) {
+		ctx |= GSURF_HIT_TEST_LINK;
+		gsurf_hit_test_set_link_uri(ht, webkit_hit_test_result_get_link_uri(r));
+		gsurf_hit_test_set_link_label(ht, webkit_hit_test_result_get_link_label(r));
+	}
+	if (webkit_hit_test_result_context_is_image(r)) {
+		ctx |= GSURF_HIT_TEST_IMAGE;
+		gsurf_hit_test_set_image_uri(ht, webkit_hit_test_result_get_image_uri(r));
+	}
+	if (webkit_hit_test_result_context_is_media(r)) {
+		ctx |= GSURF_HIT_TEST_MEDIA;
+		gsurf_hit_test_set_media_uri(ht, webkit_hit_test_result_get_media_uri(r));
+	}
+	if (webkit_hit_test_result_context_is_editable(r))
+		ctx |= GSURF_HIT_TEST_EDITABLE;
+	if (webkit_hit_test_result_context_is_scrollbar(r))
+		ctx |= GSURF_HIT_TEST_SCROLLBAR;
+	gsurf_hit_test_set_context(ht, ctx);
+	return ht;
+}
+
+/* Let context-menu-provider modules contribute entries to the menu. */
+static gboolean
+on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu, GdkEvent *event,
+                WebKitHitTestResult *hit_result, gpointer user_data)
+{
+	GsurfHitTest *hit = hit_test_from_webkit(hit_result);
+	GPtrArray *items = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_menu_item_free);
+	guint i;
+
+	gsurf_module_manager_dispatch_populate_menu(gsurf_module_manager_get_default(),
+		hit, items);
+
+	if (items->len > 0)
+		webkit_context_menu_append(menu, webkit_context_menu_item_new_separator());
+
+	for (i = 0; i < items->len; i++) {
+		GsurfMenuItem *mi = g_ptr_array_index(items, i);
+		g_autofree gchar *action_name = NULL;
+		GSimpleAction *act;
+
+		if (gsurf_menu_item_get_is_separator(mi)) {
+			webkit_context_menu_append(menu, webkit_context_menu_item_new_separator());
+			continue;
+		}
+		action_name = g_strdup_printf("gsurf-menu-%u", i);
+		act = g_simple_action_new(action_name, NULL);
+		g_object_set_data_full(G_OBJECT(act), "gsurf-command",
+			g_strdup(gsurf_menu_item_get_arg(mi)), g_free);
+		g_signal_connect(act, "activate", G_CALLBACK(on_menu_action_activate), NULL);
+		webkit_context_menu_append(menu,
+			webkit_context_menu_item_new_from_gaction(G_ACTION(act),
+				gsurf_menu_item_get_label(mi), NULL));
+		g_object_unref(act);
+	}
+
+	g_ptr_array_unref(items);
+	gsurf_hit_test_free(hit);
+	return FALSE;   /* keep the (augmented) menu */
 }
 
 static gboolean
@@ -353,7 +435,8 @@ gsurf_webkit2_view_show_inspector(GsurfView *view)
 }
 
 static void
-gsurf_webkit2_view_add_user_script(GsurfView *view, const gchar *source, gboolean at_end)
+gsurf_webkit2_view_add_user_script_full(GsurfView *view, const gchar *source,
+                                        gboolean at_end, const gchar *const *allow)
 {
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
 	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
@@ -362,22 +445,124 @@ gsurf_webkit2_view_add_user_script(GsurfView *view, const gchar *source, gboolea
 	script = webkit_user_script_new(source, WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
 		at_end ? WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END
 		       : WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
-		NULL, NULL);
+		(const gchar * const *)allow, NULL);
 	webkit_user_content_manager_add_script(ucm, script);
 	webkit_user_script_unref(script);
 }
 
 static void
-gsurf_webkit2_view_add_user_style(GsurfView *view, const gchar *css)
+gsurf_webkit2_view_add_user_style_full(GsurfView *view, const gchar *css,
+                                       const gchar *const *allow)
 {
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
 	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
 	WebKitUserStyleSheet *sheet;
 
 	sheet = webkit_user_style_sheet_new(css, WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
-		WEBKIT_USER_STYLE_LEVEL_USER, NULL, NULL);
+		WEBKIT_USER_STYLE_LEVEL_USER, (const gchar * const *)allow, NULL);
 	webkit_user_content_manager_add_style_sheet(ucm, sheet);
 	webkit_user_style_sheet_unref(sheet);
+}
+
+/* --- content filter (sub-resource adblock) --- */
+typedef struct { WebKitWebView *webview; gchar *id; } FilterCtx;
+
+static void
+on_filter_saved(GObject *source, GAsyncResult *res, gpointer data)
+{
+	FilterCtx *ctx = data;
+	WebKitUserContentFilter *filter;
+	g_autoptr(GError) error = NULL;
+
+	filter = webkit_user_content_filter_store_save_finish(
+		WEBKIT_USER_CONTENT_FILTER_STORE(source), res, &error);
+	if (filter != NULL) {
+		webkit_user_content_manager_add_filter(
+			webkit_web_view_get_user_content_manager(ctx->webview), filter);
+		webkit_user_content_filter_unref(filter);
+	} else if (error != NULL) {
+		g_warning("gsurf: content filter '%s': %s", ctx->id, error->message);
+	}
+	g_free(ctx->id);
+	g_free(ctx);
+}
+
+static void
+gsurf_webkit2_view_add_content_filter(GsurfView *view, const gchar *identifier,
+                                      const gchar *json_rules)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	g_autofree gchar *dir = g_build_filename(g_get_user_cache_dir(), "gsurf", "filters", NULL);
+	WebKitUserContentFilterStore *store;
+	GBytes *bytes;
+	FilterCtx *ctx;
+
+	g_mkdir_with_parents(dir, 0755);
+	store = webkit_user_content_filter_store_new(dir);
+	bytes = g_bytes_new(json_rules, strlen(json_rules));
+
+	ctx = g_new0(FilterCtx, 1);
+	ctx->webview = self->webview;
+	ctx->id = g_strdup(identifier);
+	webkit_user_content_filter_store_save(store, identifier, bytes, NULL,
+		on_filter_saved, ctx);
+
+	g_bytes_unref(bytes);
+	g_object_unref(store);
+}
+
+/* --- clipboard --- */
+static void
+gsurf_webkit2_view_copy_uri(GsurfView *view)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	const gchar *uri = webkit_web_view_get_uri(self->webview);
+	GtkClipboard *cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+
+	if (uri != NULL)
+		gtk_clipboard_set_text(cb, uri, -1);
+}
+
+static gchar *
+gsurf_webkit2_view_read_clipboard_text(GsurfView *view)
+{
+	GtkClipboard *cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
+	return gtk_clipboard_wait_for_text(cb);
+}
+
+/* --- snapshot (PNG) --- */
+static void
+gsurf_webkit2_view_get_snapshot_async(GsurfView *view, GCancellable *cancellable,
+                                      GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	webkit_web_view_get_snapshot(self->webview,
+		WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE,
+		cancellable, callback, user_data);
+}
+
+static cairo_status_t
+png_writer(void *closure, const unsigned char *data, unsigned int length)
+{
+	g_byte_array_append((GByteArray *)closure, data, length);
+	return CAIRO_STATUS_SUCCESS;
+}
+
+static GBytes *
+gsurf_webkit2_view_get_snapshot_finish(GsurfView *view, GAsyncResult *result, GError **error)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	cairo_surface_t *surface;
+	GByteArray *png;
+
+	surface = webkit_web_view_get_snapshot_finish(self->webview, result, error);
+	if (surface == NULL)
+		return NULL;
+
+	png = g_byte_array_new();
+	cairo_surface_write_to_png_stream(surface, png_writer, png);
+	cairo_surface_destroy(surface);
+	return g_byte_array_free_to_bytes(png);
 }
 
 static void
@@ -455,6 +640,37 @@ gsurf_webkit2_view_set_proxy(GsurfView *view, const gchar *uri)
 	G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
+static void
+on_mouse_target_changed(WebKitWebView *wv, WebKitHitTestResult *hit,
+                        guint modifiers, gpointer user_data)
+{
+	GsurfWebkit2View *self = user_data;
+	const gchar *uri = webkit_hit_test_result_context_is_link(hit)
+		? webkit_hit_test_result_get_link_uri(hit) : NULL;
+	gsurf_view_set_hovered_uri(GSURF_VIEW(self), uri);
+}
+
+static void
+on_notify_favicon(WebKitWebView *wv, GParamSpec *pspec, gpointer user_data)
+{
+	gsurf_view_emit_favicon_changed(GSURF_VIEW(user_data));
+}
+
+/* WebKit asks us to provide a view for a popup / target=_blank. Let the
+ * host create a tab; return its WebKitWebView so WebKit loads into it. */
+static GtkWidget *
+on_create(WebKitWebView *wv, WebKitNavigationAction *action, gpointer user_data)
+{
+	GsurfWebkit2View *self = user_data;
+	WebKitURIRequest *req = webkit_navigation_action_get_request(action);
+	const gchar *uri = req ? webkit_uri_request_get_uri(req) : NULL;
+	GsurfView *newview = gsurf_view_emit_create_view(GSURF_VIEW(self), uri);
+
+	if (newview != NULL)
+		return GTK_WIDGET(gsurf_view_get_native_widget(newview));
+	return NULL;
+}
+
 /* Content script (document-start, all frames): reports whether an
  * editable element is focused so the modal layer can pass keys through
  * to form fields without a manual "insert" toggle. */
@@ -474,6 +690,44 @@ on_focus_message(WebKitUserContentManager *ucm, WebKitJavascriptResult *result, 
 	GsurfWebkit2View *self = user_data;
 	JSCValue *value = webkit_javascript_result_get_js_value(result);
 	gsurf_view_set_editing(GSURF_VIEW(self), jsc_value_to_boolean(value));
+}
+
+/* Apply the storage/network/TLS/cookie settings from the active config to
+ * the view's (shared) web context. */
+static void
+gsurf_webkit2_view_apply_context_config(GsurfWebkit2View *self)
+{
+	GsurfConfig *cfg = gsurf_config_get_default();
+	WebKitWebContext *ctx = webkit_web_view_get_context(self->webview);
+
+	if (cfg == NULL)
+		return;
+
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	webkit_web_context_set_tls_errors_policy(ctx,
+		cfg->tls_strict ? WEBKIT_TLS_ERRORS_POLICY_FAIL : WEBKIT_TLS_ERRORS_POLICY_IGNORE);
+	webkit_web_context_set_cache_model(ctx,
+		cfg->enable_disk_cache ? WEBKIT_CACHE_MODEL_WEB_BROWSER
+		                       : WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
+
+	if (!cfg->ephemeral && cfg->cookie_jar != NULL && *cfg->cookie_jar != '\0') {
+		WebKitCookieManager *cm = webkit_web_context_get_cookie_manager(ctx);
+		g_autofree gchar *dir = g_path_get_dirname(cfg->cookie_jar);
+		g_mkdir_with_parents(dir, 0755);
+		webkit_cookie_manager_set_persistent_storage(cm, cfg->cookie_jar,
+			WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+	}
+
+	if (g_strcmp0(cfg->proxy_mode, "none") == 0) {
+		webkit_web_context_set_network_proxy_settings(ctx,
+			WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, NULL);
+	} else if (g_strcmp0(cfg->proxy_mode, "custom") == 0 &&
+	           cfg->proxy_uri != NULL && *cfg->proxy_uri != '\0') {
+		WebKitNetworkProxySettings *ps = webkit_network_proxy_settings_new(cfg->proxy_uri, NULL);
+		webkit_web_context_set_network_proxy_settings(ctx, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, ps);
+		webkit_network_proxy_settings_free(ps);
+	}
+	G_GNUC_END_IGNORE_DEPRECATIONS
 }
 
 /* --- GObject lifecycle --- */
@@ -520,6 +774,17 @@ gsurf_webkit2_view_constructed(GObject *object)
 		G_CALLBACK(on_load_failed_tls), self);
 	g_signal_connect(webkit_web_view_get_context(self->webview), "download-started",
 		G_CALLBACK(on_download_started), self);
+	g_signal_connect(self->webview, "mouse-target-changed",
+		G_CALLBACK(on_mouse_target_changed), self);
+	g_signal_connect(self->webview, "notify::favicon",
+		G_CALLBACK(on_notify_favicon), self);
+	g_signal_connect(self->webview, "create",
+		G_CALLBACK(on_create), self);
+	g_signal_connect(self->webview, "context-menu",
+		G_CALLBACK(on_context_menu), self);
+
+	/* Apply storage/cookie/network/TLS config from the active config. */
+	gsurf_webkit2_view_apply_context_config(self);
 
 	/* Let script-injector modules add user scripts/styles to this view. */
 	gsurf_module_manager_dispatch_inject_scripts(
@@ -565,10 +830,15 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->run_javascript_async = gsurf_webkit2_view_run_javascript_async;
 	view_class->run_javascript_finish = gsurf_webkit2_view_run_javascript_finish;
 	view_class->get_native_widget = gsurf_webkit2_view_get_native_widget;
+	view_class->get_snapshot_async = gsurf_webkit2_view_get_snapshot_async;
+	view_class->get_snapshot_finish = gsurf_webkit2_view_get_snapshot_finish;
 	view_class->show_inspector = gsurf_webkit2_view_show_inspector;
-	view_class->add_user_script = gsurf_webkit2_view_add_user_script;
-	view_class->add_user_style = gsurf_webkit2_view_add_user_style;
+	view_class->add_user_script_full = gsurf_webkit2_view_add_user_script_full;
+	view_class->add_user_style_full = gsurf_webkit2_view_add_user_style_full;
 	view_class->clear_user_content = gsurf_webkit2_view_clear_user_content;
+	view_class->add_content_filter = gsurf_webkit2_view_add_content_filter;
+	view_class->copy_uri = gsurf_webkit2_view_copy_uri;
+	view_class->read_clipboard_text = gsurf_webkit2_view_read_clipboard_text;
 	view_class->find = gsurf_webkit2_view_find;
 	view_class->find_next = gsurf_webkit2_view_find_next;
 	view_class->find_previous = gsurf_webkit2_view_find_previous;

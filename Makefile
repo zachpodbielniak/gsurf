@@ -16,7 +16,7 @@
 #   make GTK_BACKEND=gtk4 - Build against WebKitGTK 6.0 / GTK4
 
 .DEFAULT_GOAL := all
-.PHONY: all lib gsurf gir modules test deps check-deps
+.PHONY: all lib gsurf gir modules test test-gui appimage deps check-deps
 
 # Include configuration
 include config.mk
@@ -167,6 +167,46 @@ test: lib modules $(TEST_BINS)
 
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
+
+# Headless GUI smoke test (needs a display + web process): launch the
+# browser under Xvfb on about:blank and confirm it stays alive briefly.
+# Gated on xvfb-run being available so `make test` stays pure-headless.
+.PHONY: test-gui
+test-gui: gsurf modules
+	@if ! command -v xvfb-run >/dev/null 2>&1; then \
+		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi
+	@echo "Running headless GUI smoke test..."
+	@GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
+	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \
+	 timeout 15 xvfb-run -a $(OUTDIR)/gsurf about:blank >/dev/null 2>&1; \
+	 st=$$?; \
+	 if [ $$st -eq 124 ]; then \
+		echo "  PASS (ran until timeout without crashing)"; \
+	 elif [ $$st -eq 0 ]; then \
+		echo "  PASS (exited cleanly)"; \
+	 else \
+		echo "  FAIL (exit $$st)"; exit 1; \
+	 fi
+
+# Build an AppImage. Installs into a self-contained AppDir, drops an AppRun
+# that points LD_LIBRARY_PATH/GSURF_MODULE_PATH at the bundle, then runs
+# appimagetool if present (otherwise leaves the populated AppDir in place).
+.PHONY: appimage
+appimage: all
+	rm -rf $(APPDIR)
+	$(MAKE) install DESTDIR=$(abspath $(APPDIR)) PREFIX=/usr LIBDIR=/usr/lib \
+		MODULEDIR=/usr/lib/gsurf/modules BUILD_MODULES=1 $(if $(filter 1,$(MCP_AVAILABLE)),MCP=1)
+	printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport LD_LIBRARY_PATH="$$HERE/usr/lib:$$LD_LIBRARY_PATH"\nexport GSURF_MODULE_PATH="$$HERE/usr/lib/gsurf/modules"\nexec "$$HERE/usr/bin/gsurf" "$$@"\n' > $(APPDIR)/AppRun
+	chmod +x $(APPDIR)/AppRun
+	cp data/gsurf.desktop $(APPDIR)/gsurf.desktop
+	cp data/gsurf.svg $(APPDIR)/gsurf.svg
+	@if command -v $(APPIMAGETOOL) >/dev/null 2>&1; then \
+		$(APPIMAGETOOL) $(APPDIR) $(OUTDIR)/gsurf-$(VERSION)-x86_64.AppImage && \
+		echo "Wrote $(OUTDIR)/gsurf-$(VERSION)-x86_64.AppImage"; \
+	else \
+		echo "$(APPIMAGETOOL) not found; populated AppDir at $(APPDIR)"; \
+		echo "Install appimagetool and re-run, or: APPIMAGETOOL=/path/to/appimagetool make appimage"; \
+	fi
 
 # Check dependencies
 check-deps:

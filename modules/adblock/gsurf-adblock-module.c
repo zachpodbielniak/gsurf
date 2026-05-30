@@ -4,16 +4,23 @@
  * Copyright (C) 2026 Zach Podbielniak
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Implements #GsurfNavigationHook: blocks navigations whose host is in a
- * blocklist (loaded from hosts-format files and an inline list). This is
- * the navigation-level layer; sub-resource filtering via WebKit content
- * filters is a planned addition. A feature surf itself lacks.
+ * Two-layer blocking, a feature surf itself lacks:
+ *   - #GsurfNavigationHook vetoes top-level navigations whose host is in
+ *     the blocklist.
+ *   - #GsurfScriptInjector compiles the blocklist into a WebKit
+ *     content-blocker ruleset and applies it per view, so sub-resources
+ *     (scripts, images, trackers, XHR) are blocked too.
+ * Blocklists load from hosts-format files and inline lists.
  */
 
 #include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
 #include <string.h>
+
+/* WebKit compiles the whole ruleset up front; cap the domain count so a
+ * pathologically large hosts file can't make compilation pathological. */
+#define GSURF_ADBLOCK_MAX_DOMAINS 100000
 
 #define GSURF_TYPE_ADBLOCK_MODULE (gsurf_adblock_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfAdblockModule, gsurf_adblock_module,
@@ -24,13 +31,16 @@ struct _GsurfAdblockModule
 	GsurfModule parent_instance;
 	GHashTable *blocked;     /* host (gchar*) -> 1 */
 	GHashTable *whitelist;   /* host (gchar*) -> 1 */
+	gchar      *filter_json; /* compiled WebKit content-blocker ruleset */
 };
 
 static void gsurf_adblock_nav_init(GsurfNavigationHookInterface *iface);
+static void gsurf_adblock_injector_init(GsurfScriptInjectorInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfAdblockModule, gsurf_adblock_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_NAVIGATION_HOOK, gsurf_adblock_nav_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_NAVIGATION_HOOK, gsurf_adblock_nav_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_SCRIPT_INJECTOR, gsurf_adblock_injector_init))
 
 static gboolean
 host_is_blocked(GsurfAdblockModule *self, const gchar *host)
@@ -80,6 +90,75 @@ static void
 gsurf_adblock_nav_init(GsurfNavigationHookInterface *iface)
 {
 	iface->before_navigate = gsurf_adblock_before_navigate;
+}
+
+/* Compile the blocklist into a WebKit content-blocker JSON ruleset:
+ *   - one block rule whose if-domain lists every blocked host (the "*"
+ *     prefix matches the host and all of its subdomains);
+ *   - one ignore-previous-rules rule for whitelisted hosts (placed last so
+ *     it wins). Returns %NULL when there is nothing to block. */
+static gchar *
+build_filter_json(GsurfAdblockModule *self)
+{
+	GHashTableIter it;
+	gpointer key;
+	GString *s;
+	guint count = 0, total = g_hash_table_size(self->blocked);
+	gboolean first = TRUE;
+
+	if (total == 0)
+		return NULL;
+
+	s = g_string_new("[{\"trigger\":{\"url-filter\":\".*\",\"if-domain\":[");
+	g_hash_table_iter_init(&it, self->blocked);
+	while (g_hash_table_iter_next(&it, &key, NULL)) {
+		if (count >= GSURF_ADBLOCK_MAX_DOMAINS)
+			break;
+		g_string_append_printf(s, "%s\"*%s\"", first ? "" : ",", (const gchar *)key);
+		first = FALSE;
+		count++;
+	}
+	g_string_append(s, "]},\"action\":{\"type\":\"block\"}}");
+
+	if (g_hash_table_size(self->whitelist) > 0) {
+		first = TRUE;
+		g_string_append(s, ",{\"trigger\":{\"url-filter\":\".*\",\"if-domain\":[");
+		g_hash_table_iter_init(&it, self->whitelist);
+		while (g_hash_table_iter_next(&it, &key, NULL)) {
+			g_string_append_printf(s, "%s\"*%s\"", first ? "" : ",", (const gchar *)key);
+			first = FALSE;
+		}
+		g_string_append(s, "]},\"action\":{\"type\":\"ignore-previous-rules\"}}");
+	}
+	g_string_append_c(s, ']');
+
+	if (count < total)
+		g_warning("gsurf adblock: content filter capped at %u of %u domains "
+			"(navigation-level blocking still covers the rest)", count, total);
+
+	return g_string_free(s, FALSE);
+}
+
+static void
+gsurf_adblock_inject(GsurfScriptInjector *injector, GsurfView *view, const gchar *uri)
+{
+	GsurfAdblockModule *self = GSURF_ADBLOCK_MODULE(injector);
+
+	(void) uri;
+	if (view == NULL || self->filter_json == NULL)
+		return;
+	/* Apply once per view (the inject hook also fires on URI commits). */
+	if (g_object_get_data(G_OBJECT(view), "gsurf-adblock-applied") != NULL)
+		return;
+	g_object_set_data(G_OBJECT(view), "gsurf-adblock-applied", GINT_TO_POINTER(1));
+
+	gsurf_view_add_content_filter(view, "gsurf-adblock", self->filter_json);
+}
+
+static void
+gsurf_adblock_injector_init(GsurfScriptInjectorInterface *iface)
+{
+	iface->inject = gsurf_adblock_inject;
 }
 
 static const gchar *gsurf_adblock_get_name(GsurfModule *m) { return "adblock"; }
@@ -173,6 +252,10 @@ gsurf_adblock_configure(GsurfModule *module, gpointer config_ptr)
 	load_sequence(m, "block_lists", load_hosts_file, self);
 	load_sequence(m, "whitelist", add_whitelist, self);
 
+	/* Compile the WebKit content-blocker ruleset once, up front. */
+	g_clear_pointer(&self->filter_json, g_free);
+	self->filter_json = build_filter_json(self);
+
 	g_message("gsurf adblock: %u blocked host(s)", g_hash_table_size(self->blocked));
 }
 
@@ -185,6 +268,7 @@ gsurf_adblock_module_finalize(GObject *object)
 
 	g_clear_pointer(&self->blocked, g_hash_table_unref);
 	g_clear_pointer(&self->whitelist, g_hash_table_unref);
+	g_clear_pointer(&self->filter_json, g_free);
 
 	G_OBJECT_CLASS(gsurf_adblock_module_parent_class)->finalize(object);
 }

@@ -4,9 +4,10 @@
  * Copyright (C) 2026 Zach Podbielniak
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Implements #GsurfInputHandler: a configurable key pipes the active
- * view's URI to an external command (mpv by default). Ports surf's
- * playexternal patch.
+ * Implements #GsurfInputHandler (a configurable key pipes the active
+ * view's URI to an external command, mpv by default) and
+ * #GsurfContextMenuProvider (a "Play externally" entry on link/media
+ * right-click). Ports surf's playexternal patch.
  */
 
 #include <gsurf/gsurf.h>
@@ -25,10 +26,12 @@ struct _GsurfPlayexternalModule
 };
 
 static void gsurf_playexternal_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_playexternal_menu_init(GsurfContextMenuProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfPlayexternalModule, gsurf_playexternal_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_playexternal_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_playexternal_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_CONTEXT_MENU_PROVIDER, gsurf_playexternal_menu_init))
 
 static gboolean
 gsurf_playexternal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -75,6 +78,42 @@ static void
 gsurf_playexternal_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_playexternal_handle_key_event;
+}
+
+/* Add a "Play externally" entry when right-clicking a link or media. The
+ * menu item carries the resolved shell command in its arg; the backend
+ * spawns it on activation. */
+static void
+gsurf_playexternal_populate(GsurfContextMenuProvider *provider, GsurfHitTest *hit,
+                            GPtrArray *items)
+{
+	GsurfPlayexternalModule *self = GSURF_PLAYEXTERNAL_MODULE(provider);
+	const gchar *uri = NULL;
+	GsurfMenuItem *item;
+	g_autofree gchar *quoted = NULL;
+	g_autofree gchar *cmd = NULL;
+
+	if (gsurf_hit_test_context_is_media(hit))
+		uri = gsurf_hit_test_get_media_uri(hit);
+	else if (gsurf_hit_test_context_is_link(hit))
+		uri = gsurf_hit_test_get_link_uri(hit);
+	if (uri == NULL || *uri == '\0')
+		return;
+
+	quoted = g_shell_quote(uri);
+	cmd = g_strdup_printf("%s %s", self->command ? self->command : "mpv --", quoted);
+
+	item = gsurf_menu_item_new();
+	gsurf_menu_item_set_label(item, "Play externally");
+	gsurf_menu_item_set_action(item, "spawn");
+	gsurf_menu_item_set_arg(item, cmd);
+	g_ptr_array_add(items, item);
+}
+
+static void
+gsurf_playexternal_menu_init(GsurfContextMenuProviderInterface *iface)
+{
+	iface->populate = gsurf_playexternal_populate;
 }
 
 static const gchar *gsurf_playexternal_get_name(GsurfModule *m) { return "playexternal"; }

@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: linux-amd64
+    container:
+      image: git.podbielniak.com/zachpodbielniak/build-container:43
+      options: --privileged
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Fetch submodules
+        run: |
+          git config --global url."https://git.podbielniak.com/".insteadOf "git@git-ssh.podbielniak.com:"
+          git config --global url."https://gitlab.com/".insteadOf "git@gitlab.com:"
+          git submodule update --init --recursive
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            webkit2gtk4.1-devel gtk3-devel javascriptcoregtk4.1-devel \
+            glib2-devel gobject-introspection-devel \
+            libsoup3-devel libdex-devel libpng-devel json-glib-devel \
+            libyaml-devel make gcc pkgconf xorg-x11-server-Xvfb
+
+      - name: Show configuration
+        run: make MCP=1 show-config
+
+      - name: Build (lib + binary + modules + MCP)
+        run: make MCP=1
+
+      - name: Build GObject Introspection data
+        run: make MCP=1 BUILD_GIR=1 gir
+
+      - name: Run headless test suite
+        run: make MCP=1 test
+
+      - name: Run headless GUI smoke test
+        run: make MCP=1 test-gui

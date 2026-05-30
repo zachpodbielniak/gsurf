@@ -112,6 +112,11 @@ print_module_list(void)
 
 /* ===== Keybinding dispatch ===== */
 
+/* Forward declarations (definitions appear later in the file). */
+static void       load_uri_rewritten(GsurfView *view, const gchar *input);
+static void       setup_view(GsurfApplication *app, GsurfWindow *window, GsurfView *view);
+static GsurfView *make_tab(GsurfWindow *window, const gchar *uri);
+
 static void
 scroll_js(GsurfView *view, const gchar *js)
 {
@@ -146,6 +151,31 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 	case GSURF_ACTION_SCROLL_BOTTOM:  scroll_js(view, "window.scrollTo(0,document.body.scrollHeight)"); return TRUE;
 	case GSURF_ACTION_PAGE_DOWN:      scroll_js(view, "window.scrollBy(0,window.innerHeight*0.9)"); return TRUE;
 	case GSURF_ACTION_PAGE_UP:        scroll_js(view, "window.scrollBy(0,-window.innerHeight*0.9)"); return TRUE;
+	case GSURF_ACTION_HALF_PAGE_DOWN: scroll_js(view, "window.scrollBy(0,window.innerHeight*0.5)"); return TRUE;
+	case GSURF_ACTION_HALF_PAGE_UP:   scroll_js(view, "window.scrollBy(0,-window.innerHeight*0.5)"); return TRUE;
+	case GSURF_ACTION_FIND_NEXT:      gsurf_view_find_next(view); return TRUE;
+	case GSURF_ACTION_FIND_PREV:      gsurf_view_find_previous(view); return TRUE;
+	case GSURF_ACTION_COPY_URL:       gsurf_view_copy_uri(view); return TRUE;
+	case GSURF_ACTION_PASTE_URL: {
+		g_autofree gchar *text = gsurf_view_read_clipboard_text(view);
+		if (text != NULL && *text != '\0')
+			load_uri_rewritten(view, text);
+		return TRUE;
+	}
+	case GSURF_ACTION_HOME: {
+		GsurfConfig *cfg = gsurf_config_get_default();
+		if (cfg != NULL && cfg->homepage != NULL)
+			load_uri_rewritten(view, cfg->homepage);
+		return TRUE;
+	}
+	case GSURF_ACTION_OPEN_NEW_VIEW: {
+		GsurfConfig *cfg = gsurf_config_get_default();
+		const gchar *hovered = gsurf_view_get_hovered_uri(view);
+		const gchar *uri = (hovered != NULL && *hovered != '\0')
+			? hovered : (cfg != NULL ? cfg->new_view_uri : NULL);
+		make_tab(window, uri);
+		return TRUE;
+	}
 	case GSURF_ACTION_TOGGLE_FULLSCREEN:
 		gsurf_window_set_fullscreen(window, !gsurf_window_get_fullscreen(window));
 		return TRUE;
@@ -189,6 +219,55 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	action = gsurf_config_get_keybind_action(config, keystr);
 	if (action == GSURF_ACTION_NONE)
 		return FALSE;
+
+	return execute_action(app, window, view, action);
+}
+
+/* Build a normalized mousebind string ("Ctrl+Button2", "Button8", …) to
+ * match the keys in the config `mousebinds:` map. */
+static gchar *
+mousebind_to_string(guint button, guint state)
+{
+	GString *s = g_string_new(NULL);
+
+	if (state & GSURF_MOD_CTRL)  g_string_append(s, "Ctrl+");
+	if (state & GSURF_MOD_ALT)   g_string_append(s, "Alt+");
+	if (state & GSURF_MOD_SHIFT) g_string_append(s, "Shift+");
+	if (state & GSURF_MOD_SUPER) g_string_append(s, "Super+");
+	g_string_append_printf(s, "Button%u", button);
+
+	return g_string_free(s, FALSE);
+}
+
+static gboolean
+on_button_press(GsurfWindow *window, guint button, guint state, gpointer user_data)
+{
+	GsurfApplication *app = user_data;
+	GsurfConfig *config = gsurf_application_get_config(app);
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	GsurfView *view = gsurf_window_get_active_view(window);
+	g_autofree gchar *binding = NULL;
+	GsurfAction action;
+
+	/* Modules get first crack at the raw button. */
+	if (gsurf_module_manager_dispatch_mouse_event(mgr, view, button, state))
+		return TRUE;
+
+	binding = mousebind_to_string(button, state);
+	action = gsurf_config_get_mousebind_action(config, binding);
+	if (action == GSURF_ACTION_NONE)
+		return FALSE;
+
+	/* Mouse "open in new view" (middle-click / Ctrl-click) only fires over a
+	 * hovered link. Off a link we pass through so the engine keeps native
+	 * middle-click behavior (paste / autoscroll). */
+	if (action == GSURF_ACTION_OPEN_NEW_VIEW) {
+		const gchar *hovered = (view != NULL) ? gsurf_view_get_hovered_uri(view) : NULL;
+		if (hovered == NULL || *hovered == '\0')
+			return FALSE;
+		make_tab(window, hovered);
+		return TRUE;
+	}
 
 	return execute_action(app, window, view, action);
 }
@@ -252,6 +331,69 @@ on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data)
 		(title && *title) ? title : "",
 		(title && *title) ? " — " : "");
 	gsurf_window_set_title(window, full);
+}
+
+/* A WebKit popup / target=_blank / window.open request: create a fresh
+ * view, add it as a tab, make it active, and return it for the engine to
+ * load the popup URI into. Returns %NULL only if no window is available. */
+static GsurfView *
+on_create_view(GsurfView *source, const gchar *uri, gpointer user_data)
+{
+	GsurfApplication *app = user_data;
+	GsurfWindow *window = gsurf_application_get_active_window(app);
+
+	(void) source;
+	(void) uri; /* the engine drives the load into the returned view */
+
+	if (window == NULL)
+		return NULL;
+
+	/* make_tab adds + activates the view (wiring its signals via
+	 * "view-added") and returns it still owned by the window. */
+	return make_tab(window, NULL);
+}
+
+/* Wire the host-level signals every view needs, regardless of how it was
+ * created (initial view, tab module, or WebKit popup). Invoked from the
+ * window's "view-added" signal so it covers all of them uniformly. */
+static void
+setup_view(GsurfApplication *app, GsurfWindow *window, GsurfView *view)
+{
+	if (g_object_get_data(G_OBJECT(view), "gsurf-wired") != NULL)
+		return;
+	g_object_set_data(G_OBJECT(view), "gsurf-wired", GINT_TO_POINTER(1));
+
+	g_signal_connect(view, "title-changed", G_CALLBACK(on_view_title_changed), window);
+	g_signal_connect(view, "load-changed", G_CALLBACK(on_view_load_changed), NULL);
+	g_signal_connect(view, "create-view", G_CALLBACK(on_create_view), app);
+}
+
+static void
+on_view_added(GsurfWindow *window, GsurfView *view, gpointer user_data)
+{
+	setup_view(GSURF_APPLICATION(user_data), window, view);
+}
+
+/* Create a new view, apply config settings, add it to the window as a tab
+ * and make it active. If @uri is non-NULL, begin loading it (rewritten by
+ * URI-handler modules). Returns the view (owned by the window). */
+static GsurfView *
+make_tab(GsurfWindow *window, const gchar *uri)
+{
+	GsurfConfig *cfg = gsurf_config_get_default();
+	GsurfView *view = gsurf_view_new();
+
+	if (cfg != NULL && cfg->settings != NULL)
+		gsurf_view_apply_settings(view, cfg->settings);
+
+	gsurf_window_add_view(window, view);          /* fires "view-added" -> setup_view */
+	gsurf_window_set_active_view(window, view);
+
+	if (uri != NULL && *uri != '\0')
+		load_uri_rewritten(view, uri);
+
+	g_object_unref(view);                         /* window holds the ref now */
+	return view;
 }
 
 /* ===== main ===== */
@@ -362,24 +504,38 @@ main(int argc, char *argv[])
 	gsurf_window_set_default_size(window, config->window_width, config->window_height);
 	gsurf_window_set_title(window, config->window_title);
 
+	/* Host-level window signals. "view-added" wires every view (initial,
+	 * tab, or popup) uniformly via setup_view, so connect it before the
+	 * first add_view below. */
+	g_signal_connect(window, "key-press", G_CALLBACK(on_key_press), app);
+	g_signal_connect(window, "button-press", G_CALLBACK(on_button_press), app);
+	g_signal_connect(window, "view-added", G_CALLBACK(on_view_added), app);
+
 	view = gsurf_view_new();
 	gsurf_view_apply_settings(view, config->settings);
-	gsurf_window_add_view(window, view);
+	gsurf_window_add_view(window, view);          /* fires "view-added" -> setup_view */
 
 	if (config->default_zoom != 1.0)
 		gsurf_view_set_zoom_level(view, config->default_zoom);
 
-	g_signal_connect(window, "key-press", G_CALLBACK(on_key_press), app);
-	g_signal_connect(view, "title-changed", G_CALLBACK(on_view_title_changed), window);
-	g_signal_connect(view, "load-changed", G_CALLBACK(on_view_load_changed), NULL);
-
 	gsurf_application_add_window(app, window);
+
+	/* Let startup modules (e.g. session restore) know whether a URI was
+	 * given on the command line — a CLI URI takes precedence over them. */
+	g_object_set_data(G_OBJECT(app), "gsurf-cli-uri",
+		(argc > 1) ? (gpointer)argv[1] : NULL);
 
 	/* Activate modules now that the app/window/view exist. */
 	gsurf_module_manager_activate_all(mgr);
 
-	target_uri = (argc > 1) ? argv[1] : config->homepage;
-	load_uri_rewritten(view, target_uri);
+	/* A module (session restore) may have already populated the views and
+	 * flagged startup as handled; otherwise load the CLI URI or homepage. */
+	if (argc > 1) {
+		load_uri_rewritten(view, argv[1]);
+	} else if (g_object_get_data(G_OBJECT(app), "gsurf-startup-handled") == NULL) {
+		target_uri = config->homepage;
+		load_uri_rewritten(view, target_uri);
+	}
 
 	gsurf_window_present(window);
 	if (opt_fullscreen || config->fullscreen_on_start)

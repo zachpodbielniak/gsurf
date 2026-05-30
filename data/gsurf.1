@@ -1,0 +1,91 @@
+.TH GSURF 1 "2026" "gsurf 0.1.0" "User Commands"
+.SH NAME
+gsurf \- GObject Surf, a minimal modular web browser
+.SH SYNOPSIS
+.B gsurf
+.RI [ OPTIONS ]
+.RI [ URI ]
+.SH DESCRIPTION
+.B gsurf
+is a GLib/GObject web browser, a port of the suckless
+.B surf
+browser. Nearly all of its logic lives in the shared library
+.B libgsurf
+so other applications can embed it via GObject Introspection. Features that
+would be surf
+.I patches
+are implemented as runtime-loaded
+.B .so
+modules (tabs, ad blocking, a vim-style modal layer, link hinting, history,
+bookmarks, a find bar, an MCP server for AI control, and more).
+.PP
+Configuration is read from a YAML file and, optionally, a compiled C config.
+Vim-style modal navigation is available through the
+.B modal
+module.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-config =\fIPATH\fR
+Use the specified YAML config file instead of searching the default locations.
+.TP
+.BR \-\-c\-config =\fIPATH\fR
+Use the specified C config file (compiled and loaded at startup).
+.TP
+.B \-\-no\-yaml\-config
+Skip YAML config loading and use the built-in defaults.
+.TP
+.B \-\-no\-c\-config
+Skip C config compilation and loading.
+.TP
+.B \-\-no\-modules
+Do not load any modules.
+.TP
+.B \-\-generate\-yaml\-config
+Print the default YAML configuration to standard output and exit.
+.TP
+.B \-\-generate\-c\-config
+Print the default C configuration to standard output and exit.
+.TP
+.B \-\-list\-modules
+List the available modules and exit.
+.TP
+.BR \-f ", " \-\-fullscreen
+Start in fullscreen mode.
+.TP
+.BR \-v ", " \-\-version
+Print the version (and active backend) and exit.
+.SH KEY BINDINGS
+With the default configuration, common bindings include
+.BR Ctrl+l " (focus the address bar),"
+.BR Ctrl+t / Ctrl+w " (new/close tab),"
+.BR Ctrl+Tab " (next tab),"
+.BR / " (find in page) with " n / N " (next/previous match),"
+.BR f " (vim-style link hints), and"
+.BR Ctrl+ "+/" Ctrl\- " (zoom)."
+The
+.B modal
+module adds vim-style normal-mode keys
+.RB ( h / j / k / l ", " gg / G ", " H / L ", " i ", " Esc ).
+See
+.B \-\-generate\-yaml\-config
+for the full, documented binding set.
+.SH FILES
+.TP
+.I ~/.config/gsurf/config.yaml
+Per-user YAML configuration.
+.TP
+.I ~/.config/gsurf/config.c
+Optional per-user C configuration (compiled at startup).
+.TP
+.I @DATADIR@/gsurf/
+System data directory.
+.SH ENVIRONMENT
+.TP
+.B GSURF_MODULE_PATH
+Override the directory that modules are loaded from.
+.SH SEE ALSO
+.BR surf (1)
+.SH AUTHOR
+Zach Podbielniak.
+.SH BUGS
+Report issues to the project's source repository.

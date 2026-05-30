@@ -69,6 +69,23 @@ on_delete_event(GtkWidget *widget, GdkEvent *event, gpointer user_data)
 	return gsurf_window_emit_close_request(GSURF_WINDOW(self));
 }
 
+static gboolean
+on_view_button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer user_data)
+{
+	GsurfGtk3Window *self = user_data;
+	guint mods;
+
+	if (event->type != GDK_BUTTON_PRESS)
+		return FALSE;
+
+	mods = translate_modifiers(event->state);
+
+	/* Runs before the webview's default handler; returning TRUE consumes
+	 * the button (e.g. side-button history nav) and stops it reaching the
+	 * page, while FALSE lets WebKit handle it normally. */
+	return gsurf_window_emit_button_press(GSURF_WINDOW(self), event->button, mods);
+}
+
 /* --- Vfunc implementations --- */
 
 static void
@@ -105,6 +122,15 @@ gsurf_gtk3_window_insert_view(GsurfWindow *window, GsurfView *view)
 
 	gtk_container_add(GTK_CONTAINER(self->stack), widget);
 	gtk_widget_show(widget);
+
+	/* Route mouse buttons (incl. side history buttons) through the window
+	 * so mousebind config + input modules can act on them. Connect once. */
+	if (g_object_get_data(G_OBJECT(widget), "gsurf-btn-wired") == NULL) {
+		g_object_set_data(G_OBJECT(widget), "gsurf-btn-wired", GINT_TO_POINTER(1));
+		gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
+		g_signal_connect(widget, "button-press-event",
+			G_CALLBACK(on_view_button_press_event), self);
+	}
 }
 
 static void

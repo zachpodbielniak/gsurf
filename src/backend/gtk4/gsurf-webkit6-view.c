@@ -15,6 +15,7 @@
 
 #include <gtk/gtk.h>
 #include <webkit/webkit.h>
+#include <string.h>
 
 struct _GsurfWebkit6View
 {
@@ -246,6 +247,80 @@ gsurf_webkit6_view_clear_user_content(GsurfView *v)
 }
 
 static void
+gsurf_webkit6_view_add_user_script_full(GsurfView *v, const gchar *source,
+                                        gboolean at_end, const gchar *const *allow)
+{
+	WebKitUserContentManager *ucm =
+		webkit_web_view_get_user_content_manager(GSURF_WEBKIT6_VIEW(v)->webview);
+	WebKitUserScript *s = webkit_user_script_new(source,
+		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+		at_end ? WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END
+		       : WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		(const gchar * const *)allow, NULL);
+	webkit_user_content_manager_add_script(ucm, s);
+	webkit_user_script_unref(s);
+}
+
+static void
+gsurf_webkit6_view_add_user_style_full(GsurfView *v, const gchar *css,
+                                       const gchar *const *allow)
+{
+	WebKitUserContentManager *ucm =
+		webkit_web_view_get_user_content_manager(GSURF_WEBKIT6_VIEW(v)->webview);
+	WebKitUserStyleSheet *ss = webkit_user_style_sheet_new(css,
+		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES, WEBKIT_USER_STYLE_LEVEL_USER,
+		(const gchar * const *)allow, NULL);
+	webkit_user_content_manager_add_style_sheet(ucm, ss);
+	webkit_user_style_sheet_unref(ss);
+}
+
+typedef struct { WebKitWebView *webview; gchar *id; } Gtk6FilterCtx;
+
+static void
+gtk6_on_filter_saved(GObject *source, GAsyncResult *res, gpointer data)
+{
+	Gtk6FilterCtx *ctx = data;
+	WebKitUserContentFilter *filter;
+	g_autoptr(GError) error = NULL;
+
+	filter = webkit_user_content_filter_store_save_finish(
+		WEBKIT_USER_CONTENT_FILTER_STORE(source), res, &error);
+	if (filter != NULL) {
+		webkit_user_content_manager_add_filter(
+			webkit_web_view_get_user_content_manager(ctx->webview), filter);
+		webkit_user_content_filter_unref(filter);
+	} else if (error != NULL) {
+		g_warning("gsurf: content filter '%s': %s", ctx->id, error->message);
+	}
+	g_free(ctx->id);
+	g_free(ctx);
+}
+
+static void
+gsurf_webkit6_view_add_content_filter(GsurfView *v, const gchar *identifier,
+                                      const gchar *json_rules)
+{
+	GsurfWebkit6View *self = GSURF_WEBKIT6_VIEW(v);
+	g_autofree gchar *dir = g_build_filename(g_get_user_cache_dir(), "gsurf", "filters", NULL);
+	WebKitUserContentFilterStore *store;
+	GBytes *bytes;
+	Gtk6FilterCtx *ctx;
+
+	g_mkdir_with_parents(dir, 0755);
+	store = webkit_user_content_filter_store_new(dir);
+	bytes = g_bytes_new(json_rules, strlen(json_rules));
+
+	ctx = g_new0(Gtk6FilterCtx, 1);
+	ctx->webview = self->webview;
+	ctx->id = g_strdup(identifier);
+	webkit_user_content_filter_store_save(store, identifier, bytes, NULL,
+		gtk6_on_filter_saved, ctx);
+
+	g_bytes_unref(bytes);
+	g_object_unref(store);
+}
+
+static void
 gsurf_webkit6_view_find(GsurfView *v, const gchar *text, gboolean cs, gboolean fwd)
 {
 	WebKitFindController *fc = webkit_web_view_get_find_controller(GSURF_WEBKIT6_VIEW(v)->webview);
@@ -387,6 +462,9 @@ gsurf_webkit6_view_class_init(GsurfWebkit6ViewClass *klass)
 	vc->show_inspector = gsurf_webkit6_view_show_inspector;
 	vc->add_user_script = gsurf_webkit6_view_add_user_script;
 	vc->add_user_style = gsurf_webkit6_view_add_user_style;
+	vc->add_user_script_full = gsurf_webkit6_view_add_user_script_full;
+	vc->add_user_style_full = gsurf_webkit6_view_add_user_style_full;
+	vc->add_content_filter = gsurf_webkit6_view_add_content_filter;
 	vc->clear_user_content = gsurf_webkit6_view_clear_user_content;
 	vc->find = gsurf_webkit6_view_find;
 	vc->find_next = gsurf_webkit6_view_find_next;

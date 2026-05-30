@@ -15,6 +15,10 @@
 #include "interfaces/gsurf-permission-handler.h"
 #include "interfaces/gsurf-download-handler.h"
 #include "interfaces/gsurf-cert-handler.h"
+#include "interfaces/gsurf-request-filter.h"
+#include "interfaces/gsurf-status-provider.h"
+#include "interfaces/gsurf-context-menu-provider.h"
+#include "interfaces/gsurf-render-overlay.h"
 
 #include <gmodule.h>
 #include <yaml-glib.h>
@@ -466,6 +470,77 @@ gsurf_module_manager_dispatch_verify_cert(GsurfModuleManager *self,
 			return d;
 	}
 	return GSURF_TLS_PROMPT;
+}
+
+GsurfFilterVerdict
+gsurf_module_manager_dispatch_filter_request(GsurfModuleManager *self, GsurfView *view,
+                                             const gchar *uri, gchar **redirect_uri)
+{
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), GSURF_FILTER_ALLOW);
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		GsurfFilterVerdict v;
+
+		if (!gsurf_module_is_active(m) || !GSURF_IS_REQUEST_FILTER(m))
+			continue;
+		v = gsurf_request_filter_filter_request(GSURF_REQUEST_FILTER(m), view, uri, redirect_uri);
+		if (v != GSURF_FILTER_ALLOW)
+			return v;
+	}
+	return GSURF_FILTER_ALLOW;
+}
+
+void
+gsurf_module_manager_dispatch_populate_menu(GsurfModuleManager *self, GsurfHitTest *hit,
+                                            GPtrArray *items)
+{
+	guint i;
+
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		if (gsurf_module_is_active(m) && GSURF_IS_CONTEXT_MENU_PROVIDER(m))
+			gsurf_context_menu_provider_populate(GSURF_CONTEXT_MENU_PROVIDER(m), hit, items);
+	}
+}
+
+gchar *
+gsurf_module_manager_dispatch_status_text(GsurfModuleManager *self, GsurfView *view)
+{
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), NULL);
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		gchar *text;
+
+		if (!gsurf_module_is_active(m) || !GSURF_IS_STATUS_PROVIDER(m))
+			continue;
+		text = gsurf_status_provider_get_status_text(GSURF_STATUS_PROVIDER(m), view);
+		if (text != NULL)
+			return text;
+	}
+	return NULL;
+}
+
+void
+gsurf_module_manager_dispatch_render_overlay(GsurfModuleManager *self, GsurfView *view,
+                                             gpointer draw_target)
+{
+	guint i;
+
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		if (gsurf_module_is_active(m) && GSURF_IS_RENDER_OVERLAY(m))
+			gsurf_render_overlay_render(GSURF_RENDER_OVERLAY(m), view, draw_target);
+	}
 }
 
 /* --- Lifecycle --- */

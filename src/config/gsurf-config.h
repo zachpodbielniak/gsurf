@@ -59,7 +59,19 @@ struct _GsurfConfig
 
 	GsurfSettings *settings;
 
-	GHashTable *keybinds; /* gchar* -> GUINT_TO_POINTER(GsurfAction) */
+	GHashTable *keybinds;   /* gchar* -> GUINT_TO_POINTER(GsurfAction) */
+	GHashTable *mousebinds; /* gchar* ("Mods+ButtonN") -> GsurfAction */
+
+	/* Storage / network / TLS. */
+	gchar    *cookie_jar;       /* persistent cookie store path, or NULL */
+	gchar    *data_dir;
+	gchar    *cache_dir;
+	gboolean  enable_disk_cache;
+	gchar    *proxy_mode;       /* "default" | "none" | "custom" */
+	gchar    *proxy_uri;
+	gboolean  do_not_track;
+	gboolean  tls_strict;
+	gboolean  ephemeral;        /* private browsing (no persistent storage) */
 
 	/*< private >*/
 	gchar      *config_path;     /* path the config was loaded from */
@@ -118,6 +130,15 @@ gchar *gsurf_config_find_default_path(void);
  * Returns: the bound #GsurfAction, or %GSURF_ACTION_NONE
  */
 GsurfAction gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keystring);
+
+/**
+ * gsurf_config_get_mousebind_action:
+ * @self: a #GsurfConfig
+ * @binding: a normalized "Mods+ButtonN" string
+ *
+ * Returns: the bound #GsurfAction, or %GSURF_ACTION_NONE
+ */
+GsurfAction gsurf_config_get_mousebind_action(GsurfConfig *self, const gchar *binding);
 
 /**
  * gsurf_config_get_module_node:
