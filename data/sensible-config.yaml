@@ -167,6 +167,11 @@ modules:
     host_files:
       - "~/.config/gsurf/adblock/hosts"
     whitelist: []
+    # For full EasyList / uBlock Origin coverage (per-path + element hiding),
+    # run `make adblock-lists` then uncomment:
+    # content_filters:
+    #   - "~/.config/gsurf/adblock/easylist.json"
+    #   - "~/.config/gsurf/adblock/easyprivacy.json"
 
   # Downloads land in the configured directory.
   downloads:

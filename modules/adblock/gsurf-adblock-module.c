@@ -10,7 +10,11 @@
  *   - #GsurfScriptInjector compiles the blocklist into a WebKit
  *     content-blocker ruleset and applies it per view, so sub-resources
  *     (scripts, images, trackers, XHR) are blocked too.
- * Blocklists load from hosts-format files and inline lists.
+ * Blocklists load from hosts-format files and inline lists. In addition,
+ * `content_filters:` loads pre-converted WebKit content-blocker JSON files
+ * (e.g. EasyList/uBO lists run through abp2blocklist or `make adblock-lists`)
+ * and applies each natively — this is where per-path, resource-type, and
+ * element-hiding rules come from.
  */
 
 #include <gsurf/gsurf.h>
@@ -26,13 +30,29 @@
 G_DECLARE_FINAL_TYPE(GsurfAdblockModule, gsurf_adblock_module,
                      GSURF, ADBLOCK_MODULE, GsurfModule)
 
+/* A pre-built WebKit content-blocker ruleset loaded from a JSON file. */
+typedef struct {
+	gchar *id;    /* stable identifier for the WebKit filter store */
+	gchar *json;  /* the raw content-blocker JSON */
+} ContentFilter;
+
 struct _GsurfAdblockModule
 {
 	GsurfModule parent_instance;
-	GHashTable *blocked;     /* host (gchar*) -> 1 */
-	GHashTable *whitelist;   /* host (gchar*) -> 1 */
-	gchar      *filter_json; /* compiled WebKit content-blocker ruleset */
+	GHashTable *blocked;         /* host (gchar*) -> 1 */
+	GHashTable *whitelist;       /* host (gchar*) -> 1 */
+	gchar      *filter_json;     /* compiled-from-hosts content-blocker ruleset */
+	GPtrArray  *content_filters; /* ContentFilter* loaded from content_filters: */
 };
+
+static void
+content_filter_free(gpointer data)
+{
+	ContentFilter *cf = data;
+	g_free(cf->id);
+	g_free(cf->json);
+	g_free(cf);
+}
 
 static void gsurf_adblock_nav_init(GsurfNavigationHookInterface *iface);
 static void gsurf_adblock_injector_init(GsurfScriptInjectorInterface *iface);
@@ -143,16 +163,26 @@ static void
 gsurf_adblock_inject(GsurfScriptInjector *injector, GsurfView *view, const gchar *uri)
 {
 	GsurfAdblockModule *self = GSURF_ADBLOCK_MODULE(injector);
+	guint i;
 
 	(void) uri;
-	if (view == NULL || self->filter_json == NULL)
+	if (view == NULL)
+		return;
+	if (self->filter_json == NULL && self->content_filters->len == 0)
 		return;
 	/* Apply once per view (the inject hook also fires on URI commits). */
 	if (g_object_get_data(G_OBJECT(view), "gsurf-adblock-applied") != NULL)
 		return;
 	g_object_set_data(G_OBJECT(view), "gsurf-adblock-applied", GINT_TO_POINTER(1));
 
-	gsurf_view_add_content_filter(view, "gsurf-adblock", self->filter_json);
+	if (self->filter_json != NULL)
+		gsurf_view_add_content_filter(view, "gsurf-adblock", self->filter_json);
+
+	/* Apply each pre-built list as its own native WebKit content filter. */
+	for (i = 0; i < self->content_filters->len; i++) {
+		ContentFilter *cf = g_ptr_array_index(self->content_filters, i);
+		gsurf_view_add_content_filter(view, cf->id, cf->json);
+	}
 }
 
 static void
@@ -164,7 +194,7 @@ gsurf_adblock_injector_init(GsurfScriptInjectorInterface *iface)
 static const gchar *gsurf_adblock_get_name(GsurfModule *m) { return "adblock"; }
 static const gchar *gsurf_adblock_get_description(GsurfModule *m)
 {
-	return "Host-based navigation blocking (hosts files + inline list)";
+	return "Host-based blocking plus WebKit content filters (EasyList/uBO JSON)";
 }
 
 static gchar *
@@ -211,6 +241,40 @@ load_hosts_file(GsurfAdblockModule *self, const gchar *path)
 	g_strfreev(lines);
 }
 
+/* Load a pre-built WebKit content-blocker JSON file verbatim and apply it
+ * natively (per-path, resource-type, element-hiding — whatever the file
+ * encodes). Generate these from EasyList/uBO lists with abp2blocklist or
+ * the `make adblock-lists` target. */
+static void
+load_content_filter(GsurfAdblockModule *self, const gchar *path)
+{
+	g_autofree gchar *expanded = expand_path(path);
+	g_autofree gchar *base = NULL;
+	g_autofree gchar *json = NULL;
+	ContentFilter *cf;
+	gchar *id, *p;
+
+	if (expanded == NULL || !g_file_get_contents(expanded, &json, NULL, NULL))
+		return;
+	if (json == NULL || *json == '\0')
+		return;
+
+	/* Stable identifier from the file's basename (the WebKit filter store
+	 * keys compiled rulesets by it, so each file needs a distinct one). */
+	base = g_path_get_basename(expanded);
+	if ((p = strrchr(base, '.')) != NULL)
+		*p = '\0';
+	id = g_strconcat("gsurf-adblock-", base, NULL);
+	for (p = id; *p != '\0'; p++)
+		if (!g_ascii_isalnum(*p) && *p != '-' && *p != '_')
+			*p = '-';
+
+	cf = g_new0(ContentFilter, 1);
+	cf->id = id;
+	cf->json = g_steal_pointer(&json);
+	g_ptr_array_add(self->content_filters, cf);
+}
+
 static void
 load_sequence(YamlMapping *m, const gchar *key, void (*fn)(GsurfAdblockModule *, const gchar *),
               GsurfAdblockModule *self)
@@ -252,11 +316,16 @@ gsurf_adblock_configure(GsurfModule *module, gpointer config_ptr)
 	load_sequence(m, "block_lists", load_hosts_file, self);
 	load_sequence(m, "whitelist", add_whitelist, self);
 
+	/* Pre-converted WebKit content-blocker JSON files (EasyList/uBO etc.). */
+	g_ptr_array_set_size(self->content_filters, 0);
+	load_sequence(m, "content_filters", load_content_filter, self);
+
 	/* Compile the WebKit content-blocker ruleset once, up front. */
 	g_clear_pointer(&self->filter_json, g_free);
 	self->filter_json = build_filter_json(self);
 
-	g_message("gsurf adblock: %u blocked host(s)", g_hash_table_size(self->blocked));
+	g_message("gsurf adblock: %u blocked host(s), %u content filter(s)",
+		g_hash_table_size(self->blocked), self->content_filters->len);
 }
 
 static gboolean gsurf_adblock_activate(GsurfModule *m) { return TRUE; }
@@ -269,6 +338,7 @@ gsurf_adblock_module_finalize(GObject *object)
 	g_clear_pointer(&self->blocked, g_hash_table_unref);
 	g_clear_pointer(&self->whitelist, g_hash_table_unref);
 	g_clear_pointer(&self->filter_json, g_free);
+	g_clear_pointer(&self->content_filters, g_ptr_array_unref);
 
 	G_OBJECT_CLASS(gsurf_adblock_module_parent_class)->finalize(object);
 }
@@ -291,6 +361,7 @@ gsurf_adblock_module_init(GsurfAdblockModule *self)
 {
 	self->blocked = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 	self->whitelist = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
+	self->content_filters = g_ptr_array_new_with_free_func(content_filter_free);
 }
 
 G_MODULE_EXPORT GType

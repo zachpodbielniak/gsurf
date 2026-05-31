@@ -172,10 +172,18 @@ modules:
   adblock:
     enabled: false
     default_action: allow          # allow or block
-    block_lists:
-      - "~/.config/gsurf/adblock/easylist.txt"
+    # Hosts-format lists (one host per line, or "0.0.0.0 host"): domain-level
+    # blocking. host_files and block_lists are parsed identically.
     host_files:
       - "~/.config/gsurf/adblock/hosts"
+    block_lists: []
+    # Pre-converted WebKit content-blocker JSON: per-path, resource-type, and
+    # element-hiding rules — this is where EasyList / uBlock Origin lists go.
+    # Generate them from those lists with `make adblock-lists` (or abp2blocklist):
+    #   make adblock-lists      # -> ~/.config/gsurf/adblock/{easylist,easyprivacy}.json
+    content_filters:
+      - "~/.config/gsurf/adblock/easylist.json"
+      - "~/.config/gsurf/adblock/easyprivacy.json"
     block_third_party: false
     update_interval_hours: 24
     whitelist: []

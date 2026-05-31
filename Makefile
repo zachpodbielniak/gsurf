@@ -16,13 +16,13 @@
 #   make GTK_BACKEND=gtk4 - Build against WebKitGTK 6.0 / GTK4
 
 .DEFAULT_GOAL := all
-.PHONY: all lib gsurf gir modules test test-gui appimage deps check-deps
+.PHONY: all lib gsurf gir modules test test-gui appimage adblock-lists deps check-deps
 
 # Include configuration
 include config.mk
 
 # Check dependencies before anything else (skip for targets that don't need them)
-SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all
+SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all adblock-lists
 ifeq ($(filter $(SKIP_DEP_CHECK_TARGETS),$(MAKECMDGOALS)),)
 $(foreach dep,$(DEPS_REQUIRED),$(call check_dep,$(dep)))
 endif
@@ -209,6 +209,44 @@ appimage: all
 		echo "Install appimagetool and re-run, or: APPIMAGETOOL=/path/to/appimagetool make appimage"; \
 	fi
 
+# Fetch EasyList-style filter lists and convert them to WebKit content-blocker
+# JSON for the adblock module's `content_filters:`. Requires curl and an
+# Adblock-Plus -> WebKit converter (abp2blocklist) that reads filter text on
+# stdin and writes JSON on stdout. Override:
+#   ADBLOCK_DIR=...     output dir (default ~/.config/gsurf/adblock)
+#   ABP2BLOCKLIST=...   converter command (default: abp2blocklist, else `npx --yes abp2blocklist`)
+#   ADBLOCK_LISTS="name=url ..."   lists to fetch (default EasyList + EasyPrivacy)
+ADBLOCK_DIR ?= $(HOME)/.config/gsurf/adblock
+ABP2BLOCKLIST ?=
+ADBLOCK_LISTS ?= easylist=https://easylist.to/easylist/easylist.txt easyprivacy=https://easylist.to/easylist/easyprivacy.txt
+
+.PHONY: adblock-lists
+adblock-lists:
+	@command -v curl >/dev/null 2>&1 || { echo "adblock-lists: curl is required"; exit 1; }
+	@conv="$(ABP2BLOCKLIST)"; \
+	if [ -z "$$conv" ]; then \
+		if command -v abp2blocklist >/dev/null 2>&1; then conv="abp2blocklist"; \
+		elif command -v npx >/dev/null 2>&1; then conv="npx --yes abp2blocklist"; \
+		else echo "adblock-lists: no converter found. Install one (npm i -g abp2blocklist)"; \
+		     echo "  or set ABP2BLOCKLIST to a command reading filters on stdin, JSON on stdout."; exit 1; fi; \
+	fi; \
+	echo "Converter: $$conv"; \
+	mkdir -p "$(ADBLOCK_DIR)"; \
+	for spec in $(ADBLOCK_LISTS); do \
+		name="$${spec%%=*}"; url="$${spec#*=}"; \
+		echo "=== $$name <- $$url ==="; \
+		tmp="$$(mktemp)"; \
+		if ! curl -fsSL "$$url" -o "$$tmp"; then echo "  download failed; skipping"; rm -f "$$tmp"; continue; fi; \
+		if ! $$conv < "$$tmp" > "$(ADBLOCK_DIR)/$$name.json"; then \
+			echo "  conversion failed (converter: $$conv)"; rm -f "$$tmp" "$(ADBLOCK_DIR)/$$name.json"; exit 1; fi; \
+		rm -f "$$tmp"; \
+		echo "  wrote $(ADBLOCK_DIR)/$$name.json"; \
+	done; \
+	echo ""; \
+	echo "Add under modules.adblock in your config:"; \
+	echo "  content_filters:"; \
+	for spec in $(ADBLOCK_LISTS); do name="$${spec%%=*}"; echo "    - \"$(ADBLOCK_DIR)/$$name.json\""; done
+
 # Check dependencies
 check-deps:
 	@echo "Checking dependencies (GTK_BACKEND=$(GTK_BACKEND))..."
@@ -252,6 +290,9 @@ help:
 	@echo "  install-deps     - Install build dependencies (auto-detects distro)"
 	@echo "  check-deps       - Check for required dependencies"
 	@echo "  show-config      - Show current build configuration"
+	@echo "  appimage         - Build a self-contained AppImage"
+	@echo "  adblock-lists    - Fetch + convert EasyList/uBO lists to WebKit"
+	@echo "                     JSON for the adblock content_filters: option"
 	@echo "  help             - Show this help message"
 
 # Print any make variable: `make print-CFLAGS`
