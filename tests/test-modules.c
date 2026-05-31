@@ -157,8 +157,11 @@ test_adblock(void)
 	}
 
 	hosts = g_build_filename(g_get_tmp_dir(), "gsurf-test-hosts.txt", NULL);
+	/* Mixed format: "0.0.0.0 host", bare host, a comment, blank line, and
+	 * "localhost" (which must be ignored). */
 	g_assert_true(g_file_set_contents(hosts,
-		"# test hosts\n0.0.0.0 ads.example.com\nbadsite.net\n", -1, &error));
+		"# test hosts\n\n0.0.0.0 ads.example.com\nbadsite.net\n"
+		"127.0.0.1 localhost\ntracker.net\n", -1, &error));
 	g_assert_no_error(error);
 
 	yaml = g_strdup_printf(
@@ -166,7 +169,11 @@ test_adblock(void)
 		"  adblock:\n"
 		"    enabled: true\n"
 		"    host_files:\n"
-		"      - \"%s\"\n", hosts);
+		"      - \"%s\"\n"
+		"    block_lists:\n"
+		"      - \"inline-block.example\"\n"   /* a non-existent path: must be skipped gracefully */
+		"    whitelist:\n"
+		"      - \"tracker.net\"\n", hosts);
 
 	config = gsurf_config_new();
 	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
@@ -181,13 +188,105 @@ test_adblock(void)
 	/* Exact host blocked. */
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
 		"https://ads.example.com/banner.png"), ==, GSURF_POLICY_IGNORE);
-	/* Subdomain of a blocked host blocked. */
+	/* Subdomain of a blocked host blocked (parent-domain match). */
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
 		"https://cdn.badsite.net/x"), ==, GSURF_POLICY_IGNORE);
+	/* Whitelisted host allowed even though it is in the blocklist. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
+		"https://tracker.net/t"), ==, GSURF_POLICY_USE);
+	/* "localhost" must never have been added. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
+		"http://localhost:8080/"), ==, GSURF_POLICY_USE);
 	/* Unrelated host allowed. */
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
 		"https://good.example.org/"), ==, GSURF_POLICY_USE);
+	/* A host that merely CONTAINS a blocked host as a substring is allowed
+	 * (matching is by domain label, not substring). */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
+		"https://notbadsite.net/x"), ==, GSURF_POLICY_USE);
+	/* Edge cases: NULL, empty, non-http, and host-less URIs must not crash
+	 * and default to allowing. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, NULL),
+		==, GSURF_POLICY_USE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, ""),
+		==, GSURF_POLICY_USE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, "about:blank"),
+		==, GSURF_POLICY_USE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, "not a uri"),
+		==, GSURF_POLICY_USE);
 
+	g_unlink(hosts);
+	g_object_unref(mgr);
+	g_object_unref(config);
+}
+
+/* The content_filters: path: pre-built WebKit JSON files are loaded (valid,
+ * missing, and empty) without disrupting host-based blocking or crashing.
+ * The per-view application needs a WebKit view (covered by the GUI smoke
+ * test); here we exercise the load/parse/configure path headlessly. */
+static void
+test_adblock_content_filters(void)
+{
+	g_autoptr(GError) error = NULL;
+	GsurfConfig *config;
+	GsurfModuleManager *mgr;
+	g_autofree char *so = module_so_path("adblock");
+	g_autofree char *valid = NULL, *empty = NULL, *missing = NULL;
+	g_autofree char *hosts = NULL, *yaml = NULL;
+
+	if (!g_file_test(so, G_FILE_TEST_EXISTS)) {
+		g_test_skip("adblock.so not built");
+		return;
+	}
+
+	valid = g_build_filename(g_get_tmp_dir(), "gsurf-cf-valid.json", NULL);
+	empty = g_build_filename(g_get_tmp_dir(), "gsurf-cf-empty.json", NULL);
+	missing = g_build_filename(g_get_tmp_dir(), "gsurf-cf-does-not-exist.json", NULL);
+	hosts = g_build_filename(g_get_tmp_dir(), "gsurf-cf-hosts.txt", NULL);
+
+	g_assert_true(g_file_set_contents(valid,
+		"[{\"trigger\":{\"url-filter\":\"tracker\\\\.example\"},"
+		"\"action\":{\"type\":\"block\"}}]\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_true(g_file_set_contents(empty, "", -1, &error));
+	g_assert_no_error(error);
+	g_assert_true(g_file_set_contents(hosts, "ads.example.com\n", -1, &error));
+	g_assert_no_error(error);
+	g_unlink(missing);   /* ensure it does not exist */
+
+	yaml = g_strdup_printf(
+		"modules:\n"
+		"  adblock:\n"
+		"    enabled: true\n"
+		"    host_files:\n"
+		"      - \"%s\"\n"
+		"    content_filters:\n"
+		"      - \"%s\"\n"   /* valid */
+		"      - \"%s\"\n"   /* empty -> skipped */
+		"      - \"%s\"\n",  /* missing -> skipped */
+		hosts, valid, empty, missing);
+
+	config = gsurf_config_new();
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
+	g_assert_no_error(error);
+
+	mgr = gsurf_module_manager_new();
+	gsurf_module_manager_set_config(mgr, config);
+	g_assert_nonnull(gsurf_module_manager_load_module(mgr, so, &error));
+	g_assert_no_error(error);
+	/* configure() runs load_content_filter on all three entries here. */
+	gsurf_module_manager_activate_all(mgr);
+
+	/* Host-based blocking still works alongside content_filters. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
+		"https://ads.example.com/x"), ==, GSURF_POLICY_IGNORE);
+
+	/* The script-injector dispatch with a NULL view is a no-op (does not
+	 * crash) — the real application path is exercised by make test-gui. */
+	gsurf_module_manager_dispatch_inject_scripts(mgr, NULL, NULL);
+
+	g_unlink(valid);
+	g_unlink(empty);
 	g_unlink(hosts);
 	g_object_unref(mgr);
 	g_object_unref(config);
@@ -200,5 +299,6 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/modules/search-engines", test_search_engines);
 	g_test_add_func("/gsurf/modules/history", test_history);
 	g_test_add_func("/gsurf/modules/adblock", test_adblock);
+	g_test_add_func("/gsurf/modules/adblock-content-filters", test_adblock_content_filters);
 	return g_test_run();
 }

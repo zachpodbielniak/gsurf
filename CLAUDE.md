@@ -116,7 +116,7 @@ module that runs its own server lifecycle on `activate()`.
 ## Tests / running
 
 ```sh
-make test                                   # headless GLib tests (45 cases)
+make test                                   # headless GLib tests (53 cases)
 make test-gui                               # xvfb-gated GUI smoke test (skips if no xvfb-run)
 xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 ```
@@ -124,13 +124,20 @@ xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 Test layout (`tests/test-*.c`, auto-discovered): `test-version`, `test-enums`
 (action<->string, GType registration), `test-keys` (canonicalize/normalize/
 match), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
-keybind lookup, module nodes, bad-input handling), `test-manager` (loading,
-enabled gating, priority, input passthrough, default verdicts, and every hook
-dispatch through the real module .so files), `test-modules` (search-engines/
-history/adblock), `test-boxed` (the boxed value types: new/copy/free, getters,
-setters, deep-copy independence). The GTK/WebKit view+window layer needs a
-display and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb
-harnesses rather than `make test`.
+keybind lookup, module nodes, `ignore_yaml`, the bind setters with
+normalization/NULL/empty, bad-input handling), `test-cconfig` (the crispy
+C-config compile-and-load pipeline, incl. the commented-`CRISPY_PARAMS`
+regression and bad-source handling; skips with no compiler), `test-manager`
+(loading, search paths, enabled gating, priority, input passthrough, default
+verdicts for every hook — including the request-filter/status/context-menu/
+render-overlay ones — and dispatch through the real module .so files),
+`test-modules` (search-engines, history, adblock host blocking + whitelist +
+edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
+value types: new/copy/free, getters, setters, deep-copy independence). The
+GTK/WebKit view+window layer (and module UIs like the find bar / tab strip,
+the per-view content-filter *application*, modal key dispatch) needs a display
+and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb harnesses
+rather than `make test`.
 
 Packaging targets: `make appimage` builds a self-contained AppImage (bundles the
 binary, `libgsurf`, all modules, desktop file + 256×256 PNG icon; needs

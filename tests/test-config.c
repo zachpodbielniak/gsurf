@@ -171,6 +171,16 @@ test_set_binds(void)
 	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button8"), ==, GSURF_ACTION_BACK);
 	gsurf_config_set_mousebind(c, "Button8", GSURF_ACTION_NONE);
 	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button8"), ==, GSURF_ACTION_NONE);
+
+	/* Surrounding whitespace is tolerated and normalized away. */
+	gsurf_config_set_keybind(c, "  ctrl + l  ", GSURF_ACTION_OPEN_PROMPT);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+l"), ==, GSURF_ACTION_OPEN_PROMPT);
+
+	/* NULL / empty bindings are no-ops, not crashes. */
+	gsurf_config_set_keybind(c, NULL, GSURF_ACTION_RELOAD);
+	gsurf_config_set_keybind(c, "", GSURF_ACTION_RELOAD);
+	gsurf_config_set_mousebind(c, NULL, GSURF_ACTION_BACK);
+	gsurf_config_set_mousebind(c, "", GSURF_ACTION_BACK);
 }
 
 static void

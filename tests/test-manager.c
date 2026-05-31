@@ -77,6 +77,27 @@ test_defaults_no_modules(void)
 	g_object_unref(mgr);
 }
 
+/* The newer dispatch hooks (request-filter, status, context-menu, render
+ * overlay) return pass-through defaults and never crash with no modules. */
+static void
+test_new_hook_defaults(void)
+{
+	GsurfModuleManager *mgr = gsurf_module_manager_new();
+	g_autoptr(GsurfHitTest) hit = gsurf_hit_test_new();
+	GPtrArray *items = g_ptr_array_new();
+	gchar *redirect = NULL;
+
+	g_assert_cmpint(gsurf_module_manager_dispatch_filter_request(mgr, NULL, "https://x", &redirect),
+		==, GSURF_FILTER_ALLOW);
+	g_assert_null(gsurf_module_manager_dispatch_status_text(mgr, NULL));
+	gsurf_module_manager_dispatch_populate_menu(mgr, hit, items);
+	g_assert_cmpuint(items->len, ==, 0);
+	gsurf_module_manager_dispatch_render_overlay(mgr, NULL, NULL);
+
+	g_ptr_array_unref(items);
+	g_object_unref(mgr);
+}
+
 static void
 test_passthrough_flag(void)
 {
@@ -312,6 +333,7 @@ main(int argc, char *argv[])
 {
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/gsurf/manager/defaults-no-modules", test_defaults_no_modules);
+	g_test_add_func("/gsurf/manager/new-hook-defaults", test_new_hook_defaults);
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
 	g_test_add_func("/gsurf/manager/load-bad-path", test_load_bad_path);
 	g_test_add_func("/gsurf/manager/search-paths", test_search_paths);
