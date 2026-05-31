@@ -8,6 +8,10 @@
 # Every key here matches what the core/modules actually read; modules not
 # listed are simply left disabled (run `gsurf --list-modules` for the rest).
 
+# Set to true to ignore this config file entirely (use built-in defaults).
+# Equivalent to running with --no-yaml-config.
+# ignore_yaml: false
+
 # ===== Browser / general =====
 browser:
   homepage: "https://duckduckgo.com"

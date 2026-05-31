@@ -24,25 +24,39 @@ struct _GsurfConfigCompiler
 
 G_DEFINE_FINAL_TYPE(GsurfConfigCompiler, gsurf_config_compiler, G_TYPE_OBJECT)
 
-/* Extract the optional `#define CRISPY_PARAMS "..."` value, if present. */
+/* Extract the optional `#define CRISPY_PARAMS "..."` value, if present.
+ *
+ * Only an actual preprocessor define is honored — a commented-out example
+ * (e.g. the `/* #define CRISPY_PARAMS "..." *​/` line in the shipped config
+ * templates) is ignored. The line, after leading whitespace, must begin
+ * with `#define`; that excludes lines that open with a comment. */
 static gchar *
 extract_crispy_params(const gchar *source)
 {
-	const gchar *p = strstr(source, "CRISPY_PARAMS");
-	const gchar *start, *end;
+	g_auto(GStrv) lines = g_strsplit(source, "\n", -1);
+	guint i;
 
-	if (p == NULL)
-		return NULL;
+	for (i = 0; lines[i] != NULL; i++) {
+		const gchar *line = lines[i];
+		const gchar *p, *start, *end;
 
-	start = strchr(p, '"');
-	if (start == NULL)
-		return NULL;
-	start++;
-	end = strchr(start, '"');
-	if (end == NULL)
-		return NULL;
-
-	return g_strndup(start, end - start);
+		while (*line == ' ' || *line == '\t')
+			line++;
+		if (!g_str_has_prefix(line, "#define"))
+			continue;
+		p = strstr(line, "CRISPY_PARAMS");
+		if (p == NULL)
+			continue;
+		start = strchr(p, '"');
+		if (start == NULL)
+			continue;
+		start++;
+		end = strchr(start, '"');
+		if (end == NULL)
+			continue;
+		return g_strndup(start, end - start);
+	}
+	return NULL;
 }
 
 gchar *

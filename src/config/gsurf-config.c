@@ -173,6 +173,13 @@ parse_root(GsurfConfig *self, YamlMapping *root)
 {
 	YamlMapping *m;
 
+	/* ignore_yaml: true -> skip this document entirely, keeping whatever is
+	 * already set (built-in defaults / previously-loaded config). Equivalent
+	 * to passing --no-yaml-config. Mirrors gst's behavior. */
+	if (yaml_mapping_has_member(root, "ignore_yaml") &&
+	    yaml_mapping_get_boolean_member(root, "ignore_yaml"))
+		return;
+
 	/* browser: */
 	m = yaml_mapping_get_mapping_member(root, "browser");
 	if (m != NULL) {
@@ -393,6 +400,48 @@ gsurf_config_get_mousebind_action(GsurfConfig *self, const gchar *binding)
 		return GSURF_ACTION_NONE;
 	val = g_hash_table_lookup(self->mousebinds, binding);
 	return val != NULL ? (GsurfAction)GPOINTER_TO_UINT(val) : GSURF_ACTION_NONE;
+}
+
+void
+gsurf_config_set_keybind(GsurfConfig *self, const gchar *keystring, GsurfAction action)
+{
+	gchar *norm;
+
+	g_return_if_fail(GSURF_IS_CONFIG(self));
+	if (keystring == NULL)
+		return;
+
+	norm = normalize_keystring(keystring);
+	if (norm == NULL)
+		return;
+
+	if (action == GSURF_ACTION_NONE) {
+		g_hash_table_remove(self->keybinds, norm);
+		g_free(norm);
+	} else {
+		g_hash_table_replace(self->keybinds, norm, GUINT_TO_POINTER(action));
+	}
+}
+
+void
+gsurf_config_set_mousebind(GsurfConfig *self, const gchar *binding, GsurfAction action)
+{
+	gchar *norm;
+
+	g_return_if_fail(GSURF_IS_CONFIG(self));
+	if (binding == NULL)
+		return;
+
+	norm = normalize_keystring(binding);
+	if (norm == NULL)
+		return;
+
+	if (action == GSURF_ACTION_NONE) {
+		g_hash_table_remove(self->mousebinds, norm);
+		g_free(norm);
+	} else {
+		g_hash_table_replace(self->mousebinds, norm, GUINT_TO_POINTER(action));
+	}
 }
 
 gpointer

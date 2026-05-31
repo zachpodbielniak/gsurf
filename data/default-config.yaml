@@ -9,6 +9,7 @@
 # List modules with:    gsurf --list-modules
 
 # Set to true to ignore this config file entirely (use built-in defaults).
+# Equivalent to running with --no-yaml-config.
 # ignore_yaml: false
 
 # ===== Browser / general settings (core library) =====

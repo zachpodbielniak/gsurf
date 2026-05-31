@@ -126,6 +126,54 @@ test_override(void)
 }
 
 static void
+test_ignore_yaml(void)
+{
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	/* Establish a baseline value. */
+	g_assert_true(gsurf_config_load_from_data(c, "browser:\n  homepage: \"https://base\"\n", -1, &error));
+	g_assert_cmpstr(c->homepage, ==, "https://base");
+
+	/* A document with ignore_yaml: true is skipped entirely — its homepage
+	 * must NOT take effect. */
+	g_assert_true(gsurf_config_load_from_data(c,
+		"ignore_yaml: true\nbrowser:\n  homepage: \"https://ignored\"\n", -1, &error));
+	g_assert_cmpstr(c->homepage, ==, "https://base");
+
+	/* ignore_yaml: false applies normally. */
+	g_assert_true(gsurf_config_load_from_data(c,
+		"ignore_yaml: false\nbrowser:\n  homepage: \"https://applied\"\n", -1, &error));
+	g_assert_cmpstr(c->homepage, ==, "https://applied");
+	g_assert_no_error(error);
+}
+
+static void
+test_set_binds(void)
+{
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+
+	/* Programmatic setters (the C-config path). */
+	gsurf_config_set_keybind(c, "Ctrl+r", GSURF_ACTION_RELOAD);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+r"), ==, GSURF_ACTION_RELOAD);
+
+	/* The binding string is normalized: modifier order/case is canonicalized,
+	 * so this resolves to the same "Ctrl+Shift+t" the runtime looks up. */
+	gsurf_config_set_keybind(c, "shift+ctrl+t", GSURF_ACTION_TAB_NEW);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+Shift+t"), ==, GSURF_ACTION_TAB_NEW);
+
+	/* GSURF_ACTION_NONE removes the binding. */
+	gsurf_config_set_keybind(c, "Ctrl+r", GSURF_ACTION_NONE);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+r"), ==, GSURF_ACTION_NONE);
+
+	/* Mousebinds likewise. */
+	gsurf_config_set_mousebind(c, "Button8", GSURF_ACTION_BACK);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button8"), ==, GSURF_ACTION_BACK);
+	gsurf_config_set_mousebind(c, "Button8", GSURF_ACTION_NONE);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button8"), ==, GSURF_ACTION_NONE);
+}
+
+static void
 test_non_mapping_root(void)
 {
 	g_autoptr(GsurfConfig) c = gsurf_config_new();
@@ -159,6 +207,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/config/modules-node", test_modules_node);
 	g_test_add_func("/gsurf/config/bad-geometry", test_bad_geometry_ignored);
 	g_test_add_func("/gsurf/config/override", test_override);
+	g_test_add_func("/gsurf/config/ignore-yaml", test_ignore_yaml);
+	g_test_add_func("/gsurf/config/set-binds", test_set_binds);
 	g_test_add_func("/gsurf/config/non-mapping-root", test_non_mapping_root);
 	g_test_add_func("/gsurf/config/default-singleton", test_default_singleton);
 	return g_test_run();

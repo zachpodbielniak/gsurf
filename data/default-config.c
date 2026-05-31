@@ -51,9 +51,10 @@ gsurf_config_init(void)
 	/* config->settings->webgl = FALSE; */
 	/* gsurf_settings_set_user_agent(config->settings, "MyAgent/1.0"); */
 
-	/* --- Keybinds (normalized "Mods+Key" -> action nick) --- */
-	/* g_hash_table_replace(config->keybinds, g_strdup("Ctrl+m"),
-	 *     GUINT_TO_POINTER(GSURF_ACTION_RELOAD)); */
+	/* --- Keybinds / mousebinds (the setters normalize the binding string
+	 *     to match runtime key lookups; pass GSURF_ACTION_NONE to remove) --- */
+	/* gsurf_config_set_keybind(config, "Ctrl+r", GSURF_ACTION_RELOAD); */
+	/* gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK); */
 
 	/* --- Module options are configured via YAML; see
 	 *     --generate-yaml-config and gsurf_config_get_module_node(). --- */

@@ -80,8 +80,14 @@ and `GTlsCertificate` instead.
   see `docs/embedding.org`.
 - **Config**: `GsurfConfig` (final, public struct) parses YAML via yaml-glib and
   keeps the `modules:` mapping for modules to read their own section
-  (`gsurf_config_get_module_node`). `GsurfConfigCompiler` compiles an optional
-  `config.c` to a cached `.so` via crispy and calls its `gsurf_config_init()`.
+  (`gsurf_config_get_module_node`). A root `ignore_yaml: true` key makes a
+  document skip itself (use built-in defaults; same as `--no-yaml-config`).
+  `GsurfConfigCompiler` compiles an optional `config.c` to a cached `.so` via
+  crispy and calls its `gsurf_config_init()` (overrides YAML). C configs set
+  scalar fields directly, bind keys/mouse via `gsurf_config_set_keybind()` /
+  `_set_mousebind()` (which normalize), and may layer module/YAML-mapping
+  config via `gsurf_config_load_from_data()`. `data/{default,sensible}-config.{yaml,c}`
+  are the worked examples.
 - **Enums** live in `src/gsurf-enums.{h,c}` (registered GTypes). `GsurfAction`
   nicks are the keybind action strings (`gsurf_action_from_string`).
 

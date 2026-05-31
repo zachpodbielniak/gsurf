@@ -141,6 +141,28 @@ GsurfAction gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keys
 GsurfAction gsurf_config_get_mousebind_action(GsurfConfig *self, const gchar *binding);
 
 /**
+ * gsurf_config_set_keybind:
+ * @self: a #GsurfConfig
+ * @keystring: a "Mods+Key" string (e.g. "Ctrl+r"); modifier order/case is
+ *   normalized internally to match runtime key lookups
+ * @action: the action to bind, or %GSURF_ACTION_NONE to remove the binding
+ *
+ * Sets (or clears) a keybinding. Intended for C configs, which cannot call
+ * the internal key normalizer when poking #GsurfConfig.keybinds directly.
+ */
+void gsurf_config_set_keybind(GsurfConfig *self, const gchar *keystring, GsurfAction action);
+
+/**
+ * gsurf_config_set_mousebind:
+ * @self: a #GsurfConfig
+ * @binding: a "Mods+ButtonN" string (e.g. "Button8", "Ctrl+Button1")
+ * @action: the action to bind, or %GSURF_ACTION_NONE to remove the binding
+ *
+ * Sets (or clears) a mouse binding (normalized like gsurf_config_set_keybind()).
+ */
+void gsurf_config_set_mousebind(GsurfConfig *self, const gchar *binding, GsurfAction action);
+
+/**
  * gsurf_config_get_module_node:
  * @self: a #GsurfConfig
  * @module_name: the module name
