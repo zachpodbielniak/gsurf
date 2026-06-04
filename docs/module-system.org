@@ -63,6 +63,13 @@ script-injector, permission-handler, cert-handler, context-menu-provider,
 render-overlay, setting-provider) follow the same =G_DECLARE_INTERFACE= +
 manager-dispatch pattern and are added as their modules are implemented.
 
+Note on =GsurfScriptInjector::inject(view, uri)=: it fires *once per view, at
+view construction* (with =uri = NULL=) — it is not re-dispatched per page load.
+A user script added there with =gsurf_view_add_user_script()= persists and is
+re-run by WebKit on every navigation automatically, so document-start bootstrap
+JS (and any =WebKitUserContentManager= script-message handler registered from
+=inject=) only needs to be set up once.
+
 * Lifecycle
 
 =configure(config)= → (manager reads =enabled=) → =activate()= if enabled →

@@ -76,7 +76,43 @@ Useful calls (see =gsurf-module-manager.h=):
 =gsurf_view_get_native_widget()= / =gsurf_window_get_native_widget()= return the
 underlying =GtkWidget*= as an opaque =gpointer= so the abstract API never leaks a
 GTK type. A GTK-aware host casts it and packs it into its own container instead
-of calling =gsurf_window_present()=.
+of calling =gsurf_window_present()=. With the webkit2gtk-4.1 backend the
+returned widget *is* the =WebKitWebView=, so a host can reach the WebKit layer
+directly (e.g. =webkit_web_view_get_context()=, =..._get_user_content_manager()=)
+to add features that the abstract API does not wrap.
+
+* View signals a host can observe
+
+A =GsurfView= emits these GObject signals; a host that parents the raw view
+(no =GsurfWindow=) connects to them for chrome/automation:
+
+- =load-changed= =(GsurfLoadEvent)=, =uri-changed= =(uri)=, =title-changed= =(title)=
+- =progress-changed= =(gdouble 0..1)=, =hovered-uri-changed= =(uri or "")=
+- =favicon-changed= =()=, =web-process-terminated= =()=
+- =create-view= =(uri) -> GsurfView*= — a popup / =target=_blank= / =window.open=
+  request. The handler returns a *new, unrealized* =GsurfView= for WebKit to
+  take over, or =NULL= to block the popup. The return is =(transfer none)=, and
+  it uses a first-handler-wins accumulator. A host that has no spare unrealized
+  view should return =NULL= and open the URI itself instead — returning a view
+  that is already realized/parented fights WebKit's popup lifecycle.
+
+* Downloads and permissions (host dispatch)
+
+These are answered *synchronously*, so a host hook must decide without blocking:
+
+- *Downloads*: the backend connects =download-started= on the WebKit context and
+  dispatches =decide-destination= to a =GsurfDownloadHandler= module
+  (=(uri, suggested) -> path=, first non-NULL wins; return without a path to let
+  the engine default). gsurf tracks no further progress itself — a host that
+  wants progress/finished/failed events listens on the WebKit download directly
+  (via the default =WebKitWebContext=).
+- *Permissions*: the backend dispatches =permission-request= to a
+  =GsurfPermissionHandler= module expecting a synchronous verdict
+  (=ALLOW=/=DENY=/=PROMPT=); =PROMPT= returns =FALSE= so the engine default
+  applies, which also lets a host that connects its *own* =permission-request=
+  handler on the =WebKitWebView= (and returns =TRUE=) win when no gsurf
+  permission module is enabled. A blocking modal inside this callback is unsafe;
+  decide from a policy, or defer by reffing the request and answering later.
 
 * GObject Introspection
 
