@@ -19,7 +19,19 @@ Three-file Makefile system (mirrors gst):
 - `Makefile` — driver; auto-discovers `src/**/*.c` via wildcards.
 
 Key flags: `DEBUG=1`, `ASAN=1`, `MCP=1`, `AI=1` (reserved/deferred),
-`GTK_BACKEND=gtk3|gtk4`, `BUILD_GIR=1`, `BUILD_TESTS=0`, `STATIC=1`.
+`GTK_BACKEND=gtk3|gtk4`, `BUILD_GIR=1`, `BUILD_TESTS=0`, `STATIC=1`,
+`LRG_BACKEND=1`.
+
+`LRG_BACKEND=1` is **additive** to the GTK backend: it compiles
+`src/backend/lrg/**` (the libregnum/raylib backend) alongside the GTK one into
+a single `libgsurf`, runtime-selected by `gsurf_backend_set_default_type()`.
+The standalone binary picks it with `gsurf --lrg[=2d]` (only 2D today; 3d/3dvr
+reserved); cmacs uses it for `emacs --lrg` frames.  The page is rendered to a
+GrlTexture and composited by the host (the standalone raylib window, or cmacs's
+lrgterm), so under `--lrg` gsurf needs no GTK widget tree.  It links graylib +
+raylib from the sibling `../libregnum` checkout (or, in cmacs, the canonical
+`liblibregnum.a`).  **Toggling `LRG_BACKEND` between builds needs `make clean`**
+(the shared object paths don't see the flag change).
 
 `STATIC=1` links `libgsurf.a` into the `gsurf` binary (no runtime
 `libgsurf.so` dependency); system libs (GTK/WebKit/…) stay dynamic since
@@ -62,10 +74,26 @@ and `GTlsCertificate` instead.
   public wrappers that `g_return_if_fail` then call the vfunc:
   `GsurfView` (`src/core/gsurf-view.h`), `GsurfWindow` (`src/window/gsurf-window.h`),
   `GsurfModule` (`src/module/gsurf-module.h`).
-- **Backend abstraction**: only `src/backend/gtk3/**` (or `gtk4/**`) touches
-  GTK/WebKit. `src/core/gsurf-backend.c` is the single `#ifdef GSURF_BACKEND_*`
-  bridge with the `gsurf_view_new()` / `gsurf_window_new()` factories. The
-  abstract API never leaks GTK types (`get_native_widget` returns `gpointer`).
+- **Backend abstraction**: `src/backend/gtk3/**` (or `gtk4/**`) is the GTK/WebKit
+  backend; `src/backend/lrg/**` is the GTK-free libregnum backend. The factory
+  `src/core/gsurf-backend.c` was changed from a build-time `#ifdef` to a
+  **runtime** factory: `gsurf_view_new_for_backend(type)` /
+  `gsurf_window_new_for_backend(type)` / `gsurf_backend_is_available(type)` /
+  `gsurf_backend_set_default_type(type)`, with `gsurf_view_new()` etc. as thin
+  wrappers over the current default. GTK (gtk3⊕gtk4, mutually exclusive) and LRG
+  are *additive* in one `libgsurf`. The abstract API never leaks GTK types
+  (`get_native_widget` returns `gpointer`; the LRG view returns `NULL` there and
+  exposes a texture + input-injection API instead — `gsurf-lrg-view.h`).
+- **LRG backend internals** (`src/backend/lrg/`): `GsurfLrgView` (the shared
+  `GsurfView` subclass — renders the page to a `GrlTexture`, injects input) and
+  `GsurfLrgWindow` (standalone raylib window + render loop + chrome) sit over a
+  build-selected **web-engine seam** (`gsurf-lrg-engine.h`). The engine that
+  ships today is **offscreen WebKitGTK** (`gsurf-lrg-engine-webkitgtk.c`): it
+  reuses the *same* WebKit already linked by the GTK backend (the WebKit family
+  shares `webkit_*` symbols, so only one may be linked per process) by hosting
+  the WebView in a `GtkOffscreenWindow` with HW-accel off and reading the page
+  back from its cairo surface. `gsurf-lrg-engine-wpe.c` (WPE WebKit, GTK-free
+  build) is the reserved seam for a future no-GTK build.
 - **Module system**: a module is a `GsurfModule` subclass in `modules/<name>/`
   that exports `G_MODULE_EXPORT GType gsurf_module_register(void)` and implements
   one or more hook interfaces from `src/interfaces/`. `GsurfModuleManager` loads

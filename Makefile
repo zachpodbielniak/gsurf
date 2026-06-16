@@ -45,6 +45,19 @@ else
 LIB_SRCS += $(wildcard src/backend/gtk3/*.c)
 endif
 
+# libregnum (LRG) backend: additive to the GTK backend (its WebKitGTK engine
+# reuses the already-linked WebKit; selected at runtime). Compiled only when
+# LRG_BACKEND=1 and the LRG deps were found (see config.mk). Exactly one engine
+# .c is built — the WebKitGTK engine when a GTK backend is present, else WPE.
+ifeq ($(LRG_BACKEND),1)
+ifeq ($(LRG_AVAILABLE),1)
+LIB_SRCS += src/backend/lrg/gsurf-lrg-backend.c \
+	src/backend/lrg/gsurf-lrg-view.c \
+	src/backend/lrg/gsurf-lrg-window.c \
+	src/backend/lrg/gsurf-lrg-engine-$(LRG_ENGINE).c
+endif
+endif
+
 # Public headers (for GIR scanner and installation)
 LIB_HDRS := $(wildcard src/*.h) \
 	$(wildcard src/boxed/*.h) \

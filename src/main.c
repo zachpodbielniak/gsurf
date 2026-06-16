@@ -19,6 +19,10 @@
  * data/default-config.yaml and data/default-config.c). */
 #include "gsurf-default-config.h"
 
+#ifdef GSURF_HAVE_LRG_BACKEND
+#include "backend/lrg/gsurf-lrg-window.h"
+#endif
+
 /* ===== CLI options ===== */
 
 static gchar    *opt_config = NULL;
@@ -31,6 +35,26 @@ static gboolean  opt_generate_yaml = FALSE;
 static gboolean  opt_generate_c = FALSE;
 static gboolean  opt_list_modules = FALSE;
 static gboolean  opt_fullscreen = FALSE;
+
+/* --lrg[=MODE]: use the libregnum/raylib backend.  Bare --lrg means 2D
+ * (matching `emacs --lrg').  Parsed by opt_lrg_cb so the value is optional. */
+static gboolean            opt_lrg_given = FALSE;
+static GsurfLrgRenderMode  opt_lrg_mode  = GSURF_LRG_RENDER_MODE_2D;
+
+static gboolean
+opt_lrg_cb(const gchar *name, const gchar *value, gpointer data, GError **error)
+{
+	(void) name;
+	(void) data;
+	opt_lrg_given = TRUE;
+	/* gsurf_lrg_render_mode_from_string accepts NULL/"" as 2D. */
+	if (!gsurf_lrg_render_mode_from_string(value, &opt_lrg_mode)) {
+		g_set_error(error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
+			"unknown --lrg mode '%s' (use 2d, 3d, or 3dvr)", value);
+		return FALSE;
+	}
+	return TRUE;
+}
 
 static const GOptionEntry entries[] = {
 	{ "config", 'c', 0, G_OPTION_ARG_FILENAME, &opt_config,
@@ -51,6 +75,10 @@ static const GOptionEntry entries[] = {
 	  "List available modules and exit", NULL },
 	{ "fullscreen", 'f', 0, G_OPTION_ARG_NONE, &opt_fullscreen,
 	  "Start in fullscreen", NULL },
+	{ "lrg", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK,
+	  (gpointer) opt_lrg_cb,
+	  "Use the libregnum/raylib backend in a raylib window "
+	  "(MODE: 2d [default], 3d/3dvr reserved)", "MODE" },
 	{ "version", 'v', 0, G_OPTION_ARG_NONE, &opt_version,
 	  "Show version and exit", NULL },
 	{ NULL }
@@ -180,6 +208,17 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 		gsurf_window_set_fullscreen(window, !gsurf_window_get_fullscreen(window));
 		return TRUE;
 	case GSURF_ACTION_QUIT:           gsurf_application_quit(app); return TRUE;
+	case GSURF_ACTION_OPEN_PROMPT:
+#ifdef GSURF_HAVE_LRG_BACKEND
+		/* Under --lrg the GTK chromebar/omnibar can't render, so the LRG
+		 * window draws its own address bar.  On GTK, fall through so the
+		 * chromebar/omnibar module handles the prompt. */
+		if (GSURF_IS_LRG_WINDOW(window)) {
+			gsurf_lrg_window_begin_url_edit(GSURF_LRG_WINDOW(window));
+			return TRUE;
+		}
+#endif
+		return FALSE;
 	default:                          return FALSE;
 	}
 }
@@ -439,6 +478,23 @@ main(int argc, char *argv[])
 
 	gsurf_init(&argc, &argv);
 
+	/* Select the libregnum backend before backend_init so the right backend
+	 * is initialised.  Bare --lrg / --lrg=2d only; 3d/3dvr are reserved. */
+	if (opt_lrg_given) {
+		if (!gsurf_backend_is_available(GSURF_BACKEND_LRG)) {
+			g_printerr("gsurf: --lrg requested but this build has no "
+				"libregnum backend (build with LRG_BACKEND=1)\n");
+			return EXIT_FAILURE;
+		}
+		if (!gsurf_lrg_render_mode_is_implemented(opt_lrg_mode)) {
+			g_printerr("gsurf: --lrg=%s is not yet implemented; "
+				"only 2d is supported\n",
+				gsurf_lrg_render_mode_to_string(opt_lrg_mode));
+			return EXIT_FAILURE;
+		}
+		gsurf_backend_set_default_type(GSURF_BACKEND_LRG);
+	}
+
 	if (!gsurf_backend_init(&argc, &argv, &error)) {
 		g_printerr("gsurf: %s\n", error->message);
 		g_clear_error(&error);
@@ -508,6 +564,12 @@ main(int argc, char *argv[])
 	window = gsurf_window_new();
 	gsurf_window_set_default_size(window, config->window_width, config->window_height);
 	gsurf_window_set_title(window, config->window_title);
+
+#ifdef GSURF_HAVE_LRG_BACKEND
+	/* Apply the requested render mode to the libregnum window (2D only). */
+	if (opt_lrg_given && GSURF_IS_LRG_WINDOW(window))
+		gsurf_lrg_window_set_render_mode(GSURF_LRG_WINDOW(window), opt_lrg_mode);
+#endif
 
 	/* Host-level window signals. "view-added" wires every view (initial,
 	 * tab, or popup) uniformly via setup_view, so connect it before the

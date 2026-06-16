@@ -169,6 +169,55 @@ CFLAGS := $(CFLAGS_BASE) $(CFLAGS_BUILD) $(CFLAGS_INC) $(CFLAGS_DEPS)
 LDFLAGS := $(LDFLAGS_DEPS) $(LDFLAGS_ASAN)
 LDFLAGS_SHARED := -shared -Wl,-soname,libgsurf.so.$(VERSION_MAJOR)
 
+# libregnum (LRG) backend (LRG_BACKEND=1). Additive to the GTK backend.
+#
+# graylib/libregnum are vendored under the cmacs tree (a sibling checkout of
+# this gsurf dir). The WebKitGTK engine reuses the GTK/WebKit already in
+# DEPS_BACKEND and only needs graylib's headers (for #GrlTexture etc.); the WPE
+# engine (GTK-free builds) additionally needs WPE + EGL. The engine is chosen
+# automatically: WebKitGTK whenever a GTK backend is linked (always, here).
+#
+# For libgsurf.a (the archive cmacs consumes) only the compile flags matter —
+# graylib symbols resolve from the canonical liblibregnum.a when the final
+# binary links. The link libs below are for gsurf's own .so / standalone binary.
+LRG_BACKEND ?= 0
+
+LIBREGNUM_DIR  ?= $(CURDIR)/../libregnum
+GRAYLIB_DIR    ?= $(LIBREGNUM_DIR)/deps/graylib
+LRG_GRAYLIB_INC := $(GRAYLIB_DIR)/src
+LRG_LIBREGNUM_INC := $(LIBREGNUM_DIR)/src
+LRG_GRAYLIB_LIB := $(GRAYLIB_DIR)/build/lib/libgraylib.a
+LRG_RAYLIB_LIB  := $(GRAYLIB_DIR)/deps/raylib/src/libraylib.a
+LRG_PLATFORM_LIBS := -lGL -lm -lpthread -ldl -lrt -lX11
+
+ifeq ($(LRG_BACKEND),1)
+    # WebKitGTK offscreen engine unless explicitly building the GTK-free WPE one.
+    LRG_ENGINE ?= webkitgtk
+    LRG_AVAILABLE := $(shell test -f $(LRG_GRAYLIB_INC)/graylib.h && echo 1 || echo 0)
+    ifeq ($(LRG_AVAILABLE),1)
+        CFLAGS += -DGSURF_HAVE_LRG_BACKEND=1
+        ifeq ($(LRG_ENGINE),wpe)
+            CFLAGS += -DGSURF_LRG_ENGINE_WPE=1
+        else
+            CFLAGS += -DGSURF_LRG_ENGINE_WEBKITGTK=1
+            # The offscreen-WebKitGTK engine resolves the chrome font to a file
+            # via fontconfig (match the GTK client's font family).  GTK already
+            # pulls fontconfig in transitively, but link it explicitly so the
+            # Fc* symbols are guaranteed present.
+            CFLAGS  += $(shell pkg-config --cflags fontconfig 2>/dev/null)
+            LRG_FONT_LIBS := $(shell pkg-config --libs fontconfig 2>/dev/null)
+        endif
+        # -isystem so graylib's own headers don't trip -Wall -Wextra.
+        CFLAGS += -isystem $(LRG_GRAYLIB_INC) -isystem $(LRG_LIBREGNUM_INC)
+        # graylib calls raylib, so libgraylib.a must precede libraylib.a.
+        LRG_LIBS := $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) $(LRG_PLATFORM_LIBS) \
+                    $(LRG_FONT_LIBS)
+        LDFLAGS += $(LRG_LIBS)
+    endif
+else
+    LRG_AVAILABLE := 0
+endif
+
 # Library names
 LIB_NAME := gsurf
 LIB_STATIC := lib$(LIB_NAME).a

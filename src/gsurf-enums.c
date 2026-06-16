@@ -7,6 +7,8 @@
 
 #include "gsurf-enums.h"
 
+#include <string.h>
+
 /*
  * Variadic so the brace-enclosed value list (which contains commas) is
  * captured whole as __VA_ARGS__ and used directly as an array initializer.
@@ -43,6 +45,14 @@ type_name##_get_type(void)                                             \
 GSURF_DEFINE_ENUM_TYPE(GsurfBackendType, gsurf_backend_type, {
 	EV(GSURF_BACKEND_GTK3_WEBKIT2, "gtk3-webkit2"),
 	EV(GSURF_BACKEND_GTK4_WEBKIT6, "gtk4-webkit6"),
+	EV(GSURF_BACKEND_LRG, "lrg"),
+	END_EV
+})
+
+GSURF_DEFINE_ENUM_TYPE(GsurfLrgRenderMode, gsurf_lrg_render_mode, {
+	EV(GSURF_LRG_RENDER_MODE_2D, "2d"),
+	EV(GSURF_LRG_RENDER_MODE_3D, "3d"),
+	EV(GSURF_LRG_RENDER_MODE_3DVR, "3dvr"),
 	END_EV
 })
 
@@ -227,4 +237,62 @@ gsurf_action_to_string(GsurfAction action)
 	g_type_class_unref(klass);
 
 	return nick;
+}
+
+gboolean
+gsurf_lrg_render_mode_from_string(const gchar *str, GsurfLrgRenderMode *out_mode)
+{
+	GEnumClass *klass;
+	GEnumValue *value;
+	gchar *token, *lower;
+	const gchar *colon;
+	gboolean found = FALSE;
+
+	if (out_mode != NULL)
+		*out_mode = GSURF_LRG_RENDER_MODE_2D;
+
+	/* Bare --lrg (NULL/empty) means the default 2D mode, like emacs --lrg. */
+	if (str == NULL || *str == '\0')
+		return TRUE;
+
+	/* cmacs accepts MODE:ARRANGEMENT:ENVIRONMENT; only MODE matters here. */
+	colon = strchr(str, ':');
+	token = colon ? g_strndup(str, (gsize)(colon - str)) : g_strdup(str);
+	lower = g_ascii_strdown(token, -1);
+
+	klass = g_type_class_ref(GSURF_TYPE_LRG_RENDER_MODE);
+	value = g_enum_get_value_by_nick(klass, lower);
+	if (value != NULL) {
+		if (out_mode != NULL)
+			*out_mode = (GsurfLrgRenderMode)value->value;
+		found = TRUE;
+	}
+	g_type_class_unref(klass);
+
+	g_free(lower);
+	g_free(token);
+	return found;
+}
+
+const gchar *
+gsurf_lrg_render_mode_to_string(GsurfLrgRenderMode mode)
+{
+	GEnumClass *klass;
+	GEnumValue *value;
+	const gchar *nick = NULL;
+
+	klass = g_type_class_ref(GSURF_TYPE_LRG_RENDER_MODE);
+	value = g_enum_get_value(klass, mode);
+	if (value != NULL)
+		nick = value->value_nick;
+	g_type_class_unref(klass);
+
+	return nick;
+}
+
+gboolean
+gsurf_lrg_render_mode_is_implemented(GsurfLrgRenderMode mode)
+{
+	/* Only 2D is implemented today; 3D / 3D-VR are reserved. */
+	return mode == GSURF_LRG_RENDER_MODE_2D;
 }

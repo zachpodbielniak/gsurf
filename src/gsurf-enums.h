@@ -20,13 +20,40 @@ G_BEGIN_DECLS
  * GsurfBackendType:
  * @GSURF_BACKEND_GTK3_WEBKIT2: GTK3 + WebKit2GTK 4.1
  * @GSURF_BACKEND_GTK4_WEBKIT6: GTK4 + WebKitGTK 6.0
+ * @GSURF_BACKEND_LRG: libregnum/raylib backend (no GTK windowing); the page is
+ *   rendered into a GL texture composited by libregnum. The web engine is chosen
+ *   at build time (offscreen WebKitGTK when a GTK backend is also linked, or WPE
+ *   WebKit for a GTK-free build) — see #GsurfLrgRenderMode and gsurf-backend.h.
  *
- * The compiled-in windowing/web-engine backend.
+ * The windowing/web-engine backend. Unlike the two GTK backends (which are
+ * mutually exclusive at build time), %GSURF_BACKEND_LRG is *additive*: a single
+ * libgsurf may contain a GTK backend and the LRG backend together and pick
+ * between them at runtime (e.g. cmacs uses GTK for pgtk frames and LRG for
+ * @samp{--lrg} frames).
  */
 typedef enum {
 	GSURF_BACKEND_GTK3_WEBKIT2,
-	GSURF_BACKEND_GTK4_WEBKIT6
+	GSURF_BACKEND_GTK4_WEBKIT6,
+	GSURF_BACKEND_LRG
 } GsurfBackendType;
+
+/**
+ * GsurfLrgRenderMode:
+ * @GSURF_LRG_RENDER_MODE_2D: flat 2D page (a textured quad). The only mode
+ *   implemented today; the default.
+ * @GSURF_LRG_RENDER_MODE_3D: page as a panel in a 3D scene. Reserved (not yet
+ *   implemented).
+ * @GSURF_LRG_RENDER_MODE_3DVR: stereo 3D for VR headsets. Reserved.
+ *
+ * The render mode of the libregnum (%GSURF_BACKEND_LRG) backend, mirroring
+ * cmacs's @code{LrgRenderMode}. Parsed from the @samp{--lrg[=MODE]} command line
+ * by gsurf_lrg_render_mode_from_string().
+ */
+typedef enum {
+	GSURF_LRG_RENDER_MODE_2D,
+	GSURF_LRG_RENDER_MODE_3D,
+	GSURF_LRG_RENDER_MODE_3DVR
+} GsurfLrgRenderMode;
 
 /**
  * GsurfKeyMod:
@@ -302,6 +329,7 @@ typedef enum {
 
 /* GType registration for introspection / signals / properties */
 GType gsurf_backend_type_get_type(void) G_GNUC_CONST;
+GType gsurf_lrg_render_mode_get_type(void) G_GNUC_CONST;
 GType gsurf_key_mod_get_type(void) G_GNUC_CONST;
 GType gsurf_mode_policy_get_type(void) G_GNUC_CONST;
 GType gsurf_load_event_get_type(void) G_GNUC_CONST;
@@ -314,6 +342,7 @@ GType gsurf_hook_point_get_type(void) G_GNUC_CONST;
 GType gsurf_action_get_type(void) G_GNUC_CONST;
 
 #define GSURF_TYPE_BACKEND_TYPE       (gsurf_backend_type_get_type())
+#define GSURF_TYPE_LRG_RENDER_MODE    (gsurf_lrg_render_mode_get_type())
 #define GSURF_TYPE_KEY_MOD            (gsurf_key_mod_get_type())
 #define GSURF_TYPE_MODE_POLICY        (gsurf_mode_policy_get_type())
 #define GSURF_TYPE_LOAD_EVENT         (gsurf_load_event_get_type())
@@ -343,6 +372,40 @@ GsurfAction gsurf_action_from_string(const gchar *str);
  * Returns: (transfer none): the canonical action nick, or %NULL
  */
 const gchar *gsurf_action_to_string(GsurfAction action);
+
+/**
+ * gsurf_lrg_render_mode_from_string:
+ * @str: a render-mode name (@samp{2d}, @samp{3d}, @samp{3dvr}; case-insensitive)
+ * @out_mode: (out): location for the parsed #GsurfLrgRenderMode
+ *
+ * Parses the @samp{--lrg[=MODE]} argument. A %NULL or empty @str selects
+ * %GSURF_LRG_RENDER_MODE_2D (the default), matching @samp{emacs --lrg}. cmacs
+ * accepts a @samp{MODE:ARRANGEMENT:ENVIRONMENT} form for 3D; only the leading
+ * @samp{MODE} token is interpreted here and the rest is ignored.
+ *
+ * Returns: %TRUE if @str named a known mode (so @out_mode is set); %FALSE for an
+ *   unrecognised mode (@out_mode is left at %GSURF_LRG_RENDER_MODE_2D).
+ */
+gboolean gsurf_lrg_render_mode_from_string(const gchar *str,
+                                           GsurfLrgRenderMode *out_mode);
+
+/**
+ * gsurf_lrg_render_mode_to_string:
+ * @mode: a #GsurfLrgRenderMode
+ *
+ * Returns: (transfer none): the canonical mode nick (@samp{2d}/@samp{3d}/@samp{3dvr}),
+ *   or %NULL
+ */
+const gchar *gsurf_lrg_render_mode_to_string(GsurfLrgRenderMode mode);
+
+/**
+ * gsurf_lrg_render_mode_is_implemented:
+ * @mode: a #GsurfLrgRenderMode
+ *
+ * Returns: %TRUE if @mode is implemented in this build. Only
+ *   %GSURF_LRG_RENDER_MODE_2D is implemented today; 3D / 3D-VR are reserved.
+ */
+gboolean gsurf_lrg_render_mode_is_implemented(GsurfLrgRenderMode mode);
 
 G_END_DECLS
 
