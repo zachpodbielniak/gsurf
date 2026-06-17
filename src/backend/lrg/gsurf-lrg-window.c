@@ -345,28 +345,35 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view)
 	if (in_body)
 		gsurf_lrg_view_send_motion(view, px, py, mods);
 
-	/* Buttons: gsurf modules + mousebinds get first crack; if unconsumed,
-	 * the click goes to the page (so links work).  The matching release
-	 * follows the press: only forwarded to the page if the press was. */
+	/* Buttons.  A press on the chrome (address bar) opens the URL editor; a
+	 * press in the body goes to gsurf modules + mousebinds first and, if
+	 * unconsumed, to the page (so links work).  The matching release follows
+	 * the press: only forwarded to the page if the press was. */
 	for (i = 0; i < G_N_ELEMENTS(buttons); i++) {
-		gboolean down = in_body && grl_input_is_mouse_button_down(buttons[i].grl);
-		if (down && !self->btn_down[buttons[i].idx]) {
-			gboolean consumed;
+		gboolean raw = grl_input_is_mouse_button_down(buttons[i].grl);
+		if (raw && !self->btn_down[buttons[i].idx]) {
 			self->btn_down[buttons[i].idx] = TRUE;
-			consumed = gsurf_window_emit_button_press(win, buttons[i].gsurf, mods);
-			if (lrg_dbg())
-				g_printerr("[lrg-input] BTN%u press win(%d,%d) page(%d,%d) "
-				           "module_consumed=%d -> %s\n", buttons[i].gsurf,
-				           wx, wy, px, py, consumed,
-				           consumed ? "module" : "page");
-			if (!consumed) {
-				self->page_btn[buttons[i].idx] = TRUE;
-				gsurf_lrg_view_send_button(view, px, py, buttons[i].gsurf,
-				                           TRUE, mods);
+			self->page_btn[buttons[i].idx] = FALSE;
+			if (!in_body) {
+				/* Click the address bar -> edit the URL (like clicking a
+				 * browser's location bar). */
+				if (buttons[i].grl == GRL_MOUSE_BUTTON_LEFT)
+					gsurf_lrg_window_begin_url_edit(self);
 			} else {
-				self->page_btn[buttons[i].idx] = FALSE;
+				gboolean consumed =
+					gsurf_window_emit_button_press(win, buttons[i].gsurf, mods);
+				if (lrg_dbg())
+					g_printerr("[lrg-input] BTN%u press win(%d,%d) page(%d,%d) "
+					           "module_consumed=%d -> %s\n", buttons[i].gsurf,
+					           wx, wy, px, py, consumed,
+					           consumed ? "module" : "page");
+				if (!consumed) {
+					self->page_btn[buttons[i].idx] = TRUE;
+					gsurf_lrg_view_send_button(view, px, py, buttons[i].gsurf,
+					                           TRUE, mods);
+				}
 			}
-		} else if (!down && self->btn_down[buttons[i].idx]) {
+		} else if (!raw && self->btn_down[buttons[i].idx]) {
 			self->btn_down[buttons[i].idx] = FALSE;
 			if (self->page_btn[buttons[i].idx]) {
 				gsurf_lrg_view_send_button(view, px, py, buttons[i].gsurf,
@@ -408,6 +415,18 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view)
 	for (i = 0; i < G_N_ELEMENTS(lrg_repeat_keys); i++)
 		if (grl_input_is_key_pressed_repeat(lrg_repeat_keys[i]))
 			lrg_page_dispatch_special(self, view, lrg_repeat_keys[i], mods);
+
+	/* Auto-repeat held Ctrl/Alt/Super-modified printable keys (e.g. C-e/C-y
+	 * line-scroll keybinds): GLFW emits no char for those, so they arrive via
+	 * the (non-repeating) key queue.  Re-dispatch any that are repeating while
+	 * a modifier is held.  (Bare printable keys auto-repeat via the char
+	 * queue, so they are excluded here.) */
+	if (mods & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) {
+		GrlKey k;
+		for (k = GRL_KEY_SPACE; k <= GRL_KEY_GRAVE; k++)
+			if (grl_input_is_key_pressed_repeat(k))
+				lrg_page_dispatch_special(self, view, k, mods);
+	}
 }
 
 static gboolean
@@ -566,6 +585,9 @@ gsurf_lrg_window_realize(GsurfWindow *window)
 		return;
 	}
 	grl_window_set_target_fps(self->win, 60);
+	/* Let the user resize the window (the page + chrome relayout each frame
+	 * from grl_window_get_width/height, so this just works). */
+	grl_window_set_state(self->win, GRL_FLAG_WINDOW_RESIZABLE);
 	/* Don't let raylib's default exit key (Escape) close the window -- Escape
 	 * must reach the page / modal module (exit insert mode, cancel the URL
 	 * bar, etc.).  Matches cmacs lrgterm. */

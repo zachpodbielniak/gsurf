@@ -92,6 +92,13 @@ keybinds:
   "Ctrl+Shift+g": find-prev
   "F11": toggle-fullscreen
   "Ctrl+q": quit
+  # Open the address bar.  Under --lrg this drives the libregnum window's
+  # built-in URL editor; on GTK the chromebar/omnibar module handles it.
+  "o": open-prompt
+  "Ctrl+l": open-prompt
+  # vim line-scroll (handy when the modal module's j/k aren't desired).
+  "Ctrl+e": scroll-down
+  "Ctrl+y": scroll-up
 
 # ===== Mousebinds (core) =====
 mousebinds:

@@ -399,7 +399,14 @@ engine_fc_match(const char *family)
 	match = FcFontMatch(NULL, pat, &res);
 	if (match != NULL) {
 		if (FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch
-		    && file != NULL)
+		    && file != NULL
+		    /* Reject OpenType *variable* fonts (e.g. "NotoSans[wght].ttf",
+		     * which fontconfig hands back for "sans-serif" on Fedora): raylib's
+		     * stb_truetype loader can't handle them and returns no font, so the
+		     * chrome would fall back to the ugly built-in bitmap font.  The
+		     * "[axis]" in the filename is the reliable marker (FC_VARIABLE is
+		     * not set on the match).  Static families load fine. */
+		    && strchr((const char *)file, '[') == NULL)
 			out = g_strdup((const char *)file);
 		FcPatternDestroy(match);
 	}
@@ -440,9 +447,21 @@ gsurf_lrg_engine_get_ui_font_path(void)
 		}
 	}
 
-	cached = engine_fc_match(family != NULL ? family : "sans-serif");
-	if (cached == NULL)
-		cached = engine_fc_match("sans-serif");
+	/* Prefer the GTK theme family; engine_fc_match() rejects variable fonts, so
+	 * fall back through known *static* sans families until one resolves to a
+	 * loadable file (on Fedora "sans-serif" maps to a variable font). */
+	{
+		static const char *const statics[] = {
+			"DejaVu Sans", "Liberation Sans", "Cantarell",
+			"FreeSans", "Noto Sans", "sans-serif"
+		};
+		gsize i;
+
+		if (family != NULL)
+			cached = engine_fc_match(family);
+		for (i = 0; cached == NULL && i < G_N_ELEMENTS(statics); i++)
+			cached = engine_fc_match(statics[i]);
+	}
 	return cached;
 }
 
@@ -473,6 +492,9 @@ gsurf_lrg_engine_set_focus(GsurfLrgEngine *self, gboolean focused)
 	ev->focus_change.window = g_object_ref(win);
 	ev->focus_change.send_event = TRUE;
 	ev->focus_change.in = focused;
+	/* A real focus event carries the keyboard device; without one GDK warns
+	 * ("Event with type 12 not holding a GdkDevice") and may drop it. */
+	gdk_event_set_device(ev, engine_device(self, TRUE));
 	gtk_main_do_event(ev);
 	gdk_event_free(ev);
 }
