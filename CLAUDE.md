@@ -29,9 +29,20 @@ The standalone binary picks it with `gsurf --lrg[=2d]` (only 2D today; 3d/3dvr
 reserved); cmacs uses it for `emacs --lrg` frames.  The page is rendered to a
 GrlTexture and composited by the host (the standalone raylib window, or cmacs's
 lrgterm), so under `--lrg` gsurf needs no GTK widget tree.  It links graylib +
-raylib from the sibling `../libregnum` checkout (or, in cmacs, the canonical
-`liblibregnum.a`).  **Toggling `LRG_BACKEND` between builds needs `make clean`**
-(the shared object paths don't see the flag change).
+raylib from libregnum.
+
+**libregnum location.**  gsurf bundles its own libregnum as a git submodule at
+`deps/libregnum` (clone with `--recursive`, or `git submodule update --init
+--recursive`), so the LRG backend builds self-contained standalone — `make
+LRG_BACKEND=1` builds the bundled libregnum automatically when needed.
+`config.mk` resolves `LIBREGNUM_DIR` to: an explicit `LIBREGNUM_DIR=<path>`
+override (highest priority) → else the bundled `deps/libregnum` when it is
+recursively checked out → else a sibling `../libregnum`.  An embedder links its
+OWN libregnum by passing the override: **cmacs** builds the LRG gsurf lib with
+`LIBREGNUM_DIR=$(cmacs)/deps/libregnum` so only ONE libregnum/graylib/raylib is
+linked into the host (the static-lib dedup invariant); gsurf's bundled copy is
+unused there and need not be checked out.  **Toggling `LRG_BACKEND` between
+builds needs `make clean`** (the shared object paths don't see the flag change).
 
 `STATIC=1` links `libgsurf.a` into the `gsurf` binary (no runtime
 `libgsurf.so` dependency); system libs (GTK/WebKit/…) stay dynamic since

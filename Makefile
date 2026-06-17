@@ -55,6 +55,18 @@ LIB_SRCS += src/backend/lrg/gsurf-lrg-backend.c \
 	src/backend/lrg/gsurf-lrg-view.c \
 	src/backend/lrg/gsurf-lrg-window.c \
 	src/backend/lrg/gsurf-lrg-engine-$(LRG_ENGINE).c
+
+# Standalone convenience: build the bundled (or pointed-at) libregnum so its
+# graylib/raylib archives exist before we link.  These targets have NO
+# prerequisites, so make runs them only when the archive file is MISSING --
+# never to "update" an embedder's prebuilt copy.  cmacs builds libregnum itself
+# and overrides LIBREGNUM_DIR, so the archives are already present and the
+# recipe never fires there.  (When both are missing the recipe runs twice; the
+# second invocation is a no-op since the first `make -C' built both.)
+$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB):
+	$(MAKE) -C $(LIBREGNUM_DIR)
+$(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): \
+	$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB)
 endif
 endif
 

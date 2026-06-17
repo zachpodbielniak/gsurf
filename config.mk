@@ -182,7 +182,21 @@ LDFLAGS_SHARED := -shared -Wl,-soname,libgsurf.so.$(VERSION_MAJOR)
 # binary links. The link libs below are for gsurf's own .so / standalone binary.
 LRG_BACKEND ?= 0
 
-LIBREGNUM_DIR  ?= $(CURDIR)/../libregnum
+# libregnum location.  Default to gsurf's OWN bundled copy (deps/libregnum, a
+# git submodule) so the LRG backend builds self-contained standalone; fall back
+# to a sibling checkout (../libregnum) for trees that share one.  An embedder
+# (e.g. cmacs) overrides `LIBREGNUM_DIR=<path>` on the make command line to point
+# at its canonical copy, so only ONE libregnum is ever linked into the host.
+# A command-line override wins over both branches below (make precedence).
+ifndef LIBREGNUM_DIR
+  # Prefer the bundled copy only when it is RECURSIVELY checked out (its nested
+  # graylib is present, hence buildable); otherwise fall back to a sibling tree.
+  ifneq ($(wildcard $(CURDIR)/deps/libregnum/deps/graylib/src/graylib.h),)
+    LIBREGNUM_DIR := $(CURDIR)/deps/libregnum
+  else
+    LIBREGNUM_DIR := $(CURDIR)/../libregnum
+  endif
+endif
 GRAYLIB_DIR    ?= $(LIBREGNUM_DIR)/deps/graylib
 LRG_GRAYLIB_INC := $(GRAYLIB_DIR)/src
 LRG_LIBREGNUM_INC := $(LIBREGNUM_DIR)/src
