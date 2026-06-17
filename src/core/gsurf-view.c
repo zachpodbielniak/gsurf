@@ -7,6 +7,8 @@
 
 #include "core/gsurf-view.h"
 
+#include <string.h>
+
 typedef struct {
 	gboolean editing;       /* an editable DOM element is focused in the page */
 	gchar   *hovered_uri;   /* link URI under the pointer, or NULL */
@@ -136,17 +138,83 @@ gsurf_view_init(GsurfView *self)
 
 /* --- Navigation --- */
 
+/* TRUE if S begins with a real URI scheme ("http:", "about:", "file:", …).
+ * Rejects host:port forms ("duckduckgo.com:8080", "localhost:8080") so they
+ * are treated as bare addresses: a scheme has no '.' in it and is not followed
+ * by a digit (which would be a port). */
+static gboolean
+gsurf_uri_has_scheme(const gchar *s)
+{
+	const gchar *p = s;
+
+	if (!g_ascii_isalpha((guchar)*p))
+		return FALSE;
+	while (*p != '\0'
+	       && (g_ascii_isalnum((guchar)*p) || *p == '+' || *p == '-'
+	           || *p == '.'))
+		p++;
+	if (*p != ':')
+		return FALSE;                    /* no ':' -> no scheme */
+	if (memchr(s, '.', (gsize)(p - s)) != NULL)
+		return FALSE;                    /* "host.tld:port" */
+	if (g_ascii_isdigit((guchar)p[1]))
+		return FALSE;                    /* "host:port" */
+	return TRUE;
+}
+
+/* TRUE if S (already known to be scheme-less) looks like a host we should
+ * load over https rather than a free-text search term. */
+static gboolean
+gsurf_uri_looks_like_host(const gchar *s)
+{
+	if (*s == '\0')
+		return FALSE;
+	if (strchr(s, ' ') != NULL || strchr(s, '\t') != NULL)
+		return FALSE;                    /* a search phrase */
+	if (strchr(s, '.') != NULL)
+		return TRUE;                     /* domain or IPv4 */
+	if (g_str_has_prefix(s, "localhost")
+	    && (s[9] == '\0' || s[9] == ':' || s[9] == '/'))
+		return TRUE;                     /* localhost[:port][/path] */
+	return FALSE;
+}
+
+gchar *
+gsurf_view_normalize_uri(const gchar *input)
+{
+	gchar *trimmed;
+	gchar *out;
+
+	if (input == NULL)
+		return NULL;
+
+	trimmed = g_strstrip(g_strdup(input));
+	if (gsurf_uri_has_scheme(trimmed) || !gsurf_uri_looks_like_host(trimmed))
+		return trimmed;                  /* leave as-is */
+
+	out = g_strconcat("https://", trimmed, NULL);
+	g_free(trimmed);
+	return out;
+}
+
 void
 gsurf_view_load_uri(GsurfView *self, const gchar *uri)
 {
 	GsurfViewClass *klass;
+	gchar *normalized;
 
 	g_return_if_fail(GSURF_IS_VIEW(self));
 	g_return_if_fail(uri != NULL);
 
 	klass = GSURF_VIEW_GET_CLASS(self);
-	if (klass->load_uri != NULL)
-		klass->load_uri(self, uri);
+	if (klass->load_uri == NULL)
+		return;
+
+	/* Supply a missing scheme ("duckduckgo.com" -> "https://duckduckgo.com")
+	 * so users need not type it; full URIs / about: / file: pass through. */
+	normalized = gsurf_view_normalize_uri(uri);
+	klass->load_uri(self, normalized);
+	g_free(normalized);
 }
 
 void

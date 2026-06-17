@@ -106,6 +106,22 @@ struct _GsurfViewClass
 };
 
 /* --- Navigation --- */
+
+/**
+ * gsurf_view_normalize_uri:
+ * @input: a URI or bare address as typed by the user
+ *
+ * Normalizes @input into a loadable URI by supplying a missing scheme: a bare
+ * host like "duckduckgo.com", "localhost:8080" or "192.168.0.1" gains an
+ * "https://" prefix.  Inputs that already carry a scheme ("https://…",
+ * "about:blank", "file:///…", "data:…", "mailto:…", …) are returned unchanged,
+ * as are things that don't look like a host (e.g. a search phrase with spaces).
+ * Leading/trailing whitespace is trimmed.  Applied automatically by
+ * gsurf_view_load_uri().
+ *
+ * Returns: (transfer full): a newly-allocated normalized URI.
+ */
+gchar       *gsurf_view_normalize_uri(const gchar *input);
 void         gsurf_view_load_uri(GsurfView *self, const gchar *uri);
 void         gsurf_view_load_html(GsurfView *self, const gchar *html, const gchar *base_uri);
 void         gsurf_view_reload(GsurfView *self, gboolean bypass_cache);
