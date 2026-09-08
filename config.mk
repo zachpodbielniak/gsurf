@@ -18,9 +18,18 @@ VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_MICRO)
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 
-# Auto-detect lib vs lib64 for 64-bit systems (Fedora, RHEL, SUSE, etc.)
-# Override with: make LIBDIR=/usr/local/lib
-LIBDIR_SUFFIX := $(shell if [ -d /usr/lib64 ]; then echo lib64; else echo lib; fi)
+# Auto-detect lib vs lib64.  NOT `test -d /usr/lib64': that directory
+# exists on Ubuntu (a real directory holding only the loader) and on Arch
+# (a symlink to lib), so the old test answered lib64 on two distros whose
+# pkg-config searches /usr/lib/pkgconfig and never /usr/lib64/pkgconfig.
+# Every .pc we installed there was invisible, which is how cad-glib's
+# `pkg-config --exists crispy' probe silently answered no on Ubuntu.
+# gcc's own multi-os directory is the authoritative answer: ../lib64 on
+# Fedora/RHEL/SUSE, ../lib on Debian/Ubuntu/Arch.  The old test survives
+# as the fallback for a toolchain that cannot answer.
+# Override with: make LIBDIR=...
+LIBDIR_SUFFIX_DETECTED := $(shell if [ "$$(cc -print-multi-os-directory 2>/dev/null)" = ../lib64 ]; then echo lib64; elif cc -print-multi-os-directory >/dev/null 2>&1; then echo lib; elif [ -d /usr/lib64 ]; then echo lib64; else echo lib; fi)
+LIBDIR_SUFFIX ?= $(LIBDIR_SUFFIX_DETECTED)
 LIBDIR ?= $(PREFIX)/$(LIBDIR_SUFFIX)
 INCLUDEDIR ?= $(PREFIX)/include
 DATADIR ?= $(PREFIX)/share
