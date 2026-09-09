@@ -28,7 +28,7 @@ $(OUTDIR)/modules/%.so: modules/%/*.c | $(OUTDIR)/modules
 	$(CC) $(MODULE_CFLAGS) $(MODULE_LDFLAGS) -o $@ $^ $(LDFLAGS) -L$(OUTDIR) -lgsurf
 
 # yaml-glib dependency compilation
-$(OBJDIR)/deps/yaml-glib/src/%.o: deps/yaml-glib/src/%.c
+$(OBJDIR)/deps/yaml-glib/src/%.o: $(YAMLGLIB_DIR)/src/%.c
 	@$(MKDIR_P) $(@D)
 	$(CC) $(CFLAGS) -c $< -o $@
 
@@ -259,3 +259,7 @@ uninstall:
 	rm -f $(DESTDIR)$(DATADIR)/applications/gsurf.desktop
 	rm -f $(DESTDIR)$(ICONDIR)/256x256/apps/gsurf.png
 	rm -f $(DESTDIR)$(MANDIR)/man1/gsurf.1
+
+# Always out of date, so the stamp above is re-evaluated every run.
+.PHONY: FORCE
+FORCE:

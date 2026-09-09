@@ -160,7 +160,7 @@ LDFLAGS_DEPS := $(shell $(PKG_CONFIG) --libs $(DEPS_REQUIRED) 2>/dev/null)
 # that sub-make via MAKEFLAGS — so crispy lands in build/debug when we build
 # DEBUG=1 and build/release otherwise. Track the same path here, or the
 # libgsurf.a/binary link looks for the archive in the wrong directory.
-CRISPY_DIR := deps/crispy
+CRISPY_DIR ?= deps/crispy
 ifeq ($(DEBUG),1)
 CRISPY_BUILD := $(CRISPY_DIR)/build/debug
 else
@@ -169,7 +169,17 @@ endif
 CRISPY_LIB := $(CRISPY_BUILD)/libcrispy.a
 
 # Include paths
-CFLAGS_INC := -I. -Isrc -Ideps/yaml-glib/src -Ideps/crispy/src -I$(OUTDIR)
+# Where the vendored yaml-glib and mcp-glib come from.  gsurf compiles
+# yaml-glib's sources into libgsurf, so an embedder shipping its own copy
+# gets two of every yaml_* symbol in one binary.  Set these on the make
+# command line to point at the canonical checkout; `?=' keeps a bare
+# `make' in a standalone clone on the submodules.  (CRISPY_DIR is below
+# and already works this way -- gsurf links crispy's archive rather than
+# compiling it.)
+YAMLGLIB_DIR ?= deps/yaml-glib
+MCP_GLIB_DIR ?= deps/mcp-glib
+
+CFLAGS_INC := -I. -Isrc -I$(YAMLGLIB_DIR)/src -I$(CRISPY_DIR)/src -I$(OUTDIR)
 
 # Combine all CFLAGS
 CFLAGS := $(CFLAGS_BASE) $(CFLAGS_BUILD) $(CFLAGS_INC) $(CFLAGS_DEPS)
@@ -276,7 +286,7 @@ TEST_LDFLAGS := $(LDFLAGS) -L$(OUTDIR) -lgsurf -Wl,-rpath,$(OUTDIR)
 # Module flags (absolute include paths for out-of-tree compilation).
 # The build/include/gsurf symlink lets modules use <gsurf/gsurf.h> exactly
 # as an installed consumer would.
-MODULE_CFLAGS_INC := -I$(CURDIR)/$(BUILDDIR)/include -I$(CURDIR) -I$(CURDIR)/src -I$(CURDIR)/deps/yaml-glib/src -I$(CURDIR)/deps/crispy/src
+MODULE_CFLAGS_INC := -I$(CURDIR)/$(BUILDDIR)/include -I$(CURDIR) -I$(CURDIR)/src -I$(abspath $(YAMLGLIB_DIR))/src -I$(abspath $(CRISPY_DIR))/src
 MODULE_CFLAGS := $(CFLAGS_BASE) $(CFLAGS_BUILD) $(MODULE_CFLAGS_INC) $(CFLAGS_DEPS)
 MODULE_LDFLAGS := -shared -fPIC
 
@@ -291,8 +301,8 @@ MODULE_LDFLAGS := -shared -fPIC
 # either. Only true system libraries (libsoup/libdex/libpng/json-glib/glib)
 # stay dynamic.
 ifeq ($(MCP_AVAILABLE),1)
-MCP_CFLAGS := -I$(CURDIR)/deps/mcp-glib/src $(shell $(PKG_CONFIG) --cflags $(DEPS_MCP) json-glib-1.0 2>/dev/null)
-MCP_LDFLAGS := $(CURDIR)/deps/mcp-glib/build/libmcp-glib-1.0.a $(shell $(PKG_CONFIG) --libs $(DEPS_MCP) json-glib-1.0 2>/dev/null)
+MCP_CFLAGS := -I$(abspath $(MCP_GLIB_DIR))/src $(shell $(PKG_CONFIG) --cflags $(DEPS_MCP) json-glib-1.0 2>/dev/null)
+MCP_LDFLAGS := $(abspath $(MCP_GLIB_DIR))/build/libmcp-glib-1.0.a $(shell $(PKG_CONFIG) --libs $(DEPS_MCP) json-glib-1.0 2>/dev/null)
 endif
 
 # Print configuration (for debugging)

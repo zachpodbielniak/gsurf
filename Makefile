@@ -81,7 +81,7 @@ LIB_HDRS := $(wildcard src/*.h) \
 	$(wildcard src/util/*.h)
 
 # yaml-glib sources (vendored dependency, compiled into libgsurf)
-YAMLGLIB_SRCS := $(wildcard deps/yaml-glib/src/*.c)
+YAMLGLIB_SRCS := $(wildcard $(YAMLGLIB_DIR)/src/*.c)
 
 # crispy sources (vendored dependency for C config; wired in Phase 3)
 # Minimal config-compilation subset to avoid pulling in the full CLI/tooling.
@@ -98,7 +98,9 @@ endif
 
 # Object files
 LIB_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(LIB_SRCS))
-YAMLGLIB_OBJS := $(patsubst deps/%.c,$(OBJDIR)/deps/%.o,$(YAMLGLIB_SRCS))
+# Keyed on YAMLGLIB_DIR so an overridden (absolute) path still lands
+# its objects in the same place under OBJDIR.
+YAMLGLIB_OBJS := $(patsubst $(YAMLGLIB_DIR)/%.c,$(OBJDIR)/deps/yaml-glib/%.o,$(YAMLGLIB_SRCS))
 CRISPY_OBJS := $(patsubst deps/%.c,$(OBJDIR)/deps/%.o,$(CRISPY_SRCS))
 MAIN_OBJ := $(OBJDIR)/main.o
 TEST_OBJS := $(patsubst tests/%.c,$(OBJDIR)/tests/%.o,$(TEST_SRCS))
@@ -346,6 +348,22 @@ compile-commands:
 # pre-build them via -MM before the generated headers (gsurf-version.h,
 # crispy-version.h) are in place on a fresh tree.
 ifeq ($(filter clean clean-all,$(MAKECMDGOALS)),)
+# Which copy the vendored objects under OBJDIR were built from.
+#
+# Object paths are fixed regardless of YAMLGLIB_DIR, so switching copies leaves
+# objects -- and .d files -- describing the other one.  A stale .d naming
+# a source that no longer exists makes make fail during graph
+# construction with "No rule to make target", before any recipe could
+# have cleaned it up.  Hence a parse-time check rather than a rule:
+# `-include' of the .d files happens at parse time too, and this has to
+# win that race.
+_yaml-glib_stamp := $(OBJDIR)/deps/.yaml-glib-dir
+_yaml-glib_prev := $(shell cat $(_yaml-glib_stamp) 2>/dev/null)
+ifneq ($(_yaml-glib_prev),$(YAMLGLIB_DIR))
+$(shell rm -rf $(OBJDIR)/deps/yaml-glib)
+$(shell mkdir -p $(dir $(_yaml-glib_stamp)) && printf '%s' '$(YAMLGLIB_DIR)' > $(_yaml-glib_stamp))
+endif
+
 -include $(wildcard $(LIB_OBJS:.o=.d))
 -include $(wildcard $(MAIN_OBJ:.o=.d))
 endif
