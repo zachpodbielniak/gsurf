@@ -165,6 +165,9 @@ gsurf_find_bar_activate(GsurfModule *module)
 	if (window == NULL)
 		return TRUE;
 
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
+
 	self->bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	self->label = gtk_label_new("Find:");
 	self->entry = gtk_search_entry_new();

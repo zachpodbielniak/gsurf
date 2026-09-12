@@ -103,6 +103,7 @@ gpointer    gsurf_window_get_native_widget(GsurfWindow *self);
  * @widget: a native widget (a #GtkWidget as gpointer)
  *
  * Packs a chrome widget above the view area (e.g. an address bar).
+ * No-op while kiosk mode is enabled so the page fills the window.
  */
 void        gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget);
 
@@ -112,6 +113,7 @@ void        gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget);
  * @widget: a native widget (a #GtkWidget as gpointer)
  *
  * Packs a chrome widget below the view area (e.g. a status bar).
+ * No-op while kiosk mode is enabled so the page fills the window.
  */
 void        gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget);
 

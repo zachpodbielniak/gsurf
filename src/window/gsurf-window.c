@@ -353,6 +353,7 @@ gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget)
 	g_return_if_fail(GSURF_IS_WINDOW(self));
 
 	klass = GSURF_WINDOW_GET_CLASS(self);
+	/* Kiosk hides chrome like a PWA; modules stay loaded and dispatch. */
 	if (!gsurf_kiosk_is_enabled() && klass->add_chrome_widget != NULL)
 		klass->add_chrome_widget(self, widget, TRUE);
 }

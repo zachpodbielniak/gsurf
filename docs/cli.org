@@ -38,4 +38,4 @@ If no URI is given, the configured homepage is opened.
 
 * Kiosk and PWA launchers
 
-See [[file:kiosk-pwa.org][Kiosk mode and site applications]] for examples, installation locations, module restrictions, and PWA scope.
+See [[file:kiosk-pwa.org][Kiosk mode and site applications]] for examples, installation locations, chrome hiding, and PWA scope.

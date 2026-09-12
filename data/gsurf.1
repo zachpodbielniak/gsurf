@@ -56,9 +56,10 @@ Start in fullscreen mode.
 Print the version (and active backend) and exit.
 .TP
 .B \-\-kiosk
-Require one URI, hide browser chrome, skip modules, and disable URL entry,
-new views/popups, native context menus, and the inspector. Normal page navigation
-remains available. Fullscreen is optional; add \-\-fullscreen if wanted.
+Require one URI, hide browser chrome, and disable URL entry, new views/popups,
+native context menus, and the inspector. Enabled modules still load; chrome
+widgets are not packed. Normal page navigation remains available. Fullscreen
+is optional; add \-\-fullscreen if wanted. Use \-\-no-modules to skip modules.
 .TP
 .B \-\-pwa
 Install the single HTTP(S) URI as a desktop launcher running gsurf in kiosk mode,

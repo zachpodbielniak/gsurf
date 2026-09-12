@@ -3,7 +3,7 @@
 #+authors: Zach Podbielniak
 #+categories: gsurf browser desktop
 #+created: 2026-09-11T20:00:00-04:00
-#+updated: 2026-09-11T20:00:00-04:00
+#+updated: 2026-09-11T22:00:00-04:00
 #+version: 1
 
 * Open a site as an application
@@ -17,7 +17,7 @@ gsurf --kiosk --fullscreen https://example.org
 
 Normal links, forms, redirects, history navigation, reload, zoom, scrolling, page text editing, and closing the window continue to work. Kiosk does not force fullscreen; add =--fullscreen= when wanted. This is an application-style browser UI, not a domain allowlist or operating-system security boundary: page content can navigate to other sites, and local configuration remains trusted.
 
-Kiosk sessions load normal YAML/C settings but skip all runtime modules, including chromebar, tabs, status bar, bookmarks, session restore, modal navigation, adblock, userscripts, and MCP. This prevents module-specific controls and restored sessions from reintroducing arbitrary URL entry. In-page functionality supplied by the site still works. Links that require a separate popup window will not work in kiosk mode.
+Kiosk sessions load normal YAML/C settings and the same enabled runtime modules as an ordinary session. Address, tab, and status bars are not packed into the window; URL-entry and new-view actions stay blocked even if a chrome module is loaded. Adblock, userscripts, modal navigation, search engines, MCP, and other non-chrome modules keep working. Session restore does not override a CLI URI. In-page functionality supplied by the site still works. Links that require a separate popup window will not work in kiosk mode. Use =--no-modules= to skip modules.
 
 * Install a site launcher
 
@@ -41,8 +41,8 @@ A PWA here means a desktop shortcut launching a site in gsurf's restricted appli
 
 * Library and validation
 
-Hosts can set =GsurfConfig.kiosk= on the default configuration before constructing windows/views. The shared view/window layer blocks additional views, popup dispatch, inspector dispatch, and added chrome widgets. Hosts must enforce their own action/module policy; the standalone CLI uses =gsurf_kiosk_allows_action()= and skips module loading. This flag is selected by the host, not by a YAML key, and is not intended for live toggling of an existing window.
+Hosts can set =GsurfConfig.kiosk= on the default configuration before constructing windows/views. The shared view/window layer blocks additional views, popup dispatch, inspector dispatch, and added chrome widgets. Hosts must enforce their own action policy; the standalone CLI uses =gsurf_kiosk_allows_action()= and still loads modules unless =--no-modules= is given. This flag is selected by the host, not by a YAML key, and is not intended for live toggling of an existing window.
 
-=gsurf_pwa_install()= provides display-independent installation with an explicit executable and destination. =make test= (also =make tests=) covers the shared kiosk guards, ordinary-session behavior, invalid inputs, idempotent installation, naming, distinct sites on one host, I/O failures, real desktop Exec parsing/launching with special characters, and headless CLI installation into a temporary XDG directory. Root test runs omit actual system installation. =make gir= validates introspection metadata; =make test-gui= needs =xvfb-run= (Fedora package =xorg-x11-server-Xvfb=).
+=gsurf_pwa_install()= provides display-independent installation with an explicit executable and destination. =make test= (also =make tests=) covers the shared kiosk guards, chrome-widget omission with modules still dispatching, ordinary-session behavior, invalid inputs, idempotent installation, naming, distinct sites on one host, I/O failures, real desktop Exec parsing/launching with special characters, and headless CLI installation into a temporary XDG directory. Root test runs omit actual system installation. =make gir= validates introspection metadata; =make test-gui= needs =xvfb-run= (Fedora package =xorg-x11-server-Xvfb=).
 
 Desktop escaping follows the [[https://specifications.freedesktop.org/desktop-entry/latest-single/][freedesktop Desktop Entry specification]]; the executable-percent restriction reflects [[https://github.com/GNOME/glib/blob/main/gio/gdesktopappinfo.c][GLib's desktop launcher implementation]].

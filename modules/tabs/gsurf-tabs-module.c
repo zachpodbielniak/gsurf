@@ -259,6 +259,12 @@ gsurf_tabs_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	if (window == NULL)
 		return FALSE;
 
+	/* Kiosk keeps the module loaded but never opens extra views. */
+	if (gsurf_kiosk_is_enabled() &&
+	    ((self->key_new && gsurf_keys_match(keyval, state, self->key_new)) ||
+	     (self->key_reopen && gsurf_keys_match(keyval, state, self->key_reopen))))
+		return TRUE;
+
 	if (self->key_new && gsurf_keys_match(keyval, state, self->key_new)) {
 		open_tab_uri(window, NULL);
 		return TRUE;
@@ -309,6 +315,10 @@ gsurf_tabs_activate(GsurfModule *module)
 
 	self->window = window;
 	g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&self->window);
+
+	/* Extra views are already rejected in kiosk; skip the tab strip. */
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
 
 	install_css(self);
 

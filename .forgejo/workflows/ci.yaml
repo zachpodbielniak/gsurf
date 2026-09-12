@@ -36,6 +36,13 @@ jobs:
       - name: Build (lib + binary + modules + MCP)
         run: make MCP=1
 
+      - name: Regress parallel clean and rebuild (release and debug)
+        run: |
+          make clean all -j
+          make DEBUG=1 clean all -j
+          make DEBUG=1 clean all -j
+          make DEBUG=1 tests -j
+
       - name: Build GObject Introspection data
         run: make MCP=1 BUILD_GIR=1 gir
 
