@@ -212,6 +212,83 @@ on_help_destroy(GtkWidget *dialog, gpointer user_data)
 		g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", NULL);
 }
 
+/* Move the tree cursor by @delta rows and keep the cell in view. */
+static void
+help_tree_move(GtkTreeView *tree, gint delta)
+{
+	GtkTreeModel *model;
+	GtkTreePath *path = NULL;
+	gint n;
+	gint idx = 0;
+	gint *indices;
+
+	model = gtk_tree_view_get_model(tree);
+	n = gtk_tree_model_iter_n_children(model, NULL);
+	if (n <= 0)
+		return;
+
+	gtk_tree_view_get_cursor(tree, &path, NULL);
+	if (path != NULL) {
+		indices = gtk_tree_path_get_indices(path);
+		idx = indices[0] + delta;
+		gtk_tree_path_free(path);
+	} else if (delta < 0) {
+		idx = n - 1;
+	}
+
+	if (idx < 0)
+		idx = 0;
+	if (idx >= n)
+		idx = n - 1;
+
+	path = gtk_tree_path_new_from_indices(idx, -1);
+	gtk_tree_view_set_cursor(tree, path, NULL, FALSE);
+	gtk_tree_view_scroll_to_cell(tree, path, NULL, FALSE, 0, 0);
+	gtk_tree_path_free(path);
+}
+
+static void
+help_scroll_x(GtkScrolledWindow *scrolled, gint delta)
+{
+	GtkAdjustment *adj;
+
+	adj = gtk_scrolled_window_get_hadjustment(scrolled);
+	if (adj == NULL)
+		return;
+	gtk_adjustment_set_value(adj, gtk_adjustment_get_value(adj) + (gdouble)delta);
+}
+
+/* q closes; hjkl move. Typeahead search is off so letters are ours. */
+static gboolean
+on_help_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+{
+	GtkTreeView *tree = GTK_TREE_VIEW(user_data);
+	GtkWidget *scrolled;
+	GtkWidget *toplevel;
+	GsurfKeybindHelpKey action;
+
+	action = gsurf_keybind_help_key_action(event->keyval,
+		translate_modifiers(event->state));
+	if (action == GSURF_KEYBIND_HELP_KEY_NONE)
+		return FALSE;
+	if (action == GSURF_KEYBIND_HELP_KEY_CLOSE) {
+		toplevel = gtk_widget_get_toplevel(widget);
+		if (GTK_IS_WINDOW(toplevel))
+			gtk_widget_destroy(toplevel);
+		return TRUE;
+	}
+
+	scrolled = gtk_widget_get_parent(GTK_WIDGET(tree));
+	if (action == GSURF_KEYBIND_HELP_KEY_UP)
+		help_tree_move(tree, -1);
+	else if (action == GSURF_KEYBIND_HELP_KEY_DOWN)
+		help_tree_move(tree, 1);
+	else if (GTK_IS_SCROLLED_WINDOW(scrolled))
+		help_scroll_x(GTK_SCROLLED_WINDOW(scrolled),
+			action == GSURF_KEYBIND_HELP_KEY_LEFT ? -80 : 80);
+	return TRUE;
+}
+
 static void
 gsurf_gtk3_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 {
@@ -230,7 +307,7 @@ gsurf_gtk3_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 		return;
 	}
 
-	dialog = gtk_dialog_new_with_buttons("Keybindings",
+	dialog = gtk_dialog_new_with_buttons("Keybindings (hjkl / q)",
 		GTK_WINDOW(self->window),
 		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
 		"_Close", GTK_RESPONSE_CLOSE,
@@ -258,8 +335,15 @@ gsurf_gtk3_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 	tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
 	g_object_unref(store);
 	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
-	gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree), TRUE);
-	gtk_tree_view_set_search_column(GTK_TREE_VIEW(tree), 0);
+	gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree), FALSE);
+	gtk_tree_selection_set_mode(gtk_tree_view_get_selection(GTK_TREE_VIEW(tree)),
+		GTK_SELECTION_BROWSE);
+	if (entries != NULL && entries->len > 0) {
+		GtkTreePath *path = gtk_tree_path_new_first();
+
+		gtk_tree_view_set_cursor(GTK_TREE_VIEW(tree), path, NULL, FALSE);
+		gtk_tree_path_free(path);
+	}
 
 	renderer = gtk_cell_renderer_text_new();
 	g_object_set(renderer, "family", "monospace", NULL);
@@ -279,7 +363,10 @@ gsurf_gtk3_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 
 	content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
 	gtk_box_pack_start(GTK_BOX(content), scrolled, TRUE, TRUE, 0);
+	g_signal_connect(tree, "key-press-event", G_CALLBACK(on_help_key_press), tree);
+	g_signal_connect(dialog, "key-press-event", G_CALLBACK(on_help_key_press), tree);
 	gtk_widget_show_all(dialog);
+	gtk_widget_grab_focus(tree);
 }
 
 static void

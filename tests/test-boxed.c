@@ -144,6 +144,29 @@ test_keybind_help(void)
 	gsurf_keybind_help_append(entries, "", "ignored", "core", "none");
 	g_assert_cmpuint(entries->len, ==, 1);
 	g_ptr_array_unref(entries);
+
+	g_assert_cmpint(gsurf_keybind_help_key_action('j', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_DOWN);
+	g_assert_cmpint(gsurf_keybind_help_key_action('k', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_UP);
+	g_assert_cmpint(gsurf_keybind_help_key_action('h', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_LEFT);
+	g_assert_cmpint(gsurf_keybind_help_key_action('l', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_RIGHT);
+	g_assert_cmpint(gsurf_keybind_help_key_action('q', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_CLOSE);
+	g_assert_cmpint(gsurf_keybind_help_key_action('Q', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_CLOSE);
+	g_assert_cmpint(gsurf_keybind_help_key_action('?', GSURF_MOD_SHIFT),
+		==, GSURF_KEYBIND_HELP_KEY_CLOSE);
+	g_assert_cmpint(gsurf_keybind_help_key_action(0xff1b, GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_CLOSE);
+	g_assert_cmpint(gsurf_keybind_help_key_action('j', GSURF_MOD_CTRL),
+		==, GSURF_KEYBIND_HELP_KEY_NONE);
+	g_assert_cmpint(gsurf_keybind_help_key_action('q', GSURF_MOD_CTRL),
+		==, GSURF_KEYBIND_HELP_KEY_NONE);
+	g_assert_cmpint(gsurf_keybind_help_key_action('J', GSURF_MOD_NONE),
+		==, GSURF_KEYBIND_HELP_KEY_NONE);
 }
 
 static void

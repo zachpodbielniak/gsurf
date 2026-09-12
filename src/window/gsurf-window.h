@@ -126,8 +126,8 @@ void        gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget);
  * @entries: (element-type GsurfKeybindHelp) (nullable): rows to display
  *
  * Shows a popup listing currently active keybindings. GTK backends use a
- * native dialog; other backends inject an in-page overlay. Pressing the
- * help key again, or Escape, dismisses it.
+ * native dialog; other backends inject an in-page overlay. `hjkl` move
+ * through the list; `q`, `?`, or Escape dismisses it.
  */
 void        gsurf_window_show_keybind_help(GsurfWindow *self, GPtrArray *entries);
 
