@@ -50,6 +50,10 @@ gsurf_application_add_window(GsurfApplication *self, GsurfWindow *window)
 	g_return_if_fail(GSURF_IS_APPLICATION(self));
 	g_return_if_fail(GSURF_IS_WINDOW(window));
 
+	/* One close handler and owned reference per tracked window. */
+	if (g_ptr_array_find(self->windows, window, NULL))
+		return;
+
 	g_ptr_array_add(self->windows, g_object_ref(window));
 	/* Retained windows must not call back into a disposed application. */
 	g_signal_connect_object(window, "close-request",

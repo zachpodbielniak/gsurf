@@ -313,6 +313,10 @@ gsurf_window_add_view(GsurfWindow *self, GsurfView *view)
 	klass = GSURF_WINDOW_GET_CLASS(self);
 
 	first = (priv->views->len == 0);
+	/* Native containers cannot insert the same widget twice, and one
+	 * removal must release the view's entire membership in this window. */
+	if (g_ptr_array_find(priv->views, view, NULL))
+		return;
 	if (!first && gsurf_kiosk_is_enabled())
 		return;
 	g_ptr_array_add(priv->views, g_object_ref(view));
@@ -378,6 +382,10 @@ gsurf_window_set_active_view(GsurfWindow *self, GsurfView *view)
 	klass = GSURF_WINDOW_GET_CLASS(self);
 
 	if (priv->active == view)
+		return;
+
+	/* The active pointer borrows the reference held by the view list. */
+	if (!g_ptr_array_find(priv->views, view, NULL))
 		return;
 
 	priv->active = view;

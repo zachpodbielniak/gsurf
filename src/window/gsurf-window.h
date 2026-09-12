@@ -65,8 +65,25 @@ struct _GsurfWindowClass
 };
 
 /* --- View management (handled by the abstract base) --- */
+/**
+ * gsurf_window_add_view:
+ * @self: a #GsurfWindow
+ * @view: (transfer none): the view to add
+ *
+ * Takes a reference to @view and inserts it into the window. Adding the
+ * same view again is a no-op, including native insertion and signals.
+ * Kiosk mode prevents adding a second view.
+ */
 void        gsurf_window_add_view(GsurfWindow *self, GsurfView *view);
 void        gsurf_window_remove_view(GsurfWindow *self, GsurfView *view);
+/**
+ * gsurf_window_set_active_view:
+ * @self: a #GsurfWindow
+ * @view: (transfer none): a view already added to @self
+ *
+ * Selects an owned view. A view absent from this window's list is ignored
+ * without changing the native selection or emitting a signal.
+ */
 void        gsurf_window_set_active_view(GsurfWindow *self, GsurfView *view);
 /**
  * gsurf_window_get_active_view:
