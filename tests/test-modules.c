@@ -93,6 +93,119 @@ test_search_engines(void)
 }
 
 static void
+test_search_routing(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autofree gchar *so = module_so_path("search_engines");
+	GsurfModule *mod;
+	gsize i;
+	const struct {
+		const gchar *input;
+		const gchar *expected;
+	} cases[] = {
+		{ "g site cats & dogs", "https://site.test/?q=cats%20%26%20dogs" },
+		{ "g cats", "https://general.test/?q=cats" },
+		{ " \tg cats \r\n", "https://general.test/?q=cats" },
+		{ "g café/#%", "https://general.test/?q=caf%C3%A9%2F%23%25" },
+		{ "append cats", "https://append.test/?q=cats" },
+		{ "bare words", "https://default.test/?q=bare%20words" },
+		{ "localhost tutorial", "https://default.test/?q=localhost%20tutorial" },
+		{ "localhostish", "https://default.test/?q=localhostish" },
+		{ "hello\tworld.test", "https://default.test/?q=hello%09world.test" },
+		{ "empty cats", "https://default.test/?q=empty%20cats" },
+		{ "example.com", NULL },
+		{ "localhost:8080/path", NULL },
+		{ "localhost/path", NULL },
+		{ "https://example.com", NULL },
+		{ "mailto:root", NULL },
+		{ "magnet:?xt=urn:btih:abc", NULL },
+		{ "javascript:void(0)", NULL },
+		{ "ABOUT:blank", NULL },
+		{ "data:text/plain,hello world", NULL },
+		{ " \t\r\n", NULL },
+		{ "", NULL },
+		{ NULL, NULL }
+	};
+	const gchar *yaml =
+		"modules:\n"
+		"  search_engines:\n"
+		"    enabled: true\n"
+		"    default: fallback\n"
+		"    engines:\n"
+		"      general: { prefix: 'g ', url: 'https://general.test/?q=%s' }\n"
+		"      site: { prefix: 'g site ', url: 'https://site.test/?q=%s' }\n"
+		"      fallback: { prefix: '', url: 'https://default.test/?q=%s' }\n"
+		"      append: { prefix: 'append ', url: 'https://append.test/?q=' }\n"
+		"      empty: { prefix: 'empty ', url: '' }\n";
+
+	/* Exercise the actual shared module and manager dispatch, including
+	 * overlapping prefixes and escaping untrusted query characters. */
+	g_assert_true(g_file_test(so, G_FILE_TEST_EXISTS));
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
+	g_assert_no_error(error);
+	gsurf_module_manager_set_config(mgr, config);
+	mod = gsurf_module_manager_load_module(mgr, so, &error);
+	g_assert_no_error(error);
+	g_assert_nonnull(mod);
+	gsurf_module_manager_activate_all(mgr);
+	for (i = 0; i < G_N_ELEMENTS(cases); i++) {
+		g_autofree gchar *out = NULL;
+
+		g_test_message("input: %s", cases[i].input != NULL ? cases[i].input : "(null)");
+		out = gsurf_module_manager_dispatch_rewrite_uri(mgr, cases[i].input);
+		g_assert_cmpstr(out, ==, cases[i].expected);
+	}
+}
+
+static void
+test_search_reconfigure(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autofree gchar *so = module_so_path("search_engines");
+	GsurfModule *mod = NULL;
+	gsize i;
+	const struct {
+		const gchar *yaml;
+		const gchar *input;
+		const gchar *expected;
+	} cases[] = {
+		{ TEST_YAML, "g cats", "https://www.google.com/search?q=cats" },
+		{ "modules:\n  search_engines: {default_is_search: false}\n", "g cats", NULL },
+		{ "modules:\n  search_engines:\n    default: new\n    engines:\n"
+		  "      new: {url: 'https://new.test/?q=%s'}\n",
+		  "cats", "https://new.test/?q=cats" },
+		{ "modules:\n  search_engines: {default: missing}\n", "cats", NULL },
+		{ TEST_YAML, "cats", "https://duckduckgo.com/?q=cats" },
+		{ "modules: {}\n", "g cats", NULL }
+	};
+
+	/* Fresh snapshots must replace all previous routing state. Keeping the
+	 * same module instance detects stale prefixes, URLs and fallback flags. */
+	g_assert_true(g_file_test(so, G_FILE_TEST_EXISTS));
+	for (i = 0; i < G_N_ELEMENTS(cases); i++) {
+		g_autoptr(GsurfConfig) config = gsurf_config_new();
+		g_autofree gchar *out = NULL;
+
+		g_assert_true(gsurf_config_load_from_data(config, cases[i].yaml, -1, &error));
+		g_assert_no_error(error);
+		if (mod == NULL) {
+			gsurf_module_manager_set_config(mgr, config);
+			mod = gsurf_module_manager_load_module(mgr, so, &error);
+			g_assert_no_error(error);
+			g_assert_nonnull(mod);
+			gsurf_module_manager_activate_all(mgr);
+		} else {
+			gsurf_module_configure(mod, config);
+		}
+		out = gsurf_module_manager_dispatch_rewrite_uri(mgr, cases[i].input);
+		g_assert_cmpstr(out, ==, cases[i].expected);
+	}
+}
+
+static void
 test_history(void)
 {
 	g_autoptr(GError) error = NULL;
@@ -407,6 +520,8 @@ main(int argc, char *argv[])
 {
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/gsurf/modules/search-engines", test_search_engines);
+	g_test_add_func("/gsurf/modules/search-routing", test_search_routing);
+	g_test_add_func("/gsurf/modules/search-reconfigure", test_search_reconfigure);
 	g_test_add_func("/gsurf/modules/history", test_history);
 	g_test_add_func("/gsurf/modules/adblock", test_adblock);
 	g_test_add_func("/gsurf/modules/adblock-content-filters", test_adblock_content_filters);

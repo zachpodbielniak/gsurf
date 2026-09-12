@@ -38,13 +38,17 @@ G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfSearchEnginesModule, gsurf_search_engines_mod
 static gboolean
 looks_like_url(const gchar *s)
 {
-	if (strstr(s, "://") != NULL)
+	/* Schemes need not contain :// (mailto:, magnet:, javascript:, etc.). */
+	if (g_uri_peek_scheme(s) != NULL)
 		return TRUE;
-	if (g_str_has_prefix(s, "about:") || g_str_has_prefix(s, "file:") ||
-	    g_str_has_prefix(s, "data:") || g_str_has_prefix(s, "localhost"))
+	if (strpbrk(s, " \t\r\n\f\v") != NULL)
+		return FALSE;
+	if (g_str_has_prefix(s, "localhost") &&
+	    (s[9] == '\0' || s[9] == '/' || s[9] == ':' ||
+	     s[9] == '?' || s[9] == '#'))
 		return TRUE;
 	/* No spaces and contains a dot -> probably a bare hostname. */
-	if (strchr(s, ' ') == NULL && strchr(s, '.') != NULL)
+	if (strchr(s, '.') != NULL)
 		return TRUE;
 	return FALSE;
 }
@@ -72,17 +76,30 @@ gsurf_search_engines_rewrite_uri(GsurfUriHandler *handler, const gchar *input)
 	GsurfSearchEnginesModule *self = GSURF_SEARCH_ENGINES_MODULE(handler);
 	GHashTableIter iter;
 	gpointer key, value;
+	g_autofree gchar *trimmed = NULL;
+	const gchar *best_url = NULL;
+	gsize best_length = 0;
 
-	if (input == NULL || *input == '\0')
+	if (input == NULL)
+		return NULL;
+	trimmed = g_strstrip(g_strdup(input));
+	input = trimmed;
+	if (*input == '\0')
 		return NULL;
 
-	/* Prefix match: "g cats" -> google search for "cats". */
+	/* Most-specific prefix wins, independently of hash iteration order. */
 	g_hash_table_iter_init(&iter, self->engines);
 	while (g_hash_table_iter_next(&iter, &key, &value)) {
 		const gchar *prefix = key;
-		if (g_str_has_prefix(input, prefix))
-			return build_search_url(value, input + strlen(prefix));
+		gsize length = strlen(prefix);
+
+		if (length > best_length && g_str_has_prefix(input, prefix)) {
+			best_length = length;
+			best_url = value;
+		}
 	}
+	if (best_url != NULL)
+		return build_search_url(best_url, input + best_length);
 
 	/* Bare words -> default engine. */
 	if (self->default_is_search && self->default_url != NULL &&
@@ -119,6 +136,12 @@ gsurf_search_engines_configure(GsurfModule *module, gpointer config_ptr)
 	YamlMapping *m, *engines;
 	const gchar *default_name = NULL;
 
+	/* configure() receives a complete snapshot, not a delta. Removed
+	 * engines and defaults must not survive a reload, even an absent node. */
+	g_hash_table_remove_all(self->engines);
+	g_clear_pointer(&self->default_url, g_free);
+	self->default_is_search = TRUE;
+
 	node = gsurf_config_get_module_node(config, "search_engines");
 	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
 		return;
@@ -141,10 +164,12 @@ gsurf_search_engines_configure(GsurfModule *module, gpointer config_ptr)
 				continue;
 			prefix = yaml_mapping_get_string_member(e, "prefix");
 			url = yaml_mapping_get_string_member(e, "url");
-			if (url == NULL)
+			if (url == NULL || *url == '\0')
 				continue;
 
-			if (prefix != NULL)
+			/* An empty prefix would capture every address. Default-only
+			 * engines may omit the prefix or explicitly leave it empty. */
+			if (prefix != NULL && *prefix != '\0')
 				g_hash_table_replace(self->engines,
 					g_strdup(prefix), g_strdup(url));
 			if (default_name != NULL && g_strcmp0(name, default_name) == 0) {
