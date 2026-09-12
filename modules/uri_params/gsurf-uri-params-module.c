@@ -106,6 +106,8 @@ gsurf_uri_params_configure(GsurfModule *module, gpointer config_ptr)
 	rules = yaml_mapping_get_sequence_member(m, "rules");
 	if (rules == NULL)
 		return;
+	/* A supplied sequence replaces the previous rules, including []. */
+	g_ptr_array_set_size(self->rules, 0);
 	n = yaml_sequence_get_length(rules);
 	for (i = 0; i < n; i++) {
 		YamlNode *en = yaml_sequence_get_element(rules, i);

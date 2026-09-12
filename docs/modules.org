@@ -71,6 +71,14 @@ Empty URL templates are ignored. Empty prefixes do not match every address; an e
 
 The =/gsurf/modules/search-routing= and =/gsurf/modules/search-reconfigure= regressions load the real module and exercise manager dispatch without a display or network connection.
 
+* Reconfiguring settings modules
+
+When a host calls =gsurf_module_configure()= again, a supplied =uri_params.rules= or =useragent.rules= sequence replaces that module's previous rules. An empty sequence (=rules: []=) removes all rules; omitting the sequence preserves it. New user-agent rules take effect immediately instead of being masked by earlier first-match rules.
+
+A supplied =useragent.presets= mapping likewise replaces the previous mapping, including an empty =presets: {}=. Presets are resolved when rules are configured, so supply the rules again when changing their preset definitions. Unrecognized preset names remain literal user-agent strings. Options omitted from the update retain their previous values.
+
+Module priorities are signed integers, ordered from lowest to highest when modules are added and when =gsurf_module_manager_activate_all()= runs. The full =gint= range is supported; changing priorities after activation requires another activation pass to reorder dispatch.
+
 * Hosts-file parsing and download destinations
 
 The adblock module accepts bare domains and hosts-file lines with an IPv4 or IPv6 address followed by one or more hostname aliases. It ignores blank lines and comments, including trailing =#= comments. Hostnames are normalized to lowercase ASCII (including internationalized domain names), with a trailing DNS root dot removed. Blocked and whitelisted domains match whole labels and their subdomains; whitelist matches take precedence. Invalid non-host tokens are excluded from generated filter JSON.

@@ -96,6 +96,8 @@ gsurf_useragent_configure(GsurfModule *module, gpointer config_ptr)
 	presets = yaml_mapping_get_mapping_member(m, "presets");
 	if (presets != NULL) {
 		GList *names = yaml_mapping_get_members(presets), *l;
+		/* Removed names must no longer resolve to a cached preset. */
+		g_hash_table_remove_all(self->presets);
 		for (l = names; l != NULL; l = l->next)
 			g_hash_table_replace(self->presets, g_strdup(l->data),
 				g_strdup(yaml_mapping_get_string_member(presets, l->data)));
@@ -104,6 +106,8 @@ gsurf_useragent_configure(GsurfModule *module, gpointer config_ptr)
 
 	rules = yaml_mapping_get_sequence_member(m, "rules");
 	if (rules != NULL) {
+		/* Matching is first-wins: retaining old rules masks replacements. */
+		g_ptr_array_set_size(self->rules, 0);
 		n = yaml_sequence_get_length(rules);
 		for (i = 0; i < n; i++) {
 			YamlNode *en = yaml_sequence_get_element(rules, i);
