@@ -71,6 +71,13 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 1, GSURF_TYPE_VIEW);
 
+	/**
+	 * GsurfWindow::active-view-changed:
+	 * @self: the window
+	 * @view: (nullable): the new active view, or %NULL when empty
+	 *
+	 * Emitted after switching views, including removal of the active view.
+	 */
 	signals[SIG_ACTIVE_VIEW_CHANGED] = g_signal_new(
 		"active-view-changed", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
@@ -178,11 +185,15 @@ gsurf_window_remove_view(GsurfWindow *self, GsurfView *view)
 	g_ptr_array_remove_index(priv->views, idx);
 
 	if (priv->active == view) {
-		priv->active = priv->views->len > 0
-			? g_ptr_array_index(priv->views, MIN(idx, priv->views->len - 1))
-			: NULL;
-		if (priv->active != NULL)
-			gsurf_window_set_active_view(self, priv->active);
+		/* Let the setter update the active pointer: preassigning it makes
+		 * its equality guard skip the backend switch and notification. */
+		if (priv->views->len > 0) {
+			gsurf_window_set_active_view(self,
+				g_ptr_array_index(priv->views, MIN(idx, priv->views->len - 1)));
+		} else {
+			priv->active = NULL;
+			g_signal_emit(self, signals[SIG_ACTIVE_VIEW_CHANGED], 0, NULL);
+		}
 	}
 
 	g_signal_emit(self, signals[SIG_VIEW_REMOVED], 0, view);

@@ -234,8 +234,12 @@ gsurf_mousebind_set_arg(
 	GsurfMousebind	*mousebind,
 	const gchar	*arg
 ){
+	gchar *copy;
+
 	g_return_if_fail(mousebind != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(arg);
 	g_free(mousebind->arg);
-	mousebind->arg = g_strdup(arg);
+	mousebind->arg = copy;
 }

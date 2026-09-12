@@ -88,7 +88,7 @@ on_download_decide_destination(WebKitDownload *download, const gchar *suggested,
 	file_uri = g_filename_to_uri(path, NULL, NULL);
 	if (file_uri != NULL)
 		webkit_download_set_destination(download, file_uri);
-	return TRUE;
+	return file_uri != NULL;
 }
 
 static void
@@ -813,6 +813,12 @@ gsurf_webkit2_view_dispose(GObject *object)
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(object);
 
 	if (self->webview != NULL) {
+		/* The host may retain the native widget, and the context is shared.
+		 * Neither may keep callbacks into a disposed library wrapper. */
+		g_signal_handlers_disconnect_by_data(
+			webkit_web_view_get_user_content_manager(self->webview), self);
+		g_signal_handlers_disconnect_by_data(
+			webkit_web_view_get_context(self->webview), self);
 		g_signal_handlers_disconnect_by_data(self->webview, self);
 		g_clear_object(&self->webview);
 	}

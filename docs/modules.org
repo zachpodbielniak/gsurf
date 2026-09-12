@@ -60,3 +60,9 @@ modules such as page-summary and chat. The architecture reserves room for it
 
 Detailed docs live under =docs/modules/<name>.org= as each module lands. The
 =search_engines= and =mcp= modules are the reference implementations.
+
+* Hosts-file parsing and download destinations
+
+The adblock module accepts bare domains and hosts-file lines with an IPv4 or IPv6 address followed by one or more hostname aliases. It ignores blank lines and comments, including trailing =#= comments. Hostnames are normalized to lowercase ASCII (including internationalized domain names), with a trailing DNS root dot removed. Blocked and whitelisted domains match whole labels and their subdomains; whitelist matches take precedence. Invalid non-host tokens are excluded from generated filter JSON.
+
+The downloads module treats the suggested name as a filename: it strips directory components, substitutes =download= for empty names, dot components and roots, and resolves relative =dir:= settings against the process working directory. Directory creation failures are logged and leave destination handling to the engine. This is filename containment, not a guarantee against another local process replacing directory entries; existing WebKit overwrite behavior is unchanged.

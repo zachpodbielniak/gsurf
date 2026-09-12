@@ -460,6 +460,9 @@ gsurf_webkit6_view_dispose(GObject *object)
 	GsurfWebkit6View *self = GSURF_WEBKIT6_VIEW(object);
 
 	if (self->webview != NULL) {
+		/* The content manager can outlive the library wrapper in embedders. */
+		g_signal_handlers_disconnect_by_data(
+			webkit_web_view_get_user_content_manager(self->webview), self);
 		g_signal_handlers_disconnect_by_data(self->webview, self);
 		g_clear_object(&self->webview);
 	}

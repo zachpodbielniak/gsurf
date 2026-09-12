@@ -271,10 +271,14 @@ gsurf_hit_test_set_link_uri(
 	GsurfHitTest    *hit_test,
 	const gchar     *link_uri
 ){
+	gchar *copy;
+
 	g_return_if_fail(hit_test != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(link_uri);
 	g_free(hit_test->link_uri);
-	hit_test->link_uri = g_strdup(link_uri);
+	hit_test->link_uri = copy;
 }
 
 /*
@@ -289,10 +293,14 @@ gsurf_hit_test_set_image_uri(
 	GsurfHitTest    *hit_test,
 	const gchar     *image_uri
 ){
+	gchar *copy;
+
 	g_return_if_fail(hit_test != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(image_uri);
 	g_free(hit_test->image_uri);
-	hit_test->image_uri = g_strdup(image_uri);
+	hit_test->image_uri = copy;
 }
 
 /*
@@ -307,10 +315,14 @@ gsurf_hit_test_set_media_uri(
 	GsurfHitTest    *hit_test,
 	const gchar     *media_uri
 ){
+	gchar *copy;
+
 	g_return_if_fail(hit_test != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(media_uri);
 	g_free(hit_test->media_uri);
-	hit_test->media_uri = g_strdup(media_uri);
+	hit_test->media_uri = copy;
 }
 
 /*
@@ -325,8 +337,12 @@ gsurf_hit_test_set_link_label(
 	GsurfHitTest    *hit_test,
 	const gchar     *link_label
 ){
+	gchar *copy;
+
 	g_return_if_fail(hit_test != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(link_label);
 	g_free(hit_test->link_label);
-	hit_test->link_label = g_strdup(link_label);
+	hit_test->link_label = copy;
 }
