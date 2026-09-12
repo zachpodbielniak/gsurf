@@ -42,7 +42,9 @@ characters as the number of targets increases. Type the chord to narrow the
 set; as soon as one target remains it is clicked. =F= opens the chosen link in a
 new view, and =Escape= cancels. Configure the keys/colors under
 =modules.modal= (=hint_key=, =hint_key_newview=, =hint_chars=, =hint_bg=,
-=hint_fg=).
+=hint_fg=, =hint_font_size=). Font size is a positive integer in CSS pixels, defaulting to =11=; invalid values retain the previous size and log a warning. Set =hint_font_size: 15= for larger labels in both =f= and =F= sessions.
+
+In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf_config_load_from_data()=, as demonstrated by =data/sensible-config.c=. Supply the complete modules block: this loader replaces the retained modules mapping rather than merging individual options. Restart the browser with the rebuilt modal module to apply the change.
 
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.

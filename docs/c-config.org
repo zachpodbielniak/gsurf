@@ -38,6 +38,18 @@ gsurf_config_init(void)
 }
 #+end_src
 
+* Running with only a C config
+
+Use =data/sensible-config.c= as a complete starter: core settings and bindings are C assignments, while module options are supplied in its embedded =SENSIBLE_MODULES_YAML= string. Set the modal entry to ="    hint_font_size: 15\n"= to enlarge the =f=/=F= labels from the default 11 CSS pixels to 15. Sizes must be positive integers no larger than =G_MAXINT=; invalid values log a warning and retain the current size.
+
+Put the following in =~/.config/gsurf/config.yaml=:
+
+#+begin_src yaml
+ignore_yaml: true
+#+end_src
+
+This skips that YAML document; built-in defaults still initialize the browser, and =~/.config/gsurf/config.c= runs afterward. It does not disable parsing the embedded module YAML supplied by the C config. Keep the entire desired =modules:= block in the C config, because =gsurf_config_load_from_data()= replaces the retained modules mapping rather than merging entries. Restart with the rebuilt modal module to use the new hint-size option.
+
 * CRISPY_PARAMS
 
 An optional =#define CRISPY_PARAMS "..."= near the top supplies extra compiler
