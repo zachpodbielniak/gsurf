@@ -3,7 +3,7 @@
 
 Modules are loadable =.so= extensions — gsurf's equivalent of surf patches. Each
 is enabled under the =modules:= section of the config. See [[file:module-system.org][module-system.org]] to
-write one. =gsurf --list-modules= prints the registry.
+write one. =gsurf --list-modules= prints the registry in alphabetical order.
 
 Status: *implemented* modules ship and are tested; *planned* modules are designed
 (registry entry + config schema present) and follow the established pattern.
