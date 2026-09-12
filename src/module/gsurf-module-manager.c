@@ -46,7 +46,11 @@ compare_priority(gconstpointer a, gconstpointer b)
 {
 	GsurfModule *ma = *(GsurfModule * const *)a;
 	GsurfModule *mb = *(GsurfModule * const *)b;
-	return gsurf_module_get_priority(ma) - gsurf_module_get_priority(mb);
+	gint pa = gsurf_module_get_priority(ma);
+	gint pb = gsurf_module_get_priority(mb);
+
+	/* Subtracting priorities can overflow and reverse the hook order. */
+	return (pa > pb) - (pa < pb);
 }
 
 /* --- Context --- */

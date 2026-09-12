@@ -226,6 +226,118 @@ test_enabled_gating(void)
 	g_object_unref(mgr);
 }
 
+/* Priorities are public gint values: comparisons must not overflow at
+ * either endpoint, both when registering and when activating modules. */
+static void
+test_priority_extremes(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = NULL;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *path = module_so_path("uri_params");
+	GsurfModule *first, *second;
+	GPtrArray *modules;
+
+	mgr = mgr_with("useragent", "modules:\n  useragent:\n    enabled: true\n");
+	if (mgr == NULL || !g_file_test(path, G_FILE_TEST_EXISTS)) {
+		g_test_skip("useragent.so and uri_params.so must be built");
+		return;
+	}
+	first = gsurf_module_manager_get_module(mgr, "useragent");
+	gsurf_module_set_priority(first, G_MININT);
+	second = gsurf_module_manager_load_module(mgr, path, &error);
+	g_assert_no_error(error);
+	g_assert_nonnull(second);
+	modules = gsurf_module_manager_get_modules(mgr);
+	g_assert_true(g_ptr_array_index(modules, 0) == first);
+
+	gsurf_module_set_priority(second, G_MAXINT);
+	gsurf_module_manager_activate_all(mgr);
+	g_assert_true(g_ptr_array_index(modules, 0) == first);
+	g_assert_true(g_ptr_array_index(modules, 1) == second);
+
+	/* Also exercise the opposite comparator argument order. */
+	gsurf_module_set_priority(first, G_MAXINT);
+	gsurf_module_set_priority(second, G_MININT);
+	gsurf_module_manager_activate_all(mgr);
+	g_assert_true(g_ptr_array_index(modules, 0) == second);
+}
+
+/* Supply a new configuration object just as an embedding host does. */
+static void
+reconfigure_module(GsurfModuleManager *mgr, const gchar *name, const gchar *yaml)
+{
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
+	g_assert_no_error(error);
+	gsurf_module_configure(gsurf_module_manager_get_module(mgr, name), config);
+}
+
+/* Removing a site from the replacement rules must restore baseline settings. */
+static void
+test_uri_params_reconfigure(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = NULL;
+	g_autoptr(GsurfSettings) settings = NULL;
+
+	mgr = mgr_with("uri_params",
+		"modules:\n  uri_params:\n    enabled: true\n"
+		"    rules:\n      - regex: old\n        settings: {javascript: false}\n");
+	if (mgr == NULL) {
+		g_test_skip("uri_params.so not built");
+		return;
+	}
+	reconfigure_module(mgr, "uri_params",
+		"modules:\n  uri_params:\n"
+		"    rules:\n      - regex: new\n        settings: {images: false}\n");
+	settings = gsurf_settings_new();
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://old.test");
+	g_assert_true(settings->javascript);
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://new.test");
+	g_assert_false(settings->images);
+
+	reconfigure_module(mgr, "uri_params", "modules:\n  uri_params:\n    rules: []\n");
+	settings->images = TRUE;
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://new.test");
+	g_assert_true(settings->images);
+}
+
+/* Replaced rules must win immediately, and empty collections remove both
+ * cached rules and named presets instead of retaining earlier values. */
+static void
+test_useragent_reconfigure(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = NULL;
+	g_autoptr(GsurfSettings) settings = NULL;
+
+	mgr = mgr_with("useragent",
+		"modules:\n  useragent:\n    enabled: true\n    default: Baseline\n"
+		"    presets: {desktop: OldAgent}\n"
+		"    rules:\n      - {regex: example, ua: desktop}\n");
+	if (mgr == NULL) {
+		g_test_skip("useragent.so not built");
+		return;
+	}
+	settings = gsurf_settings_new();
+	reconfigure_module(mgr, "useragent",
+		"modules:\n  useragent:\n    presets: {desktop: NewAgent}\n"
+		"    rules:\n      - {regex: example, ua: desktop}\n");
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://example.test");
+	g_assert_cmpstr(settings->user_agent, ==, "NewAgent");
+
+	reconfigure_module(mgr, "useragent",
+		"modules:\n  useragent:\n    presets: {}\n"
+		"    rules:\n      - {regex: example, ua: desktop}\n");
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://example.test");
+	/* Unknown preset names are documented literal user-agent strings. */
+	g_assert_cmpstr(settings->user_agent, ==, "desktop");
+
+	reconfigure_module(mgr, "useragent", "modules:\n  useragent:\n    rules: []\n");
+	gsurf_module_manager_dispatch_apply_settings(mgr, NULL, settings, "https://example.test");
+	g_assert_cmpstr(settings->user_agent, ==, "Baseline");
+}
+
 /* ---- hook dispatch through real modules ---- */
 
 static void
@@ -339,6 +451,9 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/search-paths", test_search_paths);
 	g_test_add_func("/gsurf/manager/load-modules-from-path", test_load_modules_from_path);
 	g_test_add_func("/gsurf/manager/priority-api", test_priority_api);
+	g_test_add_func("/gsurf/manager/priority-extremes", test_priority_extremes);
+	g_test_add_func("/gsurf/manager/uri-params-reconfigure", test_uri_params_reconfigure);
+	g_test_add_func("/gsurf/manager/useragent-reconfigure", test_useragent_reconfigure);
 	g_test_add_func("/gsurf/manager/enabled-gating", test_enabled_gating);
 	g_test_add_func("/gsurf/manager/uri-params", test_uri_params);
 	g_test_add_func("/gsurf/manager/useragent", test_useragent);
