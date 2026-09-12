@@ -94,7 +94,8 @@ static const GOptionEntry entries[] = {
 	{ NULL }
 };
 
-/* ===== Built-in module registry (drives --list-modules) ===== */
+/* ===== Built-in module registry (drives --list-modules) =====
+ * Keep this table name-sorted; print_module_list() also sorts at runtime. */
 
 typedef struct {
 	const gchar *name;
@@ -102,50 +103,73 @@ typedef struct {
 } GsurfBuiltinModule;
 
 static const GsurfBuiltinModule builtin_modules[] = {
-	{ "search_engines", "Prefix-based search engines with default-engine fallback" },
+	{ "adblock",        "Host/pattern-based request blocking (EasyList + hosts files)" },
+	{ "bookmarks",      "Save and recall bookmarks (dmenu or built-in popup)" },
+	{ "cert_manager",   "Per-domain certificate exceptions and pinning" },
 	{ "chromebar",      "Address bar that falls back to search for non-URI input" },
+	{ "cookie_policy",  "Cookie accept policy with an @Aa-style cycle toggle" },
+	{ "dark_mode",      "Force dark color scheme with optional dark user CSS" },
+	{ "downloads",      "Download manager list UI with progress and notifications" },
+	{ "externalpipe",   "Pipe page HTML/text/selection to external commands" },
+	{ "find_bar",       "Find-in-page UI over the engine find controller" },
+	{ "geolocation",    "Fine-grained geolocation permission policy per-site" },
 	{ "history",        "Log visited URIs to a history file (dmenu integration)" },
 	{ "homepage",       "Startup/new-view page and go-home keybind" },
-	{ "toggles",        "Runtime toggle keybinds for JS, images, TLS, dark mode, etc." },
-	{ "adblock",        "Host/pattern-based request blocking (EasyList + hosts files)" },
-	{ "cookie_policy",  "Cookie accept policy with an @Aa-style cycle toggle" },
-	{ "tabs",           "Tab-bar UI over the view stack with new/close/switch keys" },
-	{ "find_bar",       "Find-in-page UI over the engine find controller" },
-	{ "modal",          "Vim-like modal input and link hinting (vimium-style 'f')" },
-	{ "omnibar",        "Frequency/recency-ranked history completion popup" },
-	{ "bookmarks",      "Save and recall bookmarks (dmenu or built-in popup)" },
-	{ "externalpipe",   "Pipe page HTML/text/selection to external commands" },
-	{ "playexternal",   "Send media/page/link URI to an external player (mpv)" },
-	{ "downloads",      "Download manager list UI with progress and notifications" },
-	{ "userscripts",    "Inject global and per-domain user JavaScript" },
-	{ "site_styles",    "Per-URI user CSS stylesheets (surf styles[])" },
-	{ "uri_params",     "Per-domain web engine setting overrides (surf uriparams[])" },
-	{ "cert_manager",   "Per-domain certificate exceptions and pinning" },
-	{ "useragent",      "Dynamic and per-domain user-agent switching" },
-	{ "notifications",  "Desktop notifications (downloads, Web Notifications)" },
-	{ "mcp",            "MCP server for AI assistant integration (requires MCP=1)" },
 	{ "inspector",      "Toggle the web inspector / devtools" },
-	{ "spacesearch",    "Leading space in the bar forces a search" },
-	{ "dark_mode",      "Force dark color scheme with optional dark user CSS" },
-	{ "status_bar",     "Bottom status bar: URI, load progress, TLS, mode" },
-	{ "geolocation",    "Fine-grained geolocation permission policy per-site" },
-	{ "session",        "Save and restore open views (tab sessions)" },
+	{ "mcp",            "MCP server for AI assistant integration (requires MCP=1)" },
+	{ "modal",          "Vim-like modal input and link hinting (vimium-style 'f')" },
+	{ "notifications",  "Desktop notifications (downloads, Web Notifications)" },
+	{ "omnibar",        "Frequency/recency-ranked history completion popup" },
+	{ "playexternal",   "Send media/page/link URI to an external player (mpv)" },
 	{ "proxy_switch",   "Cycle through proxy presets at runtime" },
+	{ "search_engines", "Prefix-based search engines with default-engine fallback" },
+	{ "session",        "Save and restore open views (tab sessions)" },
+	{ "site_styles",    "Per-URI user CSS stylesheets (surf styles[])" },
+	{ "spacesearch",    "Leading space in the bar forces a search" },
+	{ "status_bar",     "Bottom status bar: URI, load progress, TLS, mode" },
+	{ "tabs",           "Tab-bar UI over the view stack with new/close/switch keys" },
+	{ "toggles",        "Runtime toggle keybinds for JS, images, TLS, dark mode, etc." },
+	{ "uri_params",     "Per-domain web engine setting overrides (surf uriparams[])" },
+	{ "useragent",      "Dynamic and per-domain user-agent switching" },
+	{ "userscripts",    "Inject global and per-domain user JavaScript" },
 	{ NULL, NULL }
 };
+
+/* qsort callback: compare two GsurfBuiltinModule records by name. */
+static gint
+compare_builtin_modules(gconstpointer a, gconstpointer b, gpointer user_data)
+{
+	const GsurfBuiltinModule *left;
+	const GsurfBuiltinModule *right;
+
+	(void) user_data;
+	left = (const GsurfBuiltinModule *)a;
+	right = (const GsurfBuiltinModule *)b;
+	return g_strcmp0(left->name, right->name);
+}
 
 static void
 print_module_list(void)
 {
+	GsurfBuiltinModule *sorted;
+	gint n;
 	gint i;
+
+	for (n = 0; builtin_modules[n].name != NULL; n++)
+		;
+	/* Copy so a later out-of-order table entry still prints sorted. */
+	sorted = g_new(GsurfBuiltinModule, (gsize)n);
+	memcpy(sorted, builtin_modules, (gsize)n * sizeof(GsurfBuiltinModule));
+	g_qsort_with_data(sorted, n, sizeof(GsurfBuiltinModule),
+		compare_builtin_modules, NULL);
 
 	g_print("Available gsurf modules:\n\n");
 	g_print("  %-16s %s\n", "MODULE", "DESCRIPTION");
 	g_print("  %-16s %s\n", "------", "-----------");
-	for (i = 0; builtin_modules[i].name != NULL; i++)
-		g_print("  %-16s %s\n", builtin_modules[i].name,
-			builtin_modules[i].description);
+	for (i = 0; i < n; i++)
+		g_print("  %-16s %s\n", sorted[i].name, sorted[i].description);
 	g_print("\nEnable modules under the `modules:` section of your config.yaml.\n");
+	g_free(sorted);
 }
 
 /* ===== Keybinding dispatch ===== */

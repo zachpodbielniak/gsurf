@@ -24,7 +24,7 @@ If no URI is given, the configured homepage is opened.
 | =-f, --fullscreen=       | Start in fullscreen                                   |
 | =--generate-yaml-config= | Print the default YAML config and exit                |
 | =--generate-c-config=    | Print the default C config and exit                   |
-| =--list-modules=         | List available modules and exit                       |
+| =--list-modules=         | List available modules alphabetically and exit        |
 | =-v, --version=          | Print version (and active backend) and exit           |
 
 * Environment

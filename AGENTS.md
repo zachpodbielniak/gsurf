@@ -140,7 +140,7 @@ and `GTlsCertificate` instead.
    `gsurf_config_get_module_node()`, and export `gsurf_module_register()`.
 3. Add an `enabled:` block (plus options) under `modules:` in
    `data/default-config.yaml`, and a row in `builtin_modules[]` in `src/main.c`
-   (drives `--list-modules`).
+   (`--list-modules` prints that table in alphabetical order).
 4. `make` (modules are auto-discovered) and add a test under `tests/`.
 
 `modules/search_engines/` is the reference implementation; `modules/mcp/` shows a
