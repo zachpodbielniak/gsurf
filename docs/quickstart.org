@@ -20,6 +20,15 @@ make test                  # run the test suite
 sudo make install          # install to /usr/local
 #+end_src
 
+To clean and rebuild in parallel, use either command:
+
+#+begin_src sh
+make clean all -j
+make DEBUG=1 clean all -j
+#+end_src
+
+When =clean= or =clean-all= is combined with other goals, cleaning finishes first and a fresh make invocation runs the remaining goals with the same options and parallelism. Goal order does not matter; =make all clean -j= also cleans first. This coordinates goals within one invocation, not separate make processes sharing a checkout.
+
 * First config
 
 #+begin_src sh

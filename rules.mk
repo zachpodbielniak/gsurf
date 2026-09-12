@@ -4,6 +4,11 @@
 # All library/main objects depend on the generated version header
 $(LIB_OBJS) $(MAIN_OBJ): src/gsurf-version.h
 
+# This source includes crispy.h, which includes crispy's generated version
+# header. Let crispy's own build generate it before this object compiles,
+# including when CRISPY_DIR points at an embedder's copy.
+$(OBJDIR)/config/gsurf-config-compiler.o: | crispy-lib
+
 # main.o (and its .d) depends on the generated embedded-config header
 $(MAIN_OBJ) $(OBJDIR)/main.d: $(OUTDIR)/gsurf-default-config.h
 

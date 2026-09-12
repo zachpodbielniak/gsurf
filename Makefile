@@ -16,6 +16,21 @@
 #   make GTK_BACKEND=gtk4 - Build against WebKitGTK 6.0 / GTK4
 
 .DEFAULT_GOAL := all
+
+# Cleaning and building cannot share a dependency graph: clean can delete
+# files after make has already decided they are up to date. Dispatch mixed
+# invocations in two phases, reparsing the normal graph after cleaning.
+# Recursive make preserves command-line options and the parallel jobserver.
+_clean_goals := $(filter clean clean-all,$(MAKECMDGOALS))
+_other_goals := $(filter-out clean clean-all,$(MAKECMDGOALS))
+ifneq ($(and $(_clean_goals),$(_other_goals)),)
+.PHONY: $(MAKECMDGOALS) _clean_then_build
+$(MAKECMDGOALS): _clean_then_build ;
+_clean_then_build:
+	$(MAKE) $(if $(filter clean-all,$(_clean_goals)),clean-all,clean)
+	$(MAKE) $(_other_goals)
+else
+
 .PHONY: all lib gsurf gir modules test test-gui appimage adblock-lists deps check-deps
 
 # Include configuration
@@ -370,3 +385,5 @@ endif
 -include $(wildcard $(LIB_OBJS:.o=.d))
 -include $(wildcard $(MAIN_OBJ:.o=.d))
 endif
+
+endif # mixed clean/build invocation
