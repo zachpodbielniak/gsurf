@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include "util/gsurf-kiosk.h"
 #include "window/gsurf-window.h"
 
 typedef struct {
@@ -140,6 +141,8 @@ gsurf_window_add_view(GsurfWindow *self, GsurfView *view)
 	klass = GSURF_WINDOW_GET_CLASS(self);
 
 	first = (priv->views->len == 0);
+	if (!first && gsurf_kiosk_is_enabled())
+		return;
 	g_ptr_array_add(priv->views, g_object_ref(view));
 
 	if (klass->insert_view != NULL)
@@ -339,7 +342,7 @@ gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget)
 	g_return_if_fail(GSURF_IS_WINDOW(self));
 
 	klass = GSURF_WINDOW_GET_CLASS(self);
-	if (klass->add_chrome_widget != NULL)
+	if (!gsurf_kiosk_is_enabled() && klass->add_chrome_widget != NULL)
 		klass->add_chrome_widget(self, widget, TRUE);
 }
 
@@ -351,7 +354,7 @@ gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget)
 	g_return_if_fail(GSURF_IS_WINDOW(self));
 
 	klass = GSURF_WINDOW_GET_CLASS(self);
-	if (klass->add_chrome_widget != NULL)
+	if (!gsurf_kiosk_is_enabled() && klass->add_chrome_widget != NULL)
 		klass->add_chrome_widget(self, widget, FALSE);
 }
 

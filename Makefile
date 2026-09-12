@@ -174,7 +174,7 @@ modules: lib $(OUTDIR)/modules
 	done
 
 # Build and run tests (modules needed for the module-loading test)
-test: lib modules $(TEST_BINS)
+test: gsurf modules $(TEST_BINS)
 	@echo "Running tests..."
 	@failed=0; \
 	for test in $(TEST_BINS); do \
@@ -196,15 +196,18 @@ test: lib modules $(TEST_BINS)
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
 
+.PHONY: tests
+tests: test
+
 # Headless GUI smoke test (needs a display + web process): launch the
 # browser under Xvfb on about:blank and confirm it stays alive briefly.
 # Gated on xvfb-run being available so `make test` stays pure-headless.
 .PHONY: test-gui
 test-gui: gsurf modules
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
-		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi
-	@echo "Running headless GUI smoke test..."
-	@GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
+		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
+	echo "Running headless GUI smoke test..."; \
+	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \
 	 timeout 15 xvfb-run -a $(OUTDIR)/gsurf about:blank >/dev/null 2>&1; \
 	 st=$$?; \

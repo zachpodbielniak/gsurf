@@ -18,6 +18,9 @@ If no URI is given, the configured homepage is opened.
 | =--no-yaml-config=       | Skip YAML loading (built-in defaults only)            |
 | =--no-c-config=          | Skip C-config compilation/loading                     |
 | =--no-modules=           | Do not load any modules                               |
+| =--kiosk=              | Hide browser chrome; disable URL entry and new views |
+| =--pwa=                | Install the URI as a kiosk desktop app and exit       |
+| =--pwa-name NAME=      | App label; defaults to hostname; requires =--pwa=    |
 | =-f, --fullscreen=       | Start in fullscreen                                   |
 | =--generate-yaml-config= | Print the default YAML config and exit                |
 | =--generate-c-config=    | Print the default C config and exit                   |
@@ -32,3 +35,7 @@ If no URI is given, the configured homepage is opened.
 | =GSURF_CONFIG_C=     | Path to a C config file                            |
 | =XDG_CONFIG_HOME=    | Base for =gsurf/config.yaml= and =config.c=        |
 | =XDG_RUNTIME_DIR=    | Where the MCP module's Unix socket is created      |
+
+* Kiosk and PWA launchers
+
+See [[file:kiosk-pwa.org][Kiosk mode and site applications]] for examples, installation locations, module restrictions, and PWA scope.

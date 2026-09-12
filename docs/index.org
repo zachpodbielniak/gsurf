@@ -9,6 +9,8 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:quickstart.org][Quickstart]] — install, build, first run.
 - [[file:cli.org][CLI reference]] — command-line options.
 
+- [[file:kiosk-pwa.org][Kiosk and PWA]] — restricted site windows and desktop installation.
+
 ** Configuration
 - [[file:configuration.org][Configuration]] — the YAML schema.
 - [[file:keybindings.org][Keybindings]] — actions, defaults, modal vim navigation.

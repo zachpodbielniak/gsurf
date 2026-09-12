@@ -9,7 +9,7 @@
 
 static gboolean gsurf_initialized = FALSE;
 
-/**
+/*
  * gsurf_init_check:
  * @argc: (inout) (optional): address of argc from main()
  * @argv: (inout) (array length=argc) (optional): address of argv from main()
@@ -38,7 +38,7 @@ gsurf_init_check(int *argc, char ***argv, GError **error)
 	return TRUE;
 }
 
-/**
+/*
  * gsurf_init:
  * @argc: (inout) (optional): address of argc from main()
  * @argv: (inout) (array length=argc) (optional): address of argv from main()
@@ -57,7 +57,7 @@ gsurf_init(int *argc, char ***argv)
 	}
 }
 
-/**
+/*
  * gsurf_is_initialized:
  *
  * Returns: %TRUE if GSURF has been initialized.

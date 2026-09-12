@@ -67,6 +67,8 @@
 
 /* Utilities */
 #include "util/gsurf-keys.h"
+#include "util/gsurf-kiosk.h"
+#include "util/gsurf-pwa.h"
 
 #undef GSURF_INSIDE
 

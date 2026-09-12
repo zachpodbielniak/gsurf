@@ -36,6 +36,14 @@ struct _GsurfContextMenuProviderInterface
 	void (*populate)(GsurfContextMenuProvider *self, GsurfHitTest *hit, GPtrArray *items);
 };
 
+/**
+ * gsurf_context_menu_provider_populate:
+ * @self: a #GsurfContextMenuProvider
+ * @hit: hit-test context
+ * @items: (element-type GsurfMenuItem): caller-owned array receiving menu entries
+ *
+ * Appends provider-owned suggestions as new items in @items.
+ */
 void gsurf_context_menu_provider_populate(GsurfContextMenuProvider *self, GsurfHitTest *hit, GPtrArray *items);
 
 G_END_DECLS

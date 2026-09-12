@@ -39,10 +39,34 @@ GsurfModuleManager *gsurf_module_manager_new(void);
 
 /* --- Context (set by the host so modules can reach browser state) --- */
 void               gsurf_module_manager_set_application(GsurfModuleManager *self, GsurfApplication *app);
+/**
+ * gsurf_module_manager_get_application:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (nullable): the host application
+ */
 GsurfApplication  *gsurf_module_manager_get_application(GsurfModuleManager *self);
 void               gsurf_module_manager_set_config(GsurfModuleManager *self, GsurfConfig *config);
+/**
+ * gsurf_module_manager_get_config:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (nullable): the configuration
+ */
 GsurfConfig       *gsurf_module_manager_get_config(GsurfModuleManager *self);
+/**
+ * gsurf_module_manager_get_active_view:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (nullable): the active view
+ */
 GsurfView         *gsurf_module_manager_get_active_view(GsurfModuleManager *self);
+/**
+ * gsurf_module_manager_get_active_window:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (nullable): the active window
+ */
 GsurfWindow       *gsurf_module_manager_get_active_window(GsurfModuleManager *self);
 
 /**
@@ -134,10 +158,31 @@ guint        gsurf_module_manager_load_modules(GsurfModuleManager *self);
 const gchar *gsurf_module_manager_get_system_module_dir(void);
 
 /* --- Loading / registration --- */
+/**
+ * gsurf_module_manager_load_module:
+ * @self: a #GsurfModuleManager
+ * @path: module shared object path
+ * @error: (out) (optional): return location for an error
+ *
+ * Returns: (transfer none) (nullable): the module owned by the manager, or %NULL on error
+ */
 GsurfModule *gsurf_module_manager_load_module(GsurfModuleManager *self, const gchar *path, GError **error);
 guint        gsurf_module_manager_load_from_directory(GsurfModuleManager *self, const gchar *dir);
 void         gsurf_module_manager_add_module(GsurfModuleManager *self, GsurfModule *module);
+/**
+ * gsurf_module_manager_get_module:
+ * @self: a #GsurfModuleManager
+ * @name: registered module name
+ *
+ * Returns: (transfer none) (nullable): the named module
+ */
 GsurfModule *gsurf_module_manager_get_module(GsurfModuleManager *self, const gchar *name);
+/**
+ * gsurf_module_manager_get_modules:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: (transfer none) (element-type GsurfModule): the manager-owned modules
+ */
 GPtrArray   *gsurf_module_manager_get_modules(GsurfModuleManager *self);
 void         gsurf_module_manager_activate_all(GsurfModuleManager *self);
 void         gsurf_module_manager_deactivate_all(GsurfModuleManager *self);
@@ -158,6 +203,14 @@ GsurfPermissionVerdict gsurf_module_manager_dispatch_permission(GsurfModuleManag
 gchar              *gsurf_module_manager_dispatch_decide_destination(GsurfModuleManager *self, const gchar *uri, const gchar *suggested);
 GsurfTlsDecision    gsurf_module_manager_dispatch_verify_cert(GsurfModuleManager *self, const gchar *host, guint tls_errors);
 GsurfFilterVerdict  gsurf_module_manager_dispatch_filter_request(GsurfModuleManager *self, GsurfView *view, const gchar *uri, gchar **redirect_uri);
+/**
+ * gsurf_module_manager_dispatch_populate_menu:
+ * @self: a #GsurfModuleManager
+ * @hit: hit-test context
+ * @items: (element-type GsurfMenuItem): caller-owned array receiving menu entries
+ *
+ * Appends module-provided menu items to @items.
+ */
 void                gsurf_module_manager_dispatch_populate_menu(GsurfModuleManager *self, GsurfHitTest *hit, GPtrArray *items);
 gchar              *gsurf_module_manager_dispatch_status_text(GsurfModuleManager *self, GsurfView *view);
 void                gsurf_module_manager_dispatch_render_overlay(GsurfModuleManager *self, GsurfView *view, gpointer draw_target);

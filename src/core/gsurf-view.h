@@ -344,7 +344,13 @@ void gsurf_view_emit_uri_changed(GsurfView *self, const gchar *uri);
 void gsurf_view_emit_title_changed(GsurfView *self, const gchar *title);
 void gsurf_view_emit_progress_changed(GsurfView *self, gdouble progress);
 void gsurf_view_emit_favicon_changed(GsurfView *self);
-/* Returns a new view to host a popup/new-window, or %NULL to block it. */
+/**
+ * gsurf_view_emit_create_view:
+ * @self: a #GsurfView
+ * @uri: (nullable): requested popup URI
+ *
+ * Returns: (transfer none) (nullable): the host-owned popup view, or %NULL to block
+ */
 GsurfView *gsurf_view_emit_create_view(GsurfView *self, const gchar *uri);
 void gsurf_view_emit_web_process_terminated(GsurfView *self);
 

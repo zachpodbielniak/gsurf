@@ -10,6 +10,7 @@
  * GTK_BACKEND=gtk4 (requires webkitgtk-6.0 to compile/verify).
  */
 
+#include "util/gsurf-kiosk.h"
 #include "backend/gtk4/gsurf-webkit6-view.h"
 #include "module/gsurf-module-manager.h"
 
@@ -24,6 +25,18 @@ struct _GsurfWebkit6View
 };
 
 G_DEFINE_FINAL_TYPE(GsurfWebkit6View, gsurf_webkit6_view, GSURF_TYPE_VIEW)
+
+/* Suppress native navigation/inspector menu entries in kiosk sessions. */
+static gboolean
+on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu,
+                WebKitHitTestResult *hit, gpointer user_data)
+{
+	(void) wv;
+	(void) menu;
+	(void) hit;
+	(void) user_data;
+	return gsurf_kiosk_is_enabled();
+}
 
 /* --- native signal translation --- */
 
@@ -78,6 +91,12 @@ on_decide_policy(WebKitWebView *wv, WebKitPolicyDecision *decision,
 	GsurfWebkit6View *self = user_data;
 	WebKitNavigationAction *action;
 	const gchar *uri;
+
+	if (gsurf_kiosk_is_enabled() &&
+	    type == WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION) {
+		webkit_policy_decision_ignore(decision);
+		return TRUE;
+	}
 
 	if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION &&
 	    type != WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION)
@@ -172,7 +191,8 @@ gsurf_webkit6_view_apply_settings(GsurfView *v, GsurfSettings *s)
 	webkit_settings_set_enable_smooth_scrolling(ws, s->smooth_scrolling);
 	webkit_settings_set_enable_caret_browsing(ws, s->caret_browsing);
 	webkit_settings_set_enable_site_specific_quirks(ws, s->site_quirks);
-	webkit_settings_set_enable_developer_extras(ws, s->developer_extras);
+	webkit_settings_set_enable_developer_extras(ws,
+		s->developer_extras && !gsurf_kiosk_is_enabled());
 	webkit_settings_set_javascript_can_open_windows_automatically(ws, s->js_can_open_windows);
 	webkit_settings_set_default_font_size(ws, s->default_font_size);
 	webkit_settings_set_default_monospace_font_size(ws, s->default_monospace_font_size);
@@ -395,6 +415,18 @@ gsurf_webkit6_view_constructed(GObject *object)
 
 	widget = webkit_web_view_new();
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
+	if (gsurf_kiosk_is_enabled()) {
+		g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(widget);
+		guint i;
+
+		/* GTK4 uses event controllers for external drops. Iterate backwards
+		 * because removing a controller changes the observed list. */
+		for (i = g_list_model_get_n_items(controllers); i > 0; i--) {
+			g_autoptr(GtkEventController) controller = g_list_model_get_item(controllers, i - 1);
+			if (GTK_IS_DROP_TARGET(controller) || GTK_IS_DROP_TARGET_ASYNC(controller))
+				gtk_widget_remove_controller(widget, controller);
+		}
+	}
 
 	ucm = webkit_web_view_get_user_content_manager(self->webview);
 	webkit_user_content_manager_register_script_message_handler(ucm, "gsurfFocus", NULL);
@@ -413,6 +445,7 @@ gsurf_webkit6_view_constructed(GObject *object)
 		G_CALLBACK(on_notify_progress), self);
 	g_signal_connect(self->webview, "web-process-terminated",
 		G_CALLBACK(on_web_process_terminated), self);
+	g_signal_connect(self->webview, "context-menu", G_CALLBACK(on_context_menu), self);
 	g_signal_connect(self->webview, "decide-policy", G_CALLBACK(on_decide_policy), self);
 	g_signal_connect(self->webview, "permission-request",
 		G_CALLBACK(on_permission_request), self);

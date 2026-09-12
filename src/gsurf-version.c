@@ -7,7 +7,7 @@
 
 #include "gsurf-version.h"
 
-/**
+/*
  * gsurf_get_version:
  * @major: (out) (optional): location for major version
  * @minor: (out) (optional): location for minor version
@@ -26,7 +26,7 @@ gsurf_get_version(guint *major, guint *minor, guint *micro)
 		*micro = GSURF_VERSION_MICRO;
 }
 
-/**
+/*
  * gsurf_get_version_string:
  *
  * Retrieves the runtime version string of the GSURF library.

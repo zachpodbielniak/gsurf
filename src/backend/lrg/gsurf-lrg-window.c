@@ -18,6 +18,7 @@
  * context before the first view and should realize eagerly.
  */
 
+#include "util/gsurf-kiosk.h"
 #include "backend/lrg/gsurf-lrg-window.h"
 #include "backend/lrg/gsurf-lrg-view.h"
 #include "backend/lrg/gsurf-lrg-engine.h"
@@ -45,7 +46,7 @@
 
 #define LRG_DEFAULT_WIDTH  1024
 #define LRG_DEFAULT_HEIGHT 768
-#define LRG_CHROME_H       28    /* top address-bar height in pixels */
+#define LRG_CHROME_H       (gsurf_kiosk_is_enabled() ? 0 : 28)    /* top address-bar height in pixels */
 #define LRG_CHROME_FONT    16
 #define LRG_FONT_BASE      32    /* glyph-atlas size; downscaled when drawn */
 
@@ -490,9 +491,8 @@ lrg_window_tick(gpointer user_data)
 			}
 		}
 
-		/* Chrome: address bar (URL + load-progress underline) + hover HUD.
-		 * In URL-edit mode the bar becomes an editable address field. */
-		{
+		/* Chrome is omitted entirely in kiosk mode, including hover URLs. */
+		if (!gsurf_kiosk_is_enabled()) {
 			g_autoptr(GrlColor) fg  = grl_color_new(220, 220, 225, 255);
 			g_autoptr(GrlColor) accent = grl_color_new(90, 160, 250, 255);
 			int ty = (LRG_CHROME_H - LRG_CHROME_FONT) / 2;
@@ -717,6 +717,8 @@ gsurf_lrg_window_begin_url_edit(GsurfLrgWindow *self)
 {
 	g_return_if_fail(GSURF_IS_LRG_WINDOW(self));
 
+	if (gsurf_kiosk_is_enabled())
+		return;
 	if (self->url_input == NULL)
 		self->url_input = g_string_new(NULL);
 	else

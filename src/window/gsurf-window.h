@@ -65,9 +65,28 @@ struct _GsurfWindowClass
 void        gsurf_window_add_view(GsurfWindow *self, GsurfView *view);
 void        gsurf_window_remove_view(GsurfWindow *self, GsurfView *view);
 void        gsurf_window_set_active_view(GsurfWindow *self, GsurfView *view);
+/**
+ * gsurf_window_get_active_view:
+ * @self: a #GsurfWindow
+ *
+ * Returns: (transfer none) (nullable): the active view
+ */
 GsurfView  *gsurf_window_get_active_view(GsurfWindow *self);
+/**
+ * gsurf_window_get_views:
+ * @self: a #GsurfWindow
+ *
+ * Returns: (transfer none) (element-type GsurfView): the window-owned views
+ */
 GPtrArray  *gsurf_window_get_views(GsurfWindow *self);
 guint       gsurf_window_get_n_views(GsurfWindow *self);
+/**
+ * gsurf_window_get_nth_view:
+ * @self: a #GsurfWindow
+ * @index: zero-based view index
+ *
+ * Returns: (transfer none) (nullable): the view at @index
+ */
 GsurfView  *gsurf_window_get_nth_view(GsurfWindow *self, guint index);
 
 /* --- Native operations --- */

@@ -38,6 +38,7 @@ G_DECLARE_FINAL_TYPE(GsurfConfig, gsurf_config, GSURF, CONFIG, GObject)
  * @smooth_scroll: enable smooth scrolling
  * @fullscreen_on_start: start fullscreen
  * @settings: web engine default settings (#GsurfSettings)
+ * @kiosk: host-selected UI restrictions; set before creating windows/views
  * @keybinds: (element-type utf8 gint): normalized "Mods+Key" -> #GsurfAction
  *
  * Public configuration struct. Fields are read directly by the rest of
@@ -76,6 +77,10 @@ struct _GsurfConfig
 	/*< private >*/
 	gchar      *config_path;     /* path the config was loaded from */
 	gpointer    modules_mapping; /* YamlMapping* (ref) or NULL */
+
+	/*< public >*/
+	/* Set by the host before creating views; kiosk is a UI restriction. */
+	gboolean    kiosk;
 };
 
 /**

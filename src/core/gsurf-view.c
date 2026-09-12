@@ -5,6 +5,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include "util/gsurf-kiosk.h"
 #include "core/gsurf-view.h"
 
 #include <string.h>
@@ -486,6 +487,8 @@ gsurf_view_set_editing(GsurfView *self, gboolean editing)
 void
 gsurf_view_show_inspector(GsurfView *self)
 {
+	if (gsurf_kiosk_is_enabled())
+		return;
 	GSURF_VIEW_VOID_VFUNC(show_inspector) klass->show_inspector(self);
 }
 
@@ -607,6 +610,8 @@ gsurf_view_emit_create_view(GsurfView *self, const gchar *uri)
 {
 	GsurfView *result = NULL;
 	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	if (gsurf_kiosk_is_enabled())
+		return NULL;
 	g_signal_emit(self, signals[SIG_CREATE_VIEW], 0, uri ? uri : "", &result);
 	return result;
 }

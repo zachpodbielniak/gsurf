@@ -1,0 +1,48 @@
+#+title: Kiosk mode and site applications
+#+description: Restricted browser windows and desktop launchers for individual sites
+#+authors: Zach Podbielniak
+#+categories: gsurf browser desktop
+#+created: 2026-09-11T20:00:00-04:00
+#+updated: 2026-09-11T20:00:00-04:00
+#+version: 1
+
+* Open a site as an application
+
+#+begin_src bash
+gsurf --kiosk https://example.org
+gsurf --kiosk --fullscreen https://example.org
+#+end_src
+
+=--kiosk= requires exactly one URI. It opens a single browser view without address, tab, or status bars. URL-entry and URL-paste actions, the configured home action, new tabs, popup windows (including =target=_blank= and =window.open=), the native context menu, and the web inspector are disabled. Rebinding an action does not bypass these restrictions. The GTK backends also disable external drag-and-drop onto the page. LRG omits its built-in URL bar and hover-URL overlay and expands the page into that space.
+
+Normal links, forms, redirects, history navigation, reload, zoom, scrolling, page text editing, and closing the window continue to work. Kiosk does not force fullscreen; add =--fullscreen= when wanted. This is an application-style browser UI, not a domain allowlist or operating-system security boundary: page content can navigate to other sites, and local configuration remains trusted.
+
+Kiosk sessions load normal YAML/C settings but skip all runtime modules, including chromebar, tabs, status bar, bookmarks, session restore, modal navigation, adblock, userscripts, and MCP. This prevents module-specific controls and restored sessions from reintroducing arbitrary URL entry. In-page functionality supplied by the site still works. Links that require a separate popup window will not work in kiosk mode.
+
+* Install a site launcher
+
+#+begin_src bash
+gsurf --pwa https://mail.example.org
+gsurf --pwa --pwa-name 'My Mail' https://mail.example.org
+sudo gsurf --pwa --pwa-name 'Shared Dashboard' https://dashboard.example.org
+#+end_src
+
+=--pwa= installs a =.desktop= launcher and exits without initializing GTK, loading configuration or modules, opening a browser, or contacting the site. It accepts exactly one absolute HTTP or HTTPS URL without embedded credentials or whitespace. Percent-encode spaces in URLs. =--pwa-name= is valid only with =--pwa=; without it, the displayed name is the URL's hostname.
+
+An ordinary invocation writes to =$XDG_DATA_HOME/applications=, defaulting to =~/.local/share/applications=. Running as effective root (including =sudo=) writes only to =/usr/local/share/applications= for all users, ignoring the invoking user's XDG destination. Directory creation and file-writing failures are printed to stderr and return a failing exit status. No package installation, privilege escalation, or writable-/usr overlay is attempted. On an immutable host where the system destination is unavailable, use a user launcher or arrange that destination through the image configuration.
+
+The launcher runs the absolute gsurf executable path with =--kiosk -- SITE_URL=. AppImage launches retain the external =APPIMAGE= path rather than the temporary mounted executable. Keep that executable installed at the same path; do not install a launcher from a temporary build worktree. Executable paths containing a literal percent sign are rejected because GLib desktop launchers validate the executable before expanding percent escapes. Percent escapes in site URLs are supported.
+
+The filename is =gsurf-pwa-SHA256.desktop=, where SHA256 hashes the full input URI. Reinstalling an identical URI atomically replaces its launcher, including its display name. Distinct paths, queries, or fragments on one domain receive separate launchers. Names are display labels and cannot escape the destination directory. The command prints the installed path; remove that exact file to uninstall the launcher.
+
+* Scope of PWA support
+
+A PWA here means a desktop shortcut launching a site in gsurf's restricted application window. The launcher uses the gsurf icon and ordinary browser storage/settings. It does not fetch a web app manifest or favicon, create a separate browser profile, install an offline bundle, or copy unrelated CLI options into the launcher. Offline behavior depends on the site's own implementation and WebKit capabilities.
+
+* Library and validation
+
+Hosts can set =GsurfConfig.kiosk= on the default configuration before constructing windows/views. The shared view/window layer blocks additional views, popup dispatch, inspector dispatch, and added chrome widgets. Hosts must enforce their own action/module policy; the standalone CLI uses =gsurf_kiosk_allows_action()= and skips module loading. This flag is selected by the host, not by a YAML key, and is not intended for live toggling of an existing window.
+
+=gsurf_pwa_install()= provides display-independent installation with an explicit executable and destination. =make test= (also =make tests=) covers the shared kiosk guards, ordinary-session behavior, invalid inputs, idempotent installation, naming, distinct sites on one host, I/O failures, real desktop Exec parsing/launching with special characters, and headless CLI installation into a temporary XDG directory. Root test runs omit actual system installation. =make gir= validates introspection metadata; =make test-gui= needs =xvfb-run= (Fedora package =xorg-x11-server-Xvfb=).
+
+Desktop escaping follows the [[https://specifications.freedesktop.org/desktop-entry/latest-single/][freedesktop Desktop Entry specification]]; the executable-percent restriction reflects [[https://github.com/GNOME/glib/blob/main/gio/gdesktopappinfo.c][GLib's desktop launcher implementation]].

@@ -12,6 +12,7 @@
  * and forwarding input to the engine.
  */
 
+#include "util/gsurf-kiosk.h"
 #include "backend/lrg/gsurf-lrg-view.h"
 #include "backend/lrg/gsurf-lrg-engine.h"
 #include "module/gsurf-module-manager.h"
@@ -158,10 +159,14 @@ static gboolean
 on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu, GdkEvent *event,
                 WebKitHitTestResult *hit_result, gpointer user_data)
 {
-	GsurfHitTest *hit = hit_test_from_webkit(hit_result);
-	GPtrArray *items = g_ptr_array_new_with_free_func(
-		(GDestroyNotify)gsurf_menu_item_free);
+	GsurfHitTest *hit;
+	GPtrArray *items;
 	guint i;
+
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
+	hit = hit_test_from_webkit(hit_result);
+	items = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_menu_item_free);
 
 	gsurf_module_manager_dispatch_populate_menu(gsurf_module_manager_get_default(),
 		hit, items);
@@ -246,6 +251,12 @@ on_decide_policy(WebKitWebView *wv, WebKitPolicyDecision *decision,
 	WebKitNavigationAction *action;
 	WebKitURIRequest *request;
 	const gchar *uri;
+
+	if (gsurf_kiosk_is_enabled() &&
+	    type == WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION) {
+		webkit_policy_decision_ignore(decision);
+		return TRUE;
+	}
 
 	if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION &&
 	    type != WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION)
@@ -354,6 +365,8 @@ lrg_view_wire_signals(GsurfLrgView *self)
 	WebKitUserContentManager *ucm;
 	WebKitUserScript *tracker;
 
+	if (gsurf_kiosk_is_enabled())
+		gtk_drag_dest_unset(GTK_WIDGET(self->webview));
 	ucm = webkit_web_view_get_user_content_manager(self->webview);
 	webkit_user_content_manager_register_script_message_handler(ucm, "gsurfFocus");
 	g_signal_connect(ucm, "script-message-received::gsurfFocus",
@@ -489,7 +502,8 @@ lrg_view_apply_settings(GsurfView *view, GsurfSettings *s)
 	webkit_settings_set_enable_dns_prefetching(ws, s->dns_prefetch);
 	G_GNUC_END_IGNORE_DEPRECATIONS
 	webkit_settings_set_enable_site_specific_quirks(ws, s->site_quirks);
-	webkit_settings_set_enable_developer_extras(ws, s->developer_extras);
+	webkit_settings_set_enable_developer_extras(ws,
+		s->developer_extras && !gsurf_kiosk_is_enabled());
 	webkit_settings_set_javascript_can_open_windows_automatically(ws, s->js_can_open_windows);
 	webkit_settings_set_javascript_can_access_clipboard(ws, s->js_can_access_clipboard);
 	webkit_settings_set_default_font_size(ws, s->default_font_size);
