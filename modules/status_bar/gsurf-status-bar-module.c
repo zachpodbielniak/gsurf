@@ -21,6 +21,7 @@ struct _GsurfStatusBarModule
 {
 	GsurfModule parent_instance;
 	GtkWidget *label;
+	GsurfWindow *window; /* weak; the host may destroy it before the module */
 	GsurfView *tracked;
 	gulong     uri_id;
 	gulong     progress_id;
@@ -64,7 +65,7 @@ on_progress_changed(GsurfView *v, gdouble p, gpointer user_data)
 static void
 track_view(GsurfStatusBarModule *self, GsurfView *view)
 {
-	if (self->tracked == view)
+	if (view != NULL && self->tracked == view)
 		return;
 	if (self->tracked != NULL) {
 		if (self->uri_id) g_signal_handler_disconnect(self->tracked, self->uri_id);
@@ -73,12 +74,14 @@ track_view(GsurfStatusBarModule *self, GsurfView *view)
 	}
 	self->tracked = view;
 	self->uri_id = self->progress_id = 0;
+	self->progress = view != NULL ? gsurf_view_get_estimated_load_progress(view) : 0.0;
 	if (view != NULL) {
 		g_object_add_weak_pointer(G_OBJECT(view), (gpointer *)&self->tracked);
 		self->uri_id = g_signal_connect(view, "uri-changed", G_CALLBACK(on_uri_changed), self);
 		self->progress_id = g_signal_connect(view, "progress-changed", G_CALLBACK(on_progress_changed), self);
-		update_label(self);
 	}
+	/* A tab switch must refresh both progress and the empty-window state. */
+	update_label(self);
 }
 
 static void
@@ -107,21 +110,44 @@ gsurf_status_bar_activate(GsurfModule *module)
 		return TRUE;
 
 	self->label = gtk_label_new("");
+	/* Retain the widget even if the host destroys its container first. */
+	g_object_ref_sink(self->label);
 	gtk_label_set_xalign(GTK_LABEL(self->label), 0.0);
 	gtk_label_set_ellipsize(GTK_LABEL(self->label), PANGO_ELLIPSIZE_MIDDLE);
 	gsurf_window_add_bottom_widget(window, self->label);
 
-	g_signal_connect(window, "active-view-changed",
-		G_CALLBACK(on_active_view_changed), self);
+	self->window = window;
+	g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&self->window);
+	g_signal_connect_object(window, "active-view-changed",
+		G_CALLBACK(on_active_view_changed), self, 0);
 	track_view(self, gsurf_window_get_active_view(window));
 	return TRUE;
 }
 
+/* Release every activation resource so reactivation starts with one bar. */
 static void
-gsurf_status_bar_module_finalize(GObject *object)
+gsurf_status_bar_deactivate(GsurfModule *module)
 {
-	track_view(GSURF_STATUS_BAR_MODULE(object), NULL);
-	G_OBJECT_CLASS(gsurf_status_bar_module_parent_class)->finalize(object);
+	GsurfStatusBarModule *self = GSURF_STATUS_BAR_MODULE(module);
+
+	if (self->window != NULL) {
+		g_signal_handlers_disconnect_by_data(self->window, self);
+		g_object_remove_weak_pointer(G_OBJECT(self->window), (gpointer *)&self->window);
+		self->window = NULL;
+	}
+	track_view(self, NULL);
+	if (self->label != NULL) {
+		gtk_widget_destroy(self->label);
+		g_clear_object(&self->label);
+	}
+}
+
+/* Disposal also works when a caller never explicitly deactivated us. */
+static void
+gsurf_status_bar_module_dispose(GObject *object)
+{
+	gsurf_status_bar_deactivate(GSURF_MODULE(object));
+	G_OBJECT_CLASS(gsurf_status_bar_module_parent_class)->dispose(object);
 }
 
 static void
@@ -130,8 +156,9 @@ gsurf_status_bar_module_class_init(GsurfStatusBarModuleClass *klass)
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	GsurfModuleClass *module_class = GSURF_MODULE_CLASS(klass);
 
-	object_class->finalize = gsurf_status_bar_module_finalize;
+	object_class->dispose = gsurf_status_bar_module_dispose;
 	module_class->activate = gsurf_status_bar_activate;
+	module_class->deactivate = gsurf_status_bar_deactivate;
 	module_class->get_name = gsurf_status_bar_get_name;
 	module_class->get_description = gsurf_status_bar_get_description;
 }
