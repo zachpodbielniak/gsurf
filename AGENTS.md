@@ -174,7 +174,8 @@ render-overlay ones — and dispatch through the real module .so files),
 edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
 value types: new/copy/free, getters, setters, deep-copy independence),
 `test-keybind-help` (live `?` overlay collection: core table, enabled
-gating, reconfigured module keys, `?`/`question` alias). The
+gating, reconfigured module keys, `?`/`question` alias, overlay `hjkl`/`q`
+routing on the in-page fallback). The
 GTK/WebKit view+window layer (and module UIs like the find bar / tab strip,
 the per-view content-filter *application*, modal key dispatch) needs a display
 and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb harnesses

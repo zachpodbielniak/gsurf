@@ -81,6 +81,63 @@ gsurf_window_hide_js_help(GsurfWindow *self)
 		NULL, NULL, NULL);
 }
 
+/* Move the in-page overlay cursor (j/k) or scroll the panel (h/l). */
+static void
+gsurf_window_move_js_help(GsurfWindow *self, GsurfKeybindHelpKey action)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	GsurfView *view = priv->active;
+	const gchar *dir;
+	g_autofree gchar *js = NULL;
+
+	if (view == NULL)
+		return;
+
+	switch (action) {
+	case GSURF_KEYBIND_HELP_KEY_UP:
+		dir = "k";
+		break;
+	case GSURF_KEYBIND_HELP_KEY_DOWN:
+		dir = "j";
+		break;
+	case GSURF_KEYBIND_HELP_KEY_LEFT:
+		dir = "h";
+		break;
+	case GSURF_KEYBIND_HELP_KEY_RIGHT:
+		dir = "l";
+		break;
+	default:
+		return;
+	}
+
+	js = g_strdup_printf(
+		"(function(){"
+		"var wrap=document.getElementById('gsurf-keybind-help');"
+		"if(!wrap)return;"
+		"var box=wrap.firstChild;"
+		"if(!box)return;"
+		"var rows=box.querySelectorAll('tr');"
+		"var i=parseInt(wrap.getAttribute('data-idx')||'0',10);"
+		"var dir='%s';"
+		"function paint(n){"
+		"if(rows.length===0)return;"
+		"if(i>=0&&i<rows.length)rows[i].style.background='';"
+		"if(n<0)n=0;"
+		"if(n>=rows.length)n=rows.length-1;"
+		"i=n;"
+		"wrap.setAttribute('data-idx',String(i));"
+		"rows[i].style.background='#45475a';"
+		"rows[i].scrollIntoView({block:'nearest'});"
+		"}"
+		"if(dir==='j')paint(i+1);"
+		"else if(dir==='k')paint(i-1);"
+		"else if(dir==='h')box.scrollLeft-=80;"
+		"else if(dir==='l')box.scrollLeft+=80;"
+		"})()",
+		dir);
+	gsurf_view_run_javascript_async(view, js, NULL, NULL, NULL);
+}
+
 /*
  * Backend-agnostic overlay: inject a page-level panel. GTK backends
  * override this with a native dialog; LRG and embedders that do not
@@ -134,7 +191,7 @@ gsurf_window_show_keybind_help_js(GsurfWindow *self, GPtrArray *entries)
 		"border-radius:8px;font:13px/1.45 monospace;"
 		"box-shadow:0 8px 32px rgba(0,0,0,.55);';"
 		"var title=document.createElement('div');"
-		"title.textContent='Keybindings  (? or Escape to close)';"
+		"title.textContent='Keybindings  (hjkl move, q/?/Escape close)';"
 		"title.style.cssText='font-weight:bold;margin-bottom:12px;font-size:16px;';"
 		"box.appendChild(title);"
 		"var table=document.createElement('table');"
@@ -149,6 +206,8 @@ gsurf_window_show_keybind_help_js(GsurfWindow *self, GPtrArray *entries)
 		"tr.appendChild(td(r.source,true));"
 		"table.appendChild(tr);});"
 		"box.appendChild(table);wrap.appendChild(box);"
+		"wrap.setAttribute('data-idx','0');"
+		"if(table.firstChild)table.firstChild.style.background='#45475a';"
 		"wrap.addEventListener('click',function(e){"
 		"if(e.target===wrap&&wrap.parentNode)wrap.parentNode.removeChild(wrap);});"
 		"document.documentElement.appendChild(wrap);})()");
@@ -499,11 +558,21 @@ gsurf_window_emit_key_press(GsurfWindow *self, guint keyval, guint keycode, guin
 	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
 
 	priv = gsurf_window_get_instance_private(self);
-	/* The in-page overlay must close before modal/core consume Escape. */
-	if (priv->help_overlay &&
-	    (keyval == GDK_KEY_Escape || keyval == GDK_KEY_question)) {
-		gsurf_window_hide_js_help(self);
-		return TRUE;
+	/* Overlay keys must not leak to modal/core (j/k would scroll the page). */
+	if (priv->help_overlay) {
+		GsurfKeybindHelpKey action;
+
+		action = gsurf_keybind_help_key_action(keyval, state);
+		if (action == GSURF_KEYBIND_HELP_KEY_CLOSE) {
+			gsurf_window_hide_js_help(self);
+			return TRUE;
+		}
+		if (action != GSURF_KEYBIND_HELP_KEY_NONE) {
+			gsurf_window_move_js_help(self, action);
+			return TRUE;
+		}
+		if ((state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) == 0)
+			return TRUE;
 	}
 
 	g_signal_emit(self, signals[SIG_KEY_PRESS], 0, keyval, keycode, state, &handled);

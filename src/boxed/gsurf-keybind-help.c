@@ -7,6 +7,7 @@
 
 #include "gsurf-keybind-help.h"
 
+#include <gdk/gdkkeysyms.h>
 #include <string.h>
 
 G_DEFINE_BOXED_TYPE(GsurfKeybindHelp, gsurf_keybind_help,
@@ -161,4 +162,30 @@ gsurf_keybind_help_append(GPtrArray *entries,
 
 	g_ptr_array_add(entries,
 		gsurf_keybind_help_new(key, description, source, action));
+}
+
+GsurfKeybindHelpKey
+gsurf_keybind_help_key_action(guint keyval, guint state)
+{
+	/* Chorded keys belong to the window (quit, reload, …). */
+	if ((state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0)
+		return GSURF_KEYBIND_HELP_KEY_NONE;
+
+	switch (keyval) {
+	case GDK_KEY_Escape:
+	case GDK_KEY_q:
+	case GDK_KEY_Q:
+	case GDK_KEY_question:
+		return GSURF_KEYBIND_HELP_KEY_CLOSE;
+	case GDK_KEY_k:
+		return GSURF_KEYBIND_HELP_KEY_UP;
+	case GDK_KEY_j:
+		return GSURF_KEYBIND_HELP_KEY_DOWN;
+	case GDK_KEY_h:
+		return GSURF_KEYBIND_HELP_KEY_LEFT;
+	case GDK_KEY_l:
+		return GSURF_KEYBIND_HELP_KEY_RIGHT;
+	default:
+		return GSURF_KEYBIND_HELP_KEY_NONE;
+	}
 }

@@ -12,7 +12,73 @@
 #include <gsurf.h>
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <gdk/gdkkeysyms.h>
 #include <string.h>
+
+/* Headless view records injected overlay scripts at the public JS boundary. */
+typedef struct {
+	GsurfView parent_instance;
+	gchar *script;
+} OverlayView;
+typedef GsurfViewClass OverlayViewClass;
+
+GType overlay_view_get_type(void);
+G_DEFINE_TYPE(OverlayView, overlay_view, GSURF_TYPE_VIEW)
+
+static void
+overlay_view_run_async(GsurfView *view, const gchar *script,
+                       GCancellable *cancellable, GAsyncReadyCallback callback,
+                       gpointer user_data)
+{
+	OverlayView *self = (OverlayView *)view;
+
+	(void)cancellable;
+	(void)callback;
+	(void)user_data;
+	g_free(self->script);
+	self->script = g_strdup(script);
+}
+
+static void
+overlay_view_finalize(GObject *object)
+{
+	g_free(((OverlayView *)object)->script);
+	G_OBJECT_CLASS(overlay_view_parent_class)->finalize(object);
+}
+
+static void
+overlay_view_class_init(OverlayViewClass *klass)
+{
+	klass->run_javascript_async = overlay_view_run_async;
+	G_OBJECT_CLASS(klass)->finalize = overlay_view_finalize;
+}
+
+static void
+overlay_view_init(OverlayView *self)
+{
+	(void)self;
+}
+
+/* Default show_keybind_help vfunc (in-page overlay); no native dialog. */
+typedef struct {
+	GsurfWindow parent_instance;
+} OverlayWindow;
+typedef GsurfWindowClass OverlayWindowClass;
+
+GType overlay_window_get_type(void);
+G_DEFINE_TYPE(OverlayWindow, overlay_window, GSURF_TYPE_WINDOW)
+
+static void
+overlay_window_class_init(OverlayWindowClass *klass)
+{
+	(void)klass;
+}
+
+static void
+overlay_window_init(OverlayWindow *self)
+{
+	(void)self;
+}
 
 static char *
 module_so_path(const char *name)
@@ -203,6 +269,39 @@ test_empty_manager(void)
 	g_object_unref(mgr);
 }
 
+/* j/k/h/l move the overlay; q dismisses it; keys must not leak afterward. */
+static void
+test_overlay_vim_keys(void)
+{
+	g_autoptr(GsurfWindow) window = g_object_new(overlay_window_get_type(), NULL);
+	g_autoptr(GsurfView) view = g_object_new(overlay_view_get_type(), NULL);
+	g_autoptr(GPtrArray) entries = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_keybind_help_free);
+	OverlayView *captured = (OverlayView *)view;
+
+	gsurf_keybind_help_append(entries, "question", "Show all keybindings",
+		"core", "show-keybinds");
+	gsurf_keybind_help_append(entries, "j", "Scroll down", "modal", "scroll-down");
+	gsurf_window_add_view(window, view);
+	gsurf_window_show_keybind_help(window, entries);
+	g_assert_nonnull(captured->script);
+	g_assert_nonnull(strstr(captured->script, "gsurf-keybind-help"));
+	g_assert_nonnull(strstr(captured->script, "hjkl"));
+
+	g_assert_true(gsurf_window_emit_key_press(window, GDK_KEY_j, 0, GSURF_MOD_NONE));
+	g_assert_nonnull(strstr(captured->script, "dir='j'"));
+	g_assert_true(gsurf_window_emit_key_press(window, GDK_KEY_k, 0, GSURF_MOD_NONE));
+	g_assert_nonnull(strstr(captured->script, "dir='k'"));
+	g_assert_true(gsurf_window_emit_key_press(window, GDK_KEY_h, 0, GSURF_MOD_NONE));
+	g_assert_nonnull(strstr(captured->script, "dir='h'"));
+	g_assert_true(gsurf_window_emit_key_press(window, GDK_KEY_l, 0, GSURF_MOD_NONE));
+	g_assert_nonnull(strstr(captured->script, "dir='l'"));
+
+	g_assert_true(gsurf_window_emit_key_press(window, GDK_KEY_q, 0, GSURF_MOD_NONE));
+	g_assert_nonnull(strstr(captured->script, "removeChild"));
+	g_assert_false(gsurf_window_emit_key_press(window, GDK_KEY_j, 0, GSURF_MOD_NONE));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -213,5 +312,6 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/keybind-help/disabled-module-omitted", test_disabled_module_omitted);
 	g_test_add_func("/gsurf/keybind-help/tabs-and-modal", test_tabs_and_modal_together);
 	g_test_add_func("/gsurf/keybind-help/empty-manager", test_empty_manager);
+	g_test_add_func("/gsurf/keybind-help/overlay-vim-keys", test_overlay_vim_keys);
 	return g_test_run();
 }

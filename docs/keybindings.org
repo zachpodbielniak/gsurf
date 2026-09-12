@@ -61,8 +61,13 @@ open a popup listing every *currently active* binding:
   disabled =tabs= module is reflected immediately).
 
 GTK backends show a native dialog; other backends inject an in-page overlay.
-Press =?= again or =Escape= to dismiss. The list is rebuilt on every press —
-do not treat it as a static cheatsheet.
+While it is open:
+
+- =j= / =k= move down / up through the list
+- =h= / =l= scroll the panel left / right
+- =q=, =?=, or =Escape= dismisses it
+
+The list is rebuilt on every press — do not treat it as a static cheatsheet.
 
 In a C config: =gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS);=.
 

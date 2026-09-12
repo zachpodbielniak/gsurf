@@ -56,7 +56,8 @@ key press → window "key-press"
   └ module manager dispatch_key_event (modal/hints/tabs modules)  [first TRUE wins]
   └ else core keybind table (GsurfConfig) -> GsurfAction -> execute
       show-keybinds (`?`) collects core + active GsurfKeybindProvider
-      modules and pops a help overlay (GTK dialog or in-page fallback)
+      modules and pops a help overlay (GTK dialog or in-page fallback);
+      overlay keys: hjkl move, q/?/Escape close
 
 navigation/load → view signals
   └ dispatch_load_changed / dispatch_after_navigate to navigation-hook modules

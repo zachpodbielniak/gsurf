@@ -15,6 +15,7 @@
 
 #include <glib-object.h>
 #include "../gsurf-types.h"
+#include "../gsurf-enums.h"
 
 G_BEGIN_DECLS
 
@@ -91,6 +92,40 @@ void gsurf_keybind_help_append(GPtrArray *entries,
                                const gchar *description,
                                const gchar *source,
                                const gchar *action);
+
+/**
+ * GsurfKeybindHelpKey:
+ * @GSURF_KEYBIND_HELP_KEY_NONE: not an overlay motion/close key
+ * @GSURF_KEYBIND_HELP_KEY_CLOSE: dismiss the overlay (`q`, `Escape`, `?`)
+ * @GSURF_KEYBIND_HELP_KEY_UP: previous row (`k`)
+ * @GSURF_KEYBIND_HELP_KEY_DOWN: next row (`j`)
+ * @GSURF_KEYBIND_HELP_KEY_LEFT: scroll left (`h`)
+ * @GSURF_KEYBIND_HELP_KEY_RIGHT: scroll right (`l`)
+ *
+ * Keys handled while the `?` help overlay is visible.
+ */
+typedef enum {
+	GSURF_KEYBIND_HELP_KEY_NONE = 0,
+	GSURF_KEYBIND_HELP_KEY_CLOSE,
+	GSURF_KEYBIND_HELP_KEY_UP,
+	GSURF_KEYBIND_HELP_KEY_DOWN,
+	GSURF_KEYBIND_HELP_KEY_LEFT,
+	GSURF_KEYBIND_HELP_KEY_RIGHT
+} GsurfKeybindHelpKey;
+
+/**
+ * gsurf_keybind_help_key_action:
+ * @keyval: a GDK keyval (ASCII letters match their keyvals)
+ * @state: a #GsurfKeyMod mask
+ *
+ * Maps a key event to overlay motion. Ctrl/Alt/Super chords are ignored
+ * so bindings such as Ctrl+q still reach the window. Shift is ignored
+ * for close keys (`?` is typically Shift+question) but not for hjkl,
+ * which stay lowercase.
+ *
+ * Returns: the overlay action, or %GSURF_KEYBIND_HELP_KEY_NONE
+ */
+GsurfKeybindHelpKey gsurf_keybind_help_key_action(guint keyval, guint state);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GsurfKeybindHelp, gsurf_keybind_help_free)
 

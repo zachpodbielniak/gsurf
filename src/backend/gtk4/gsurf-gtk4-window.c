@@ -178,6 +178,77 @@ on_help4_close(GtkButton *button, gpointer user_data)
 }
 
 static void
+help4_list_move(GtkListBox *list, gint delta)
+{
+	GtkListBoxRow *row;
+	gint idx = 0;
+	gint n = 0;
+
+	while (gtk_list_box_get_row_at_index(list, n) != NULL)
+		n++;
+	if (n == 0)
+		return;
+
+	row = gtk_list_box_get_selected_row(list);
+	if (row != NULL)
+		idx = gtk_list_box_row_get_index(row) + delta;
+	else if (delta < 0)
+		idx = n - 1;
+
+	if (idx < 0)
+		idx = 0;
+	if (idx >= n)
+		idx = n - 1;
+	row = gtk_list_box_get_row_at_index(list, idx);
+	gtk_list_box_select_row(list, row);
+	if (row != NULL)
+		gtk_widget_grab_focus(GTK_WIDGET(row));
+}
+
+static void
+help4_scroll_x(GtkScrolledWindow *scrolled, gint delta)
+{
+	GtkAdjustment *adj;
+
+	adj = gtk_scrolled_window_get_hadjustment(scrolled);
+	if (adj == NULL)
+		return;
+	gtk_adjustment_set_value(adj, gtk_adjustment_get_value(adj) + (gdouble)delta);
+}
+
+static gboolean
+on_help4_key_pressed(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
+                     GdkModifierType state, gpointer user_data)
+{
+	GtkWindow *dialog = GTK_WINDOW(user_data);
+	GtkListBox *list;
+	GtkScrolledWindow *scrolled;
+	GsurfKeybindHelpKey action;
+
+	(void)ctrl;
+	(void)keycode;
+	action = gsurf_keybind_help_key_action(keyval, translate_modifiers(state));
+	if (action == GSURF_KEYBIND_HELP_KEY_NONE)
+		return FALSE;
+	if (action == GSURF_KEYBIND_HELP_KEY_CLOSE) {
+		gtk_window_destroy(dialog);
+		return TRUE;
+	}
+
+	list = GTK_LIST_BOX(g_object_get_data(G_OBJECT(dialog), "gsurf-help-list"));
+	scrolled = GTK_SCROLLED_WINDOW(g_object_get_data(G_OBJECT(dialog),
+		"gsurf-help-scrolled"));
+	if (action == GSURF_KEYBIND_HELP_KEY_UP && list != NULL)
+		help4_list_move(list, -1);
+	else if (action == GSURF_KEYBIND_HELP_KEY_DOWN && list != NULL)
+		help4_list_move(list, 1);
+	else if (scrolled != NULL)
+		help4_scroll_x(scrolled,
+			action == GSURF_KEYBIND_HELP_KEY_LEFT ? -80 : 80);
+	return TRUE;
+}
+
+static void
 gsurf_gtk4_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 {
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
@@ -196,7 +267,7 @@ gsurf_gtk4_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 	dialog = gtk_window_new();
 	gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(self->window));
 	gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
-	gtk_window_set_title(GTK_WINDOW(dialog), "Keybindings");
+	gtk_window_set_title(GTK_WINDOW(dialog), "Keybindings (hjkl / q)");
 	gtk_window_set_default_size(GTK_WINDOW(dialog), 760, 520);
 	g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", dialog);
 	g_signal_connect(dialog, "destroy", G_CALLBACK(on_help4_destroy), self);
@@ -205,7 +276,7 @@ gsurf_gtk4_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 	gtk_window_set_child(GTK_WINDOW(dialog), vbox);
 
 	list = gtk_list_box_new();
-	gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_NONE);
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_BROWSE);
 	for (i = 0; entries != NULL && i < entries->len; i++) {
 		const GsurfKeybindHelp *h = g_ptr_array_index(entries, i);
 		g_autofree gchar *pretty = gsurf_keybind_help_pretty_key(h->key);
@@ -236,6 +307,22 @@ gsurf_gtk4_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
 	close_btn = gtk_button_new_with_mnemonic("_Close");
 	g_signal_connect(close_btn, "clicked", G_CALLBACK(on_help4_close), dialog);
 	gtk_box_append(GTK_BOX(vbox), close_btn);
+
+	g_object_set_data(G_OBJECT(dialog), "gsurf-help-list", list);
+	g_object_set_data(G_OBJECT(dialog), "gsurf-help-scrolled", scrolled);
+	{
+		GtkEventController *keys = gtk_event_controller_key_new();
+
+		gtk_event_controller_set_propagation_phase(keys, GTK_PHASE_CAPTURE);
+		g_signal_connect(keys, "key-pressed", G_CALLBACK(on_help4_key_pressed), dialog);
+		gtk_widget_add_controller(dialog, keys);
+	}
+	if (entries != NULL && entries->len > 0) {
+		GtkListBoxRow *row = gtk_list_box_get_row_at_index(GTK_LIST_BOX(list), 0);
+
+		if (row != NULL)
+			gtk_list_box_select_row(GTK_LIST_BOX(list), row);
+	}
 
 	gtk_window_present(GTK_WINDOW(dialog));
 }
