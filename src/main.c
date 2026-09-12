@@ -606,10 +606,12 @@ main(int argc, char *argv[])
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 	gsurf_module_manager_set_application(mgr, app);
 	gsurf_module_manager_set_config(mgr, config);
-	if (!opt_no_modules && !opt_kiosk) {
+	if (!opt_no_modules) {
 		/* The binary's policy: $GSURF_MODULE_PATH, else <exe-dir>/modules,
 		 * else the installed system dir (first match). Embedders skip this
-		 * and set their own search paths via the manager API instead. */
+		 * and set their own search paths via the manager API instead.
+		 * Kiosk still loads modules; chrome widgets are omitted by the
+		 * window layer, and URL-entry/new-view actions stay blocked. */
 		g_autofree gchar *moddir = find_module_dir();
 		if (moddir != NULL) {
 			gsurf_module_manager_add_search_path(mgr, moddir);

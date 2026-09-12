@@ -124,6 +124,11 @@ gsurf_chromebar_activate(GsurfModule *module)
 	if (window == NULL)
 		return TRUE;
 
+	/* Kiosk is a PWA-style chrome hide: keep the module loaded, but do
+	 * not create an address bar that could take URL-entry focus. */
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
+
 	self->entry = gtk_entry_new();
 	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Enter URL or search...");
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);

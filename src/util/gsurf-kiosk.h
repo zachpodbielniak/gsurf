@@ -10,6 +10,7 @@ G_BEGIN_DECLS
  * gsurf_kiosk_is_enabled:
  *
  * Returns: whether the default configuration requests kiosk UI restrictions
+ * (hidden chrome, no extra views or inspector). Modules still load.
  */
 gboolean gsurf_kiosk_is_enabled(void);
 

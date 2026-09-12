@@ -103,6 +103,9 @@ gsurf_status_bar_activate(GsurfModule *module)
 	if (window == NULL)
 		return TRUE;
 
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
+
 	self->label = gtk_label_new("");
 	gtk_label_set_xalign(GTK_LABEL(self->label), 0.0);
 	gtk_label_set_ellipsize(GTK_LABEL(self->label), PANGO_ELLIPSIZE_MIDDLE);
