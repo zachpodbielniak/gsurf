@@ -160,8 +160,14 @@ print_module_list(void)
 	/* Copy so a later out-of-order table entry still prints sorted. */
 	sorted = g_new(GsurfBuiltinModule, (gsize)n);
 	memcpy(sorted, builtin_modules, (gsize)n * sizeof(GsurfBuiltinModule));
+	/* GLib 2.82 replaced the old sorter; keep older builds supported. */
+#if GLIB_CHECK_VERSION(2, 82, 0)
+	g_sort_array(sorted, (gsize)n, sizeof(GsurfBuiltinModule),
+		compare_builtin_modules, NULL);
+#else
 	g_qsort_with_data(sorted, n, sizeof(GsurfBuiltinModule),
 		compare_builtin_modules, NULL);
+#endif
 
 	g_print("Available gsurf modules:\n\n");
 	g_print("  %-16s %s\n", "MODULE", "DESCRIPTION");
