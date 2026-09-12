@@ -49,7 +49,8 @@ GsurfConfig *gsurf_application_get_config(GsurfApplication *self);
  * @window: (transfer none): a window to track
  *
  * Adds @window to the application. When the last window is closed the
- * main loop (if running) quits.
+ * main loop (if running) quits. Adding an already tracked window is a
+ * no-op: no additional reference, close handler, or signal is created.
  */
 void gsurf_application_add_window(GsurfApplication *self, GsurfWindow *window);
 

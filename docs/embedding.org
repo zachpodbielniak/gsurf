@@ -129,6 +129,10 @@ fork via GObject Introspection. The library makes no GTK-main-loop assumption
 
 * Ownership and view-removal contracts
 
+Membership is unique by object identity: adding the same view to a window, or the same window to an application, more than once is a no-op. Duplicate additions do not take extra references, insert native widgets, connect extra close handlers, or emit addition signals. One removal or window close therefore removes that membership completely.
+
+=gsurf_window_set_active_view()= only selects views already added to that window. Requests for foreign or previously removed views are ignored. The active pointer borrows the reference owned by the view list; it never retains an unowned view supplied by a caller.
+
 String setters on boxed values, =GsurfSettings= and =GsurfDownload= duplicate their input before releasing the previous value. Borrowed getter results and substrings of those results can therefore be passed back into the corresponding setter. Existing NULL/default semantics are retained.
 
 Removing an active view selects the view now at the removed index, or the previous final view when removing the last index. The backend receives the switch and =active-view-changed= is emitted after the public active-view pointer changes. Removing the final view emits the signal with NULL; signal consumers must handle an empty window.
