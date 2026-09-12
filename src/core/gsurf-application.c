@@ -51,8 +51,9 @@ gsurf_application_add_window(GsurfApplication *self, GsurfWindow *window)
 	g_return_if_fail(GSURF_IS_WINDOW(window));
 
 	g_ptr_array_add(self->windows, g_object_ref(window));
-	g_signal_connect(window, "close-request",
-		G_CALLBACK(on_window_close_request), self);
+	/* Retained windows must not call back into a disposed application. */
+	g_signal_connect_object(window, "close-request",
+		G_CALLBACK(on_window_close_request), self, 0);
 
 	g_signal_emit(self, signals[SIG_WINDOW_ADDED], 0, window);
 }

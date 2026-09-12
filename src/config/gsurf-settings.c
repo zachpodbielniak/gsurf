@@ -99,17 +99,25 @@ gsurf_settings_copy(GsurfSettings *self)
 void
 gsurf_settings_set_user_agent(GsurfSettings *self, const gchar *user_agent)
 {
+	gchar *copy;
+
 	g_return_if_fail(GSURF_IS_SETTINGS(self));
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = (user_agent && *user_agent) ? g_strdup(user_agent) : NULL;
 	g_free(self->user_agent);
-	self->user_agent = (user_agent && *user_agent) ? g_strdup(user_agent) : NULL;
+	self->user_agent = copy;
 }
 
 void
 gsurf_settings_set_default_charset(GsurfSettings *self, const gchar *charset)
 {
+	gchar *copy;
+
 	g_return_if_fail(GSURF_IS_SETTINGS(self));
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(charset ? charset : "UTF-8");
 	g_free(self->default_charset);
-	self->default_charset = g_strdup(charset ? charset : "UTF-8");
+	self->default_charset = copy;
 }

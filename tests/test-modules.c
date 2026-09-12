@@ -194,6 +194,9 @@ test_adblock(void)
 	/* Whitelisted host allowed even though it is in the blocklist. */
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
 		"https://tracker.net/t"), ==, GSURF_POLICY_USE);
+	/* Whitelist entries also cover subdomains and DNS case variants. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
+		"https://cdn.TRACKER.net./t"), ==, GSURF_POLICY_USE);
 	/* "localhost" must never have been added. */
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL,
 		"http://localhost:8080/"), ==, GSURF_POLICY_USE);
@@ -292,6 +295,113 @@ test_adblock_content_filters(void)
 	g_object_unref(config);
 }
 
+/* Load the real module so regressions cover its public hook contract. */
+static GsurfModuleManager *
+load_test_module(const gchar *name, const gchar *yaml)
+{
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *so = module_so_path(name);
+	GsurfModuleManager *manager;
+
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
+	g_assert_no_error(error);
+	manager = gsurf_module_manager_new();
+	gsurf_module_manager_set_config(manager, config);
+	g_assert_nonnull(gsurf_module_manager_load_module(manager, so, &error));
+	g_assert_no_error(error);
+	gsurf_module_manager_activate_all(manager);
+	g_assert_true(gsurf_module_is_active(gsurf_module_manager_get_module(manager, name)));
+	return manager;
+}
+
+/* Comments must not become domains, and every hosts-file alias counts. */
+static void
+test_adblock_hosts_syntax(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfModuleManager) manager = NULL;
+	g_autofree gchar *dir = g_dir_make_tmp("gsurf-hosts-XXXXXX", &error);
+	g_autofree gchar *path = NULL;
+	g_autofree gchar *yaml = NULL;
+	const gchar *blocked[] = {
+		"https://commented.example/", "https://first.example/",
+		"https://second.example/", "https://UPPER.example/",
+		"https://upper.example./", "https://cdn.upper.example/"
+	};
+	guint i;
+
+	g_assert_no_error(error);
+	path = g_build_filename(dir, "hosts", NULL);
+	g_assert_true(g_file_set_contents(path,
+		"0.0.0.0 commented.example # ignored.example\n"
+		":: first.example second.example\n"
+		"UPPER.example\n127.0.0.1 localhost\n", -1, &error));
+	g_assert_no_error(error);
+	yaml = g_strdup_printf("modules:\n  adblock:\n    enabled: true\n    host_files: ['%s']\n", path);
+	manager = load_test_module("adblock", yaml);
+	for (i = 0; i < G_N_ELEMENTS(blocked); i++)
+		g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(manager,
+			NULL, blocked[i]), ==, GSURF_POLICY_IGNORE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(manager,
+		NULL, "https://ignored.example/"), ==, GSURF_POLICY_USE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(manager,
+		NULL, "http://localhost/"), ==, GSURF_POLICY_USE);
+	g_assert_cmpint(g_unlink(path), ==, 0);
+	g_assert_cmpint(g_rmdir(dir), ==, 0);
+}
+
+/* Server-suggested paths must resolve to a single file in the chosen dir. */
+static void
+test_download_destinations(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfModuleManager) manager = NULL;
+	g_autofree gchar *dir = g_dir_make_tmp("gsurf-downloads-XXXXXX", &error);
+	g_autofree gchar *yaml = NULL;
+	const gchar *suggested[] = { "report.pdf", "../escape", "/tmp/escape",
+		"nested/report.pdf", "..", ".", "/", "", NULL };
+	const gchar *names[] = { "report.pdf", "escape", "escape",
+		"report.pdf", "download", "download", "download", "download", "download" };
+	guint i;
+
+	g_assert_no_error(error);
+	yaml = g_strdup_printf("modules:\n  downloads:\n    enabled: true\n    dir: '%s'\n", dir);
+	manager = load_test_module("downloads", yaml);
+	for (i = 0; i < G_N_ELEMENTS(suggested); i++) {
+		g_autofree gchar *path = gsurf_module_manager_dispatch_decide_destination(
+			manager, "https://example.org/file", suggested[i]);
+		g_autofree gchar *expected = g_build_filename(dir, names[i], NULL);
+
+		g_assert_cmpstr(path, ==, expected);
+	}
+	/* A file where the directory should be must report failure, not claim
+	 * a destination which WebKit cannot create. */
+	g_assert_cmpint(g_rmdir(dir), ==, 0);
+	g_assert_true(g_file_set_contents(dir, "occupied", -1, &error));
+	g_assert_no_error(error);
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*gsurf downloads: cannot create*");
+	g_assert_null(gsurf_module_manager_dispatch_decide_destination(manager,
+		"https://example.org/file", "report.pdf"));
+	g_test_assert_expected_messages();
+	g_assert_cmpint(g_unlink(dir), ==, 0);
+
+	/* Relative configuration remains usable by g_filename_to_uri(). */
+	g_clear_object(&manager);
+	manager = load_test_module("downloads",
+		"modules:\n  downloads:\n    enabled: true\n    dir: build\n");
+	{
+		g_autofree gchar *path = gsurf_module_manager_dispatch_decide_destination(
+			manager, "https://example.org/file", "report.pdf");
+		g_autofree gchar *expected = g_canonicalize_filename("build/report.pdf", NULL);
+		g_autofree gchar *uri = g_filename_to_uri(path, NULL, &error);
+
+		g_assert_no_error(error);
+		g_assert_nonnull(uri);
+		g_assert_cmpstr(path, ==, expected);
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -300,5 +410,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/modules/history", test_history);
 	g_test_add_func("/gsurf/modules/adblock", test_adblock);
 	g_test_add_func("/gsurf/modules/adblock-content-filters", test_adblock_content_filters);
+	g_test_add_func("/gsurf/modules/adblock-hosts-syntax", test_adblock_hosts_syntax);
+	g_test_add_func("/gsurf/modules/download-destinations", test_download_destinations);
 	return g_test_run();
 }

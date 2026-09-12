@@ -177,10 +177,14 @@ gsurf_navigation_action_set_uri(
 	GsurfNavigationAction   *action,
 	const gchar             *uri
 ){
+	gchar *copy;
+
 	g_return_if_fail(action != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(uri);
 	g_free(action->uri);
-	action->uri = g_strdup(uri);
+	action->uri = copy;
 }
 
 /*

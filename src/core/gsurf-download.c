@@ -41,10 +41,14 @@ gsurf_download_get_uri(GsurfDownload *self)
 void
 gsurf_download_set_uri(GsurfDownload *self, const gchar *uri)
 {
+	gchar *copy;
+
 	g_return_if_fail(GSURF_IS_DOWNLOAD(self));
 
-	g_clear_pointer(&self->uri, g_free);
-	self->uri = g_strdup(uri);
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(uri);
+	g_free(self->uri);
+	self->uri = copy;
 }
 
 const gchar *
@@ -57,10 +61,14 @@ gsurf_download_get_destination(GsurfDownload *self)
 void
 gsurf_download_set_destination(GsurfDownload *self, const gchar *destination)
 {
+	gchar *copy;
+
 	g_return_if_fail(GSURF_IS_DOWNLOAD(self));
 
-	g_clear_pointer(&self->destination, g_free);
-	self->destination = g_strdup(destination);
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(destination);
+	g_free(self->destination);
+	self->destination = copy;
 }
 
 const gchar *
@@ -74,10 +82,14 @@ void
 gsurf_download_set_suggested_filename(GsurfDownload *self,
 	const gchar *suggested_filename)
 {
+	gchar *copy;
+
 	g_return_if_fail(GSURF_IS_DOWNLOAD(self));
 
-	g_clear_pointer(&self->suggested_filename, g_free);
-	self->suggested_filename = g_strdup(suggested_filename);
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(suggested_filename);
+	g_free(self->suggested_filename);
+	self->suggested_filename = copy;
 }
 
 gdouble

@@ -214,10 +214,14 @@ gsurf_certificate_set_subject(
 	GsurfCertificate    *certificate,
 	const gchar         *subject
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(subject);
 	g_free(certificate->subject);
-	certificate->subject = g_strdup(subject);
+	certificate->subject = copy;
 }
 
 /*
@@ -232,10 +236,14 @@ gsurf_certificate_set_issuer(
 	GsurfCertificate    *certificate,
 	const gchar         *issuer
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(issuer);
 	g_free(certificate->issuer);
-	certificate->issuer = g_strdup(issuer);
+	certificate->issuer = copy;
 }
 
 /*
@@ -250,10 +258,14 @@ gsurf_certificate_set_not_before(
 	GsurfCertificate    *certificate,
 	const gchar         *not_before
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(not_before);
 	g_free(certificate->not_before);
-	certificate->not_before = g_strdup(not_before);
+	certificate->not_before = copy;
 }
 
 /*
@@ -268,10 +280,14 @@ gsurf_certificate_set_not_after(
 	GsurfCertificate    *certificate,
 	const gchar         *not_after
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(not_after);
 	g_free(certificate->not_after);
-	certificate->not_after = g_strdup(not_after);
+	certificate->not_after = copy;
 }
 
 /*
@@ -286,10 +302,14 @@ gsurf_certificate_set_fingerprint(
 	GsurfCertificate    *certificate,
 	const gchar         *fingerprint
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(fingerprint);
 	g_free(certificate->fingerprint);
-	certificate->fingerprint = g_strdup(fingerprint);
+	certificate->fingerprint = copy;
 }
 
 /*
@@ -304,10 +324,14 @@ gsurf_certificate_set_pem(
 	GsurfCertificate    *certificate,
 	const gchar         *pem
 ){
+	gchar *copy;
+
 	g_return_if_fail(certificate != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(pem);
 	g_free(certificate->pem);
-	certificate->pem = g_strdup(pem);
+	certificate->pem = copy;
 }
 
 /*

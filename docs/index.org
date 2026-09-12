@@ -22,3 +22,6 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:modules.org][Modules]] — the module catalog (surf-patch lineage).
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
 - [[file:embedding.org][Embedding]] — using libgsurf in another application.
+
+** Maintenance
+- [[file:audit-2026-09.org][September 2026 correctness audit]] — confirmed defects, regression coverage and boundaries.

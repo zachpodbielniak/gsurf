@@ -166,10 +166,14 @@ gsurf_menu_item_set_label(
 	GsurfMenuItem   *menu_item,
 	const gchar     *label
 ){
+	gchar *copy;
+
 	g_return_if_fail(menu_item != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(label);
 	g_free(menu_item->label);
-	menu_item->label = g_strdup(label);
+	menu_item->label = copy;
 }
 
 /*
@@ -184,10 +188,14 @@ gsurf_menu_item_set_action(
 	GsurfMenuItem   *menu_item,
 	const gchar     *action
 ){
+	gchar *copy;
+
 	g_return_if_fail(menu_item != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(action);
 	g_free(menu_item->action);
-	menu_item->action = g_strdup(action);
+	menu_item->action = copy;
 }
 
 /*
@@ -202,10 +210,14 @@ gsurf_menu_item_set_arg(
 	GsurfMenuItem   *menu_item,
 	const gchar     *arg
 ){
+	gchar *copy;
+
 	g_return_if_fail(menu_item != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(arg);
 	g_free(menu_item->arg);
-	menu_item->arg = g_strdup(arg);
+	menu_item->arg = copy;
 }
 
 /*

@@ -1,0 +1,46 @@
+#+title: September 2026 correctness audit
+#+description: Confirmed defects, regression coverage, and audit boundaries
+
+* Scope
+
+This audit traced configuration and URI handling, module loading and hooks, host blocking and downloads, public value ownership, application/window management, native WebKit signal lifetimes, and the PWA launcher path. It is a source and regression-test audit of those paths, not a claim that every module, optional backend, or web-engine integration is defect-free. Vendored dependencies remain pinned and unchanged.
+
+* Confirmed defects and regression evidence
+
+** Hosts parsing and matching
+
+The parser previously selected the final whitespace token on each line. Inline comments replaced the intended blocked domain, and all but the final hosts-file alias were lost. Case differences and trailing root dots also bypassed exact domain lookup. Parsing now removes comments before tokenization, skips the leading IP address, retains aliases, and normalizes file/URI/whitelist domains consistently. Whitelisted subdomains now use the same domain-label matching policy as the generated whitelist rules. =/gsurf/modules/adblock-hosts-syntax= reproduces the old comment failure and covers aliases and normalized host matching.
+
+** Download destinations
+
+Joining the configured directory directly with a suggested =../escape= filename returned a path outside that directory. Basename extraction and dot/root fallback now constrain the returned filename. Relative configured directories become absolute so URI conversion succeeds; creation failures are logged rather than returning unusable paths. The GTK3 callback reports a destination as handled only after successful filename-to-URI conversion. =/gsurf/modules/download-destinations= reproduces traversal and covers ordinary, absolute, nested, empty, dot and root names, relative directories and directory-creation failure.
+
+** String ownership
+
+Twenty-two setters freed their old string before duplicating the input, causing a use-after-free when given their own current value or a substring. Each now copies before freeing. =test-string-ownership= exercises all affected boxed-value and download setters, settings strings, NULL clearing and overlapping slices; the original boxed setter produced corrupted text in the regression.
+
+** Native view lifetime
+
+Disposal disconnected WebView signals but left the user-content-manager focus callback referencing the disposed wrapper. GTK3 additionally left the shared-context download-started handler attached. Disposal now disconnects each owning signal source before releasing the native view. =test-backend-lifecycle= holds native objects across repeated wrapper disposal and checks for stale callback data; the original implementation retained the content-manager callback. The analogous GTK4 cleanup is included, but GTK4 compilation requires its separate development packages.
+
+** Active-tab removal
+
+The window preassigned its replacement active pointer before calling the setter, triggering the setter's equality guard. The backend switch and active-view notification were both skipped. Removal now delegates the pointer change to the setter, with a NULL notification when the window becomes empty. The fake backend in =/gsurf/window/remove-active= verifies the actual visible-view vfunc call and observer notifications, including middle, final-index and final-view removals.
+
+** Application lifetime
+
+A retained window's close-request signal kept a raw application pointer after application disposal. An object-bound signal connection now expires with the application. =/gsurf/window/application-dispose= reproduces the stale handler, then exercises closing the retained window after disposal.
+
+* Verification commands
+
+#+begin_src sh
+make clean
+make -j8 all
+make -j8 test
+make -j8 DEBUG=1 ASAN=1 test
+GSURF_TEST_GUI=1 LD_LIBRARY_PATH=build/release ./build/release/test-backend-lifecycle
+make test-gui
+git diff --check
+#+end_src
+
+The Xvfb smoke target explicitly skips when =xvfb-run= is absent. GTK4, LRG and MCP are separate optional build configurations; successful default GTK3 tests do not establish coverage of those configurations. Fedora default-build packages are =gcc=, =make=, =pkgconf-pkg-config=, =glib2-devel=, =libyaml-devel=, =json-glib-devel=, =gtk3-devel= and =webkit2gtk4.1-devel=. Xvfb testing needs =xorg-x11-server-Xvfb=; GTK4 needs =gtk4-devel= and =webkitgtk6.0-devel=.

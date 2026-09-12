@@ -22,6 +22,7 @@ struct _GsurfChromebarModule
 {
 	GsurfModule parent_instance;
 	GtkWidget *entry;
+	GsurfWindow *window; /* weak; the host may destroy it before the module */
 	gchar     *key_focus;
 	GsurfView *tracked;     /* view whose uri-changed we follow */
 	gulong     tracked_id;
@@ -52,7 +53,7 @@ on_view_uri_changed(GsurfView *view, const gchar *uri, gpointer user_data)
 static void
 track_view(GsurfChromebarModule *self, GsurfView *view)
 {
-	if (self->tracked == view)
+	if (view != NULL && self->tracked == view)
 		return;
 	if (self->tracked != NULL && self->tracked_id != 0) {
 		g_signal_handler_disconnect(self->tracked, self->tracked_id);
@@ -65,6 +66,8 @@ track_view(GsurfChromebarModule *self, GsurfView *view)
 		self->tracked_id = g_signal_connect(view, "uri-changed",
 			G_CALLBACK(on_view_uri_changed), self);
 		on_view_uri_changed(view, gsurf_view_get_uri(view), self);
+	} else if (self->entry != NULL) {
+		gtk_entry_set_text(GTK_ENTRY(self->entry), "");
 	}
 }
 
@@ -147,12 +150,16 @@ gsurf_chromebar_activate(GsurfModule *module)
 		return TRUE;
 
 	self->entry = gtk_entry_new();
+	/* Retain the widget even if the host destroys its container first. */
+	g_object_ref_sink(self->entry);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Enter URL or search...");
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);
 	gsurf_window_add_top_widget(window, self->entry);
 
-	g_signal_connect(window, "active-view-changed",
-		G_CALLBACK(on_active_view_changed), self);
+	self->window = window;
+	g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&self->window);
+	g_signal_connect_object(window, "active-view-changed",
+		G_CALLBACK(on_active_view_changed), self, 0);
 	track_view(self, gsurf_window_get_active_view(window));
 	return TRUE;
 }
@@ -175,11 +182,37 @@ gsurf_chromebar_configure(GsurfModule *module, gpointer config_ptr)
 	}
 }
 
+/* Tear down callbacks and chrome before releasing the module's storage. */
+static void
+gsurf_chromebar_deactivate(GsurfModule *module)
+{
+	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(module);
+
+	if (self->window != NULL) {
+		g_signal_handlers_disconnect_by_data(self->window, self);
+		g_object_remove_weak_pointer(G_OBJECT(self->window), (gpointer *)&self->window);
+		self->window = NULL;
+	}
+	track_view(self, NULL);
+	if (self->entry != NULL) {
+		g_signal_handlers_disconnect_by_data(self->entry, self);
+		gtk_widget_destroy(self->entry);
+		g_clear_object(&self->entry);
+	}
+}
+
+/* Idempotent disposal covers hosts retaining windows or native widgets. */
+static void
+gsurf_chromebar_module_dispose(GObject *object)
+{
+	gsurf_chromebar_deactivate(GSURF_MODULE(object));
+	G_OBJECT_CLASS(gsurf_chromebar_module_parent_class)->dispose(object);
+}
+
 static void
 gsurf_chromebar_module_finalize(GObject *object)
 {
 	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(object);
-	track_view(self, NULL);
 	g_clear_pointer(&self->key_focus, g_free);
 	G_OBJECT_CLASS(gsurf_chromebar_module_parent_class)->finalize(object);
 }
@@ -191,7 +224,9 @@ gsurf_chromebar_module_class_init(GsurfChromebarModuleClass *klass)
 	GsurfModuleClass *module_class = GSURF_MODULE_CLASS(klass);
 
 	object_class->finalize = gsurf_chromebar_module_finalize;
+	object_class->dispose = gsurf_chromebar_module_dispose;
 	module_class->activate = gsurf_chromebar_activate;
+	module_class->deactivate = gsurf_chromebar_deactivate;
 	module_class->get_name = gsurf_chromebar_get_name;
 	module_class->get_description = gsurf_chromebar_get_description;
 	module_class->configure = gsurf_chromebar_configure;

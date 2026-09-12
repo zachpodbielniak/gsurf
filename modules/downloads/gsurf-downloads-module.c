@@ -11,6 +11,7 @@
 #include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
+#include <errno.h>
 
 #define GSURF_TYPE_DOWNLOADS_MODULE (gsurf_downloads_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfDownloadsModule, gsurf_downloads_module,
@@ -33,12 +34,28 @@ gsurf_downloads_decide_destination(GsurfDownloadHandler *handler,
                                    const gchar *uri, const gchar *suggested)
 {
 	GsurfDownloadsModule *self = GSURF_DOWNLOADS_MODULE(handler);
-	const gchar *name = (suggested && *suggested) ? suggested : "download";
+	g_autofree gchar *name = NULL;
+	g_autofree gchar *directory = NULL;
 
 	if (self->dir == NULL)
 		return NULL;
-	g_mkdir_with_parents(self->dir, 0755);
-	return g_build_filename(self->dir, name, NULL);
+	/* The remote name is a filename, never a path relative to our directory.
+	 * Dot components and roots also need a usable fallback after basename. */
+	name = g_path_get_basename((suggested && *suggested) ? suggested : "download");
+	if (g_str_equal(name, ".") || g_str_equal(name, "..") ||
+	    g_str_equal(name, G_DIR_SEPARATOR_S)) {
+		g_free(name);
+		name = g_strdup("download");
+	}
+	/* WebKit's destination conversion requires an absolute filename, even
+	 * when the configured download directory is relative to the process. */
+	directory = g_canonicalize_filename(self->dir, NULL);
+	if (g_mkdir_with_parents(directory, 0755) != 0) {
+		g_warning("gsurf downloads: cannot create '%s': %s",
+			directory, g_strerror(errno));
+		return NULL;
+	}
+	return g_build_filename(directory, name, NULL);
 }
 
 static void

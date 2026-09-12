@@ -126,3 +126,20 @@ gsurf's clean GLib/GObject API and GTK-free abstract surface are designed so a
 =GsurfView= widget can later be embedded as a buffer/overlay in the cmacs Emacs
 fork via GObject Introspection. The library makes no GTK-main-loop assumption
 (it uses the default GLib main context), which a host event loop can integrate.
+
+* Ownership and view-removal contracts
+
+String setters on boxed values, =GsurfSettings= and =GsurfDownload= duplicate their input before releasing the previous value. Borrowed getter results and substrings of those results can therefore be passed back into the corresponding setter. Existing NULL/default semantics are retained.
+
+Removing an active view selects the view now at the removed index, or the previous final view when removing the last index. The backend receives the switch and =active-view-changed= is emitted after the public active-view pointer changes. Removing the final view emits the signal with NULL; signal consumers must handle an empty window.
+
+A retained native WebKit widget or content manager must not deliver callbacks into a disposed =GsurfView=. GTK3 also disconnects the wrapper's shared-context callback. Likewise, a window retained by an embedder disconnects its application close handler when the application is disposed.
+
+The opt-in GTK3 lifetime regression can run on the host's existing display without presenting a window:
+
+#+begin_src sh
+make test
+GSURF_TEST_GUI=1 LD_LIBRARY_PATH=build/release ./build/release/test-backend-lifecycle
+#+end_src
+
+Ordinary =make test= skips this native test unless =GSURF_TEST_GUI= is set. The fake-backend window tests and string-ownership tests always run headlessly.

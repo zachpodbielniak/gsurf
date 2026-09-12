@@ -113,10 +113,14 @@ gsurf_uri_parameters_set_pattern(
 	GsurfUriParameters	*params,
 	const gchar		*pattern
 ){
+	gchar *copy;
+
 	g_return_if_fail(params != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(pattern);
 	g_free(params->pattern);
-	params->pattern = g_strdup(pattern);
+	params->pattern = copy;
 }
 
 /*

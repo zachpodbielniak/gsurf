@@ -62,26 +62,61 @@ G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfAdblockModule, gsurf_adblock_module,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_NAVIGATION_HOOK, gsurf_adblock_nav_init)
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_SCRIPT_INJECTOR, gsurf_adblock_injector_init))
 
+/* Use one DNS spelling for files, URI hosts and whitelist entries. Reject
+ * non-host syntax before it can corrupt the generated JSON domain list. */
+static gchar *
+normalize_host(const gchar *host)
+{
+	gchar *normalized;
+	gchar *p;
+	gsize length;
+
+	if (host == NULL || *host == '\0')
+		return NULL;
+	normalized = g_hostname_to_ascii(host);
+	if (normalized == NULL)
+		return NULL;
+	length = strlen(normalized);
+	if (length > 0 && normalized[length - 1] == '.')
+		normalized[--length] = '\0';
+	for (p = normalized; *p != '\0'; p++) {
+		if (!g_ascii_isalnum(*p) && *p != '-' && *p != '.' && *p != '_') {
+			g_free(normalized);
+			return NULL;
+		}
+		*p = g_ascii_tolower(*p);
+	}
+	if (length == 0) {
+		g_free(normalized);
+		return NULL;
+	}
+	return normalized;
+}
+
+/* Match full domain labels, including subdomains, for both lists. */
 static gboolean
-host_is_blocked(GsurfAdblockModule *self, const gchar *host)
+host_matches(GHashTable *hosts, const gchar *host)
 {
 	const gchar *p;
 
-	if (host == NULL)
-		return FALSE;
-	if (g_hash_table_contains(self->whitelist, host))
-		return FALSE;
-
-	/* Exact host, then each parent domain (sub.ads.example -> ads.example
-	 * -> example). */
-	if (g_hash_table_contains(self->blocked, host))
+	if (g_hash_table_contains(hosts, host))
 		return TRUE;
 	for (p = host; (p = strchr(p, '.')) != NULL; ) {
 		p++;
-		if (g_hash_table_contains(self->blocked, p))
+		if (g_hash_table_contains(hosts, p))
 			return TRUE;
 	}
 	return FALSE;
+}
+
+static gboolean
+host_is_blocked(GsurfAdblockModule *self, const gchar *host)
+{
+	g_autofree gchar *normalized = normalize_host(host);
+
+	return normalized != NULL &&
+		!host_matches(self->whitelist, normalized) &&
+		host_matches(self->blocked, normalized);
 }
 
 static GsurfPolicyDecision
@@ -205,9 +240,8 @@ expand_path(const gchar *path)
 	return g_strdup(path);
 }
 
-/* Parse a hosts-format file: ignore comments/blank lines; for each line
- * take the last whitespace-separated token as the host (so both
- * "0.0.0.0 ads.example" and "ads.example" work). */
+/* Parse bare-domain lists and hosts files. Strip inline comments before
+ * splitting, skip an optional IP address, and retain every hostname alias. */
 static void
 load_hosts_file(GsurfAdblockModule *self, const gchar *path)
 {
@@ -224,18 +258,32 @@ load_hosts_file(GsurfAdblockModule *self, const gchar *path)
 	for (i = 0; lines[i] != NULL; i++) {
 		gchar *line = g_strstrip(lines[i]);
 		gchar **toks;
-		const gchar *host;
+		gchar *comment;
+		guint j;
+		gboolean first = TRUE;
 
+		comment = strchr(line, '#');
+		if (comment != NULL)
+			*comment = '\0';
 		if (*line == '\0' || *line == '#')
 			continue;
-		toks = g_strsplit_set(line, " \t", -1);
-		host = toks[0];
-		for (guint j = 0; toks[j] != NULL; j++)
-			if (*toks[j] != '\0')
-				host = toks[j];
-		if (host != NULL && *host != '\0' &&
-		    g_strcmp0(host, "localhost") != 0)
-			g_hash_table_add(self->blocked, g_strdup(host));
+		toks = g_strsplit_set(line, " \t\r", -1);
+		for (j = 0; toks[j] != NULL; j++) {
+			g_autofree gchar *host = NULL;
+			g_autoptr(GInetAddress) address = NULL;
+
+			if (*toks[j] == '\0')
+				continue;
+			if (first) {
+				first = FALSE;
+				address = g_inet_address_new_from_string(toks[j]);
+				if (address != NULL)
+					continue;
+			}
+			host = normalize_host(toks[j]);
+			if (host != NULL && !g_str_equal(host, "localhost"))
+				g_hash_table_add(self->blocked, g_steal_pointer(&host));
+		}
 		g_strfreev(toks);
 	}
 	g_strfreev(lines);
@@ -295,8 +343,10 @@ load_sequence(YamlMapping *m, const gchar *key, void (*fn)(GsurfAdblockModule *,
 static void
 add_whitelist(GsurfAdblockModule *self, const gchar *host)
 {
-	if (host != NULL && *host != '\0')
-		g_hash_table_add(self->whitelist, g_strdup(host));
+	g_autofree gchar *normalized = normalize_host(host);
+
+	if (normalized != NULL)
+		g_hash_table_add(self->whitelist, g_steal_pointer(&normalized));
 }
 
 static void

@@ -234,8 +234,12 @@ gsurf_keybind_set_arg(
 	GsurfKeybind	*keybind,
 	const gchar	*arg
 ){
+	gchar *copy;
+
 	g_return_if_fail(keybind != NULL);
 
+	/* Copy first: the input may alias the currently owned string. */
+	copy = g_strdup(arg);
 	g_free(keybind->arg);
-	keybind->arg = g_strdup(arg);
+	keybind->arg = copy;
 }
