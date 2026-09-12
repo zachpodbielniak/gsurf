@@ -130,7 +130,7 @@ modules:
   # History log (used by chromebar/omnibar; plain text for dmenu/grep).
   history:
     enabled: true
-    file: "~/.local/share/gsurf/history"
+    # Omit file to use $XDG_DATA_HOME/gsurf/history.
     log_titles: true
 
   # Go-home key.

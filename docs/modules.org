@@ -79,6 +79,14 @@ A supplied =useragent.presets= mapping likewise replaces the previous mapping, i
 
 Module priorities are signed integers, ordered from lowest to highest when modules are added and when =gsurf_module_manager_activate_all()= runs. The full =gint= range is supported; changing priorities after activation requires another activation pass to reorder dispatch.
 
+* History records and storage
+
+History defaults to =$XDG_DATA_HOME/gsurf/history= (normally =~/.local/share/gsurf/history=). The shipped configurations leave =file= unset to honor that default; a custom =file= still supports =~/=. Reconfiguring =log_titles= without =file= preserves the selected destination. An explicitly empty =file: ""= disables writes. Storage is created only on the first eligible visit, with mode =0700= for new directories and =0600= for new files, subject to the process umask; existing permissions are preserved.
+
+Each visit appends one line: URI, an optional tab and title, then a newline. ASCII control bytes in URIs are percent-encoded, while ASCII controls in titles become spaces. Existing percent escapes and UTF-8 text are preserved. This keeps page titles from injecting additional records or terminal control bytes. =about:= and =data:= visits are excluded regardless of scheme casing. Existing log contents are not rewritten or sanitized retroactively.
+
+Directory creation, opening, writing and closing failures produce warnings containing the affected path and error. Later visits retry normally after a storage failure; failed records are not queued for replay. This remains an append-only text log, not a transactional database or a guarantee against disk loss. =tests/test-history.c= covers the real module with temporary XDG storage and a model-only view, without a display or network access.
+
 * Hosts-file parsing and download destinations
 
 The adblock module accepts bare domains and hosts-file lines with an IPv4 or IPv6 address followed by one or more hostname aliases. It ignores blank lines and comments, including trailing =#= comments. Hostnames are normalized to lowercase ASCII (including internationalized domain names), with a trailing DNS root dot removed. Blocked and whitelisted domains match whole labels and their subdomains; whitelist matches take precedence. Invalid non-host tokens are excluded from generated filter JSON.

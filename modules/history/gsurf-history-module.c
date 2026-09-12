@@ -12,7 +12,7 @@
 #include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
-#include <stdio.h>
+#include <errno.h>
 #include <string.h>
 
 #define GSURF_TYPE_HISTORY_MODULE (gsurf_history_module_get_type())
@@ -49,26 +49,59 @@ static void
 gsurf_history_after_navigate(GsurfNavigationHook *hook, GsurfView *view, const gchar *uri)
 {
 	GsurfHistoryModule *self = GSURF_HISTORY_MODULE(hook);
-	FILE *f;
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GFile) file = NULL;
+	g_autoptr(GFileOutputStream) stream = NULL;
+	g_autoptr(GString) record = NULL;
+	g_autofree gchar *dir = NULL;
 	const gchar *title;
+	const guchar *p;
 
-	if (self->file == NULL || uri == NULL || *uri == '\0')
+	if (self->file == NULL || *self->file == '\0' || uri == NULL || *uri == '\0')
 		return;
 	/* Skip internal/non-web schemes. */
-	if (g_str_has_prefix(uri, "about:") || g_str_has_prefix(uri, "data:"))
+	if (g_ascii_strncasecmp(uri, "about:", 6) == 0 ||
+	    g_ascii_strncasecmp(uri, "data:", 5) == 0)
 		return;
 
-	f = fopen(self->file, "a");
-	if (f == NULL)
+	/* Create storage lazily, including after an external directory removal.
+	 * New directories and logs are private; existing permissions are kept. */
+	dir = g_path_get_dirname(self->file);
+	if (g_mkdir_with_parents(dir, 0700) != 0) {
+		g_warning("gsurf history: cannot create '%s': %s", dir, g_strerror(errno));
 		return;
+	}
+	file = g_file_new_for_path(self->file);
+	stream = g_file_append_to(file, G_FILE_CREATE_PRIVATE, NULL, &error);
+	if (stream == NULL) {
+		g_warning("gsurf history: cannot append to '%s': %s", self->file, error->message);
+		return;
+	}
 
+	/* Keep exactly one tab-separated record per navigation. URI controls
+	 * are percent-encoded so reopening preserves their meaning; title
+	 * controls become spaces so page content cannot inject log records. */
+	record = g_string_new(NULL);
+	for (p = (const guchar *)uri; *p != '\0'; p++) {
+		if (*p < 0x20 || *p == 0x7f)
+			g_string_append_printf(record, "%%%02X", (guint)*p);
+		else
+			g_string_append_c(record, (gchar)*p);
+	}
 	title = (self->log_titles && view != NULL) ? gsurf_view_get_title(view) : NULL;
-	if (title != NULL && *title != '\0')
-		fprintf(f, "%s\t%s\n", uri, title);
-	else
-		fprintf(f, "%s\n", uri);
+	if (title != NULL && *title != '\0') {
+		g_string_append_c(record, '\t');
+		for (p = (const guchar *)title; *p != '\0'; p++)
+			g_string_append_c(record, (*p < 0x20 || *p == 0x7f) ? ' ' : (gchar)*p);
+	}
+	g_string_append_c(record, '\n');
 
-	fclose(f);
+	/* Report both write and close failures. The automatic stream cleanup
+	 * also closes the descriptor when writing fails before explicit close. */
+	if (!g_output_stream_write_all(G_OUTPUT_STREAM(stream), record->str,
+	                              record->len, NULL, NULL, &error) ||
+	    !g_output_stream_close(G_OUTPUT_STREAM(stream), NULL, &error))
+		g_warning("gsurf history: cannot save '%s': %s", self->file, error->message);
 }
 
 static void
@@ -96,26 +129,20 @@ gsurf_history_configure(GsurfModule *module, gpointer config_ptr)
 	GsurfConfig *config = config_ptr;
 	YamlNode *node;
 	YamlMapping *m;
-	const gchar *file = NULL;
 
 	node = gsurf_config_get_module_node(config, "history");
 	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
 		return;
 	m = yaml_node_get_mapping(node);
 
-	if (yaml_mapping_has_member(m, "file"))
-		file = yaml_mapping_get_string_member(m, "file");
+	/* Omitted options preserve the current configuration. In particular,
+	 * changing title logging must not redirect a custom history file. */
+	if (yaml_mapping_has_member(m, "file")) {
+		g_free(self->file);
+		self->file = expand_path(yaml_mapping_get_string_member(m, "file"));
+	}
 	if (yaml_mapping_has_member(m, "log_titles"))
 		self->log_titles = yaml_mapping_get_boolean_member(m, "log_titles");
-
-	g_free(self->file);
-	self->file = expand_path(file ? file : "~/.local/share/gsurf/history");
-
-	/* Ensure the parent directory exists. */
-	{
-		g_autofree gchar *dir = g_path_get_dirname(self->file);
-		g_mkdir_with_parents(dir, 0755);
-	}
 }
 
 static gboolean
@@ -151,7 +178,7 @@ gsurf_history_module_class_init(GsurfHistoryModuleClass *klass)
 static void
 gsurf_history_module_init(GsurfHistoryModule *self)
 {
-	self->file = NULL;
+	self->file = g_build_filename(g_get_user_data_dir(), "gsurf", "history", NULL);
 	self->log_titles = TRUE;
 }
 

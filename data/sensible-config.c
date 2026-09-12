@@ -59,7 +59,6 @@ static const char *SENSIBLE_MODULES_YAML =
 "    key_prev: \"Ctrl+Shift+Tab\"\n"
 "  history:\n"
 "    enabled: true\n"
-"    file: \"~/.local/share/gsurf/history\"\n"
 "    log_titles: true\n"
 "  homepage:\n"
 "    enabled: true\n"

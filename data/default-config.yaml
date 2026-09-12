@@ -155,7 +155,7 @@ modules:
 
   history:
     enabled: true
-    file: "~/.local/share/gsurf/history"
+    # Omit file to use $XDG_DATA_HOME/gsurf/history.
     max_entries: 10000
     log_titles: true
     dmenu_cmd: "dmenu -l 20 -i"
