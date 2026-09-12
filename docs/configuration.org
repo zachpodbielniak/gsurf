@@ -32,6 +32,8 @@ webkit:                        # web engine defaults (surf defconfig analogue)
   javascript: true
   images: true
   webgl: false
+  webrtc: false
+  media_stream: false
   caret_browsing: false
   developer_extras: false
   default_font_size: 16
@@ -57,6 +59,12 @@ modules:                       # one block per module; `enabled:` gates it
     enabled: false
     # ...
 #+end_src
+
+GTK3, GTK4, and LRG apply =webkit.webrtc= to the engine on each settings update. Enabling WebRTC also enables media streams, as required by WebKit, even when =webkit.media_stream= is false. With WebRTC disabled, =webkit.media_stream= controls media streams independently.
+
+An empty =user_agent= (or =NULL= in C settings) restores the engine's default user agent, including after a per-URI user-agent override stops matching. This reset applies to all three backends.
+
+Native settings regressions run with =make test-gui= under Xvfb. On an existing display, run =GSURF_TEST_GUI=1 ./build/release/test-backend-settings= after =make test=; ordinary headless tests skip these display-dependent checks.
 
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).

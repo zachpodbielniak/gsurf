@@ -187,7 +187,9 @@ gsurf_webkit6_view_apply_settings(GsurfView *v, GsurfSettings *s)
 	webkit_settings_set_auto_load_images(ws, s->images);
 	webkit_settings_set_enable_webgl(ws, s->webgl);
 	webkit_settings_set_enable_webaudio(ws, s->webaudio);
-	webkit_settings_set_enable_media_stream(ws, s->media_stream);
+	/* WebRTC requires media streams, including on repeated application. */
+	webkit_settings_set_enable_media_stream(ws, s->media_stream || s->webrtc);
+	webkit_settings_set_enable_webrtc(ws, s->webrtc);
 	webkit_settings_set_enable_smooth_scrolling(ws, s->smooth_scrolling);
 	webkit_settings_set_enable_caret_browsing(ws, s->caret_browsing);
 	webkit_settings_set_enable_site_specific_quirks(ws, s->site_quirks);
@@ -198,8 +200,9 @@ gsurf_webkit6_view_apply_settings(GsurfView *v, GsurfSettings *s)
 	webkit_settings_set_default_monospace_font_size(ws, s->default_monospace_font_size);
 	if (s->default_charset != NULL)
 		webkit_settings_set_default_charset(ws, s->default_charset);
-	if (s->user_agent != NULL && *s->user_agent != '\0')
-		webkit_settings_set_user_agent(ws, s->user_agent);
+	/* Clear a previous per-site override when the default is requested. */
+	webkit_settings_set_user_agent(ws,
+		(s->user_agent != NULL && *s->user_agent != '\0') ? s->user_agent : NULL);
 }
 
 static void

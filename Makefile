@@ -218,9 +218,12 @@ tests: test
 # browser under Xvfb on about:blank and confirm it stays alive briefly.
 # Gated on xvfb-run being available so `make test` stays pure-headless.
 .PHONY: test-gui
-test-gui: gsurf modules
+test-gui: gsurf modules $(OUTDIR)/test-backend-settings
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
+	echo "Running native settings regression tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-backend-settings || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \
