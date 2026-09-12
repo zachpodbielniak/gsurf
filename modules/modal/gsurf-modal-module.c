@@ -37,6 +37,7 @@ struct _GsurfModalModule
 	gchar *hint_chars;        /* alphabet, e.g. "asdfghjkl" */
 	gchar *hint_bg;
 	gchar *hint_fg;
+	gint hint_font_size;     /* CSS pixels, independent of page font settings */
 };
 
 static void gsurf_modal_input_init(GsurfInputHandlerInterface *iface);
@@ -119,10 +120,10 @@ build_show_js(GsurfModalModule *self, gboolean newview)
 		"for(var i=0;i<els.length;i++){var e=els[i],r=e.getBoundingClientRect();"
 		"var t=document.createElement('div');t.textContent=L[i];"
 		"t.style.cssText='position:fixed;z-index:2147483647;left:'+Math.max(0,r.left)+'px;top:'+Math.max(0,r.top)+'px;"
-		"background:'+BG+';color:'+FG+';font:bold 11px monospace;padding:0 3px;border-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.5);';"
+		"background:'+BG+';color:'+FG+';font:bold %dpx monospace;padding:0 3px;border-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.5);';"
 		"document.documentElement.appendChild(t);ar.push({l:L[i],e:e,t:t});}"
 		"window.__gh=ar;window.__gb='';return ar.length;})()",
-		chars_q, bg_q, fg_q, newview ? "true" : "false");
+		chars_q, bg_q, fg_q, newview ? "true" : "false", self->hint_font_size);
 }
 
 static void
@@ -372,6 +373,8 @@ gsurf_modal_configure(GsurfModule *module, gpointer config_ptr)
 	YamlNode *node;
 	YamlMapping *m;
 	const gchar *start;
+	const gchar *font_size_text;
+	gint64 font_size;
 
 	node = gsurf_config_get_module_node(config, "modal");
 	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
@@ -390,6 +393,16 @@ gsurf_modal_configure(GsurfModule *module, gpointer config_ptr)
 	dup_member(&self->hint_chars, m, "hint_chars");
 	dup_member(&self->hint_bg, m, "hint_bg");
 	dup_member(&self->hint_fg, m, "hint_fg");
+	/* Reject unusable sizes before narrowing to the CSS integer value. */
+	if (yaml_mapping_has_member(m, "hint_font_size")) {
+		font_size_text = yaml_mapping_get_string_member(m, "hint_font_size");
+		if (font_size_text != NULL &&
+		    g_ascii_string_to_signed(font_size_text, 10, 1, G_MAXINT, &font_size, NULL))
+			self->hint_font_size = (gint)font_size;
+		else
+			g_warning("modal.hint_font_size must be a positive integer <= %d; keeping %dpx",
+			          G_MAXINT, self->hint_font_size);
+	}
 }
 
 static void
@@ -434,6 +447,7 @@ gsurf_modal_module_init(GsurfModalModule *self)
 	self->hint_chars = g_strdup("asdfghjkl");
 	self->hint_bg = g_strdup("#ffd700");
 	self->hint_fg = g_strdup("#000000");
+	self->hint_font_size = 11;
 }
 
 G_MODULE_EXPORT GType

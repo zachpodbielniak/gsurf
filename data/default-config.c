@@ -56,8 +56,10 @@ gsurf_config_init(void)
 	/* gsurf_config_set_keybind(config, "Ctrl+r", GSURF_ACTION_RELOAD); */
 	/* gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK); */
 
-	/* --- Module options are configured via YAML; see
-	 *     --generate-yaml-config and gsurf_config_get_module_node(). --- */
+	/* --- Module options can be supplied as embedded YAML via
+	 *     gsurf_config_load_from_data(), as in sensible-config.c.
+	 *     Set modules.modal.hint_font_size to 15 for larger f/F labels.
+	 *     Supply the complete modules block: loading replaces that mapping. --- */
 
 	(void)config;
 	return TRUE;

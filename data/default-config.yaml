@@ -236,6 +236,7 @@ modules:
     hint_chars: "asdfghjkl"
     hint_bg: "#ffd700"
     hint_fg: "#000000"
+    hint_font_size: 11  # positive integer, CSS pixels
     hint_alpha: 230
 
   omnibar:

@@ -27,7 +27,7 @@ G_DEFINE_FINAL_TYPE(GsurfConfigCompiler, gsurf_config_compiler, G_TYPE_OBJECT)
 /* Extract the optional `#define CRISPY_PARAMS "..."` value, if present.
  *
  * Only an actual preprocessor define is honored — a commented-out example
- * (e.g. the commented CRISPY_PARAMS example in the shipped config
+ * (e.g. the commented CRISPY_PARAMS line in the shipped config
  * templates) is ignored. The line, after leading whitespace, must begin
  * with `#define`; that excludes lines that open with a comment. */
 static gchar *

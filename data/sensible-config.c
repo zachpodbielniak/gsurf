@@ -38,6 +38,7 @@ static const char *SENSIBLE_MODULES_YAML =
 "    hint_chars: \"asdfghjkl\"\n"
 "    hint_bg: \"#ffd700\"\n"
 "    hint_fg: \"#000000\"\n"
+"    hint_font_size: 11\n"
 "  chromebar:\n"
 "    enabled: true\n"
 "    key_focus: \"Ctrl+l\"\n"

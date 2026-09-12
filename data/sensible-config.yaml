@@ -100,6 +100,7 @@ modules:
     hint_chars: "asdfghjkl"    # home-row alphabet; chords grow with link count
     hint_bg: "#ffd700"
     hint_fg: "#000000"
+    hint_font_size: 11         # positive integer, CSS pixels
 
   # Address bar (Ctrl+l to focus; non-URL input falls through to search).
   chromebar:
