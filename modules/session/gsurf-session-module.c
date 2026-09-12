@@ -29,11 +29,13 @@ struct _GsurfSessionModule
 
 static void gsurf_session_nav_init(GsurfNavigationHookInterface *iface);
 static void gsurf_session_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_session_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfSessionModule, gsurf_session_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_NAVIGATION_HOOK, gsurf_session_nav_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_session_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_session_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_session_keybind_init))
 
 static void
 session_save(GsurfSessionModule *self)
@@ -87,6 +89,21 @@ static void
 gsurf_session_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_session_handle_key_event;
+}
+
+static void
+gsurf_session_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfSessionModule *self = GSURF_SESSION_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_save,
+		"Save the current session", "session", "session-save");
+}
+
+static void
+gsurf_session_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_session_list_keybinds;
 }
 
 static const gchar *gsurf_session_get_name(GsurfModule *m) { return "session"; }

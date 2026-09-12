@@ -58,7 +58,10 @@ struct _GsurfWindowClass
 	 * (used by chromebar / status-bar modules). */
 	void     (*add_chrome_widget) (GsurfWindow *self, gpointer widget, gboolean top);
 
-	gpointer padding[8];
+	/* Overlay listing currently active keybindings (the `?` help menu). */
+	void     (*show_keybind_help) (GsurfWindow *self, GPtrArray *entries);
+
+	gpointer padding[7];
 };
 
 /* --- View management (handled by the abstract base) --- */
@@ -116,6 +119,17 @@ void        gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget);
  * No-op while kiosk mode is enabled so the page fills the window.
  */
 void        gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget);
+
+/**
+ * gsurf_window_show_keybind_help:
+ * @self: a #GsurfWindow
+ * @entries: (element-type GsurfKeybindHelp) (nullable): rows to display
+ *
+ * Shows a popup listing currently active keybindings. GTK backends use a
+ * native dialog; other backends inject an in-page overlay. Pressing the
+ * help key again, or Escape, dismisses it.
+ */
+void        gsurf_window_show_keybind_help(GsurfWindow *self, GPtrArray *entries);
 
 /* --- Event emission helpers (for backend subclasses) --- */
 gboolean    gsurf_window_emit_key_press(GsurfWindow *self, guint keyval, guint keycode, guint state);

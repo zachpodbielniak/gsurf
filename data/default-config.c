@@ -54,6 +54,7 @@ gsurf_config_init(void)
 	/* --- Keybinds / mousebinds (the setters normalize the binding string
 	 *     to match runtime key lookups; pass GSURF_ACTION_NONE to remove) --- */
 	/* gsurf_config_set_keybind(config, "Ctrl+r", GSURF_ACTION_RELOAD); */
+	/* gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS); */
 	/* gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK); */
 
 	/* --- Module options can be supplied as embedded YAML via

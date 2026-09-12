@@ -35,6 +35,7 @@
 #include "boxed/gsurf-uri-parameters.h"
 #include "boxed/gsurf-keybind.h"
 #include "boxed/gsurf-mousebind.h"
+#include "boxed/gsurf-keybind-help.h"
 
 /* Core classes */
 #include "core/gsurf-view.h"
@@ -64,6 +65,7 @@
 #include "interfaces/gsurf-status-provider.h"
 #include "interfaces/gsurf-context-menu-provider.h"
 #include "interfaces/gsurf-render-overlay.h"
+#include "interfaces/gsurf-keybind-provider.h"
 
 /* Utilities */
 #include "util/gsurf-keys.h"

@@ -10,6 +10,7 @@
  */
 
 #include "backend/gtk4/gsurf-gtk4-window.h"
+#include "boxed/gsurf-keybind-help.h"
 
 #include <gtk/gtk.h>
 
@@ -160,6 +161,86 @@ gsurf_gtk4_window_add_chrome_widget(GsurfWindow *window, gpointer widget, gboole
 }
 
 static void
+on_help4_destroy(GtkWidget *dialog, gpointer user_data)
+{
+	GsurfGtk4Window *self = user_data;
+
+	(void)dialog;
+	if (self->window != NULL)
+		g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", NULL);
+}
+
+static void
+on_help4_close(GtkButton *button, gpointer user_data)
+{
+	(void)button;
+	gtk_window_destroy(GTK_WINDOW(user_data));
+}
+
+static void
+gsurf_gtk4_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
+{
+	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
+	GtkWidget *dialog, *vbox, *scrolled, *list, *old, *close_btn;
+	guint i;
+
+	if (self->window == NULL)
+		return;
+
+	old = g_object_get_data(G_OBJECT(self->window), "gsurf-keybind-help");
+	if (old != NULL) {
+		gtk_window_destroy(GTK_WINDOW(old));
+		return;
+	}
+
+	dialog = gtk_window_new();
+	gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(self->window));
+	gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+	gtk_window_set_title(GTK_WINDOW(dialog), "Keybindings");
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 760, 520);
+	g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", dialog);
+	g_signal_connect(dialog, "destroy", G_CALLBACK(on_help4_destroy), self);
+
+	vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 8);
+	gtk_window_set_child(GTK_WINDOW(dialog), vbox);
+
+	list = gtk_list_box_new();
+	gtk_list_box_set_selection_mode(GTK_LIST_BOX(list), GTK_SELECTION_NONE);
+	for (i = 0; entries != NULL && i < entries->len; i++) {
+		const GsurfKeybindHelp *h = g_ptr_array_index(entries, i);
+		g_autofree gchar *pretty = gsurf_keybind_help_pretty_key(h->key);
+		GtkWidget *row, *key_l, *desc_l, *src_l;
+
+		row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 16);
+		key_l = gtk_label_new(pretty != NULL ? pretty : "");
+		gtk_widget_add_css_class(key_l, "monospace");
+		gtk_label_set_xalign(GTK_LABEL(key_l), 0.0);
+		gtk_widget_set_size_request(key_l, 160, -1);
+		desc_l = gtk_label_new(h->description != NULL ? h->description : "");
+		gtk_label_set_xalign(GTK_LABEL(desc_l), 0.0);
+		gtk_widget_set_hexpand(desc_l, TRUE);
+		src_l = gtk_label_new(h->source != NULL ? h->source : "");
+		gtk_label_set_xalign(GTK_LABEL(src_l), 0.0);
+		gtk_widget_set_size_request(src_l, 120, -1);
+		gtk_box_append(GTK_BOX(row), key_l);
+		gtk_box_append(GTK_BOX(row), desc_l);
+		gtk_box_append(GTK_BOX(row), src_l);
+		gtk_list_box_append(GTK_LIST_BOX(list), row);
+	}
+
+	scrolled = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolled), list);
+	gtk_widget_set_vexpand(scrolled, TRUE);
+	gtk_box_append(GTK_BOX(vbox), scrolled);
+
+	close_btn = gtk_button_new_with_mnemonic("_Close");
+	g_signal_connect(close_btn, "clicked", G_CALLBACK(on_help4_close), dialog);
+	gtk_box_append(GTK_BOX(vbox), close_btn);
+
+	gtk_window_present(GTK_WINDOW(dialog));
+}
+
+static void
 gsurf_gtk4_window_dispose(GObject *object)
 {
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(object);
@@ -189,6 +270,7 @@ gsurf_gtk4_window_class_init(GsurfGtk4WindowClass *klass)
 	window_class->set_fullscreen = gsurf_gtk4_window_set_fullscreen;
 	window_class->get_native_widget = gsurf_gtk4_window_get_native_widget;
 	window_class->add_chrome_widget = gsurf_gtk4_window_add_chrome_widget;
+	window_class->show_keybind_help = gsurf_gtk4_window_show_keybind_help;
 }
 
 static void

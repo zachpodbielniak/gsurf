@@ -63,6 +63,10 @@ normalize_keystring(const gchar *s)
 			key = tok;
 	}
 
+	/* "?" is the user-facing name for GDK's "question" keyval. */
+	if (key != NULL && g_strcmp0(key, "?") == 0)
+		key = "question";
+
 	out = g_string_new(NULL);
 	if (ctrl)  g_string_append(out, "Ctrl+");
 	if (alt)   g_string_append(out, "Alt+");
@@ -379,6 +383,7 @@ gsurf_config_find_default_path(void)
 GsurfAction
 gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keystring)
 {
+	g_autofree gchar *norm = NULL;
 	gpointer val;
 
 	g_return_val_if_fail(GSURF_IS_CONFIG(self), GSURF_ACTION_NONE);
@@ -386,7 +391,11 @@ gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keystring)
 	if (keystring == NULL)
 		return GSURF_ACTION_NONE;
 
-	val = g_hash_table_lookup(self->keybinds, keystring);
+	norm = normalize_keystring(keystring);
+	if (norm == NULL)
+		return GSURF_ACTION_NONE;
+
+	val = g_hash_table_lookup(self->keybinds, norm);
 	return val != NULL ? (GsurfAction)GPOINTER_TO_UINT(val) : GSURF_ACTION_NONE;
 }
 

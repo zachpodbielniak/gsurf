@@ -25,10 +25,12 @@ struct _GsurfProxySwitchModule
 };
 
 static void gsurf_proxy_switch_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_proxy_switch_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfProxySwitchModule, gsurf_proxy_switch_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_proxy_switch_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_proxy_switch_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_proxy_switch_keybind_init))
 
 static gboolean
 gsurf_proxy_switch_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -53,6 +55,21 @@ static void
 gsurf_proxy_switch_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_proxy_switch_handle_key_event;
+}
+
+static void
+gsurf_proxy_switch_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfProxySwitchModule *self = GSURF_PROXY_SWITCH_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key,
+		"Cycle proxy presets", "proxy_switch", "proxy-cycle");
+}
+
+static void
+gsurf_proxy_switch_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_proxy_switch_list_keybinds;
 }
 
 static const gchar *gsurf_proxy_switch_get_name(GsurfModule *m) { return "proxy_switch"; }

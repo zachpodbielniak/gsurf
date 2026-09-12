@@ -32,6 +32,7 @@ typedef struct _GsurfUriParameters    GsurfUriParameters;
 typedef struct _GsurfKeybind          GsurfKeybind;
 typedef struct _GsurfMousebind        GsurfMousebind;
 typedef struct _GsurfMenuItem         GsurfMenuItem;
+typedef struct _GsurfKeybindHelp      GsurfKeybindHelp;
 
 /*
  * Default values

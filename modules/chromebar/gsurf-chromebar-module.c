@@ -28,10 +28,12 @@ struct _GsurfChromebarModule
 };
 
 static void gsurf_chromebar_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_chromebar_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfChromebarModule, gsurf_chromebar_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_chromebar_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_chromebar_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_chromebar_keybind_init))
 
 static GsurfView *
 active_view(void)
@@ -106,6 +108,21 @@ static void
 gsurf_chromebar_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_chromebar_handle_key_event;
+}
+
+static void
+gsurf_chromebar_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_focus,
+		"Focus the address bar", "chromebar", "open-prompt");
+}
+
+static void
+gsurf_chromebar_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_chromebar_list_keybinds;
 }
 
 static const gchar *gsurf_chromebar_get_name(GsurfModule *m) { return "chromebar"; }

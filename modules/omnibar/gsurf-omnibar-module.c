@@ -25,10 +25,12 @@ struct _GsurfOmnibarModule
 };
 
 static void gsurf_omnibar_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_omnibar_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfOmnibarModule, gsurf_omnibar_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_omnibar_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_omnibar_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_omnibar_keybind_init))
 
 static gboolean
 gsurf_omnibar_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -62,6 +64,21 @@ static void
 gsurf_omnibar_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_omnibar_handle_key_event;
+}
+
+static void
+gsurf_omnibar_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfOmnibarModule *self = GSURF_OMNIBAR_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key,
+		"Open history completion", "omnibar", "omnibar");
+}
+
+static void
+gsurf_omnibar_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_omnibar_list_keybinds;
 }
 
 static const gchar *gsurf_omnibar_get_name(GsurfModule *m) { return "omnibar"; }

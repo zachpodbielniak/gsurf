@@ -29,10 +29,12 @@ struct _GsurfBookmarksModule
 };
 
 static void gsurf_bookmarks_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_bookmarks_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfBookmarksModule, gsurf_bookmarks_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_bookmarks_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_bookmarks_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_bookmarks_keybind_init))
 
 /* Run "dmenu_cmd < file" and return the selected line, or NULL. */
 static gchar *
@@ -87,6 +89,23 @@ static void
 gsurf_bookmarks_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_bookmarks_handle_key_event;
+}
+
+static void
+gsurf_bookmarks_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfBookmarksModule *self = GSURF_BOOKMARKS_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_add,
+		"Bookmark the current URI", "bookmarks", "bookmark-add");
+	gsurf_keybind_help_append(entries, self->key_open,
+		"Open a bookmark", "bookmarks", "bookmark-open");
+}
+
+static void
+gsurf_bookmarks_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_bookmarks_list_keybinds;
 }
 
 static const gchar *gsurf_bookmarks_get_name(GsurfModule *m) { return "bookmarks"; }

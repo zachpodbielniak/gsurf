@@ -193,6 +193,7 @@ gsurf_config_init(void)
 	gsurf_config_set_keybind(config, "Ctrl+0",       GSURF_ACTION_ZOOM_RESET);
 	gsurf_config_set_keybind(config, "F11",          GSURF_ACTION_TOGGLE_FULLSCREEN);
 	gsurf_config_set_keybind(config, "Ctrl+q",       GSURF_ACTION_QUIT);
+	gsurf_config_set_keybind(config, "?",            GSURF_ACTION_SHOW_KEYBINDS);
 
 	/* ===== Mousebinds ===== */
 	gsurf_config_set_mousebind(config, "Button8",      GSURF_ACTION_BACK);

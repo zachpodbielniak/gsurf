@@ -215,6 +215,20 @@ void                gsurf_module_manager_dispatch_populate_menu(GsurfModuleManag
 gchar              *gsurf_module_manager_dispatch_status_text(GsurfModuleManager *self, GsurfView *view);
 void                gsurf_module_manager_dispatch_render_overlay(GsurfModuleManager *self, GsurfView *view, gpointer draw_target);
 
+/**
+ * gsurf_module_manager_collect_keybinds:
+ * @self: a #GsurfModuleManager
+ *
+ * Builds the current keybinding help list: every core `keybinds:` entry
+ * plus each *active* module that implements #GsurfKeybindProvider. The
+ * result is sorted with core rows first, then by module name and key.
+ * Re-run this at display time; do not cache it across config or module
+ * changes.
+ *
+ * Returns: (transfer full) (element-type GsurfKeybindHelp): the rows
+ */
+GPtrArray          *gsurf_module_manager_collect_keybinds(GsurfModuleManager *self);
+
 G_END_DECLS
 
 #endif /* GSURF_MODULE_MANAGER_H */

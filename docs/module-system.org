@@ -55,13 +55,20 @@ from the directory). Add an =enabled:= block under =modules:= in
 | Interface              | vfunc(s)                                  | Fired when / used by                          | Consumable        |
 |------------------------+-------------------------------------------+-----------------------------------------------+-------------------|
 | =GsurfInputHandler=    | =handle_key_event=, =handle_mouse_event=  | key/button before default binds (modal, tabs) | first TRUE wins   |
+| =GsurfKeybindProvider= | =list_keybinds=                           | =?= help overlay; queried at display time     | additive          |
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
 | =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed= | navigation lifecycle (history, homepage) | =before=: veto    |
 
 More interfaces (request-filter for adblock, download-handler, status-provider,
 script-injector, permission-handler, cert-handler, context-menu-provider,
-render-overlay, setting-provider) follow the same =G_DECLARE_INTERFACE= +
-manager-dispatch pattern and are added as their modules are implemented.
+render-overlay, setting-provider, keybind-provider) follow the same
+=G_DECLARE_INTERFACE= + manager-dispatch pattern and are added as their modules
+are implemented.
+
+A module that owns keys should implement =GsurfKeybindProvider::list_keybinds=
+and append =GsurfKeybindHelp= rows with its *current* configured keys. The =?=
+overlay calls =gsurf_module_manager_collect_keybinds()= on each press, so
+disabled modules and reconfigured keys show up without a restart.
 
 Note on =GsurfScriptInjector::inject(view, uri)=: it fires *once per view, at
 view construction* (with =uri = NULL=) — it is not re-dispatched per page load.

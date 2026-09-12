@@ -23,10 +23,12 @@ struct _GsurfInspectorModule
 };
 
 static void gsurf_inspector_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_inspector_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfInspectorModule, gsurf_inspector_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_inspector_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_inspector_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_inspector_keybind_init))
 
 static gboolean
 gsurf_inspector_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -47,6 +49,21 @@ static void
 gsurf_inspector_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_inspector_handle_key_event;
+}
+
+static void
+gsurf_inspector_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfInspectorModule *self = GSURF_INSPECTOR_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key,
+		"Toggle the web inspector", "inspector", "inspector");
+}
+
+static void
+gsurf_inspector_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_inspector_list_keybinds;
 }
 
 static const gchar *gsurf_inspector_get_name(GsurfModule *m) { return "inspector"; }

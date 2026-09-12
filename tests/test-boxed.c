@@ -114,6 +114,39 @@ test_keybind(void)
 }
 
 static void
+test_keybind_help(void)
+{
+	g_autoptr(GsurfKeybindHelp) h = gsurf_keybind_help_new("question",
+		"Show all keybindings", "core", "show-keybinds");
+	g_autofree gchar *pretty = NULL;
+	g_autofree gchar *pretty_mod = NULL;
+	GPtrArray *entries;
+
+	g_assert_cmpstr(gsurf_keybind_help_get_key(h), ==, "question");
+	g_assert_cmpstr(gsurf_keybind_help_get_description(h), ==, "Show all keybindings");
+	g_assert_cmpstr(gsurf_keybind_help_get_source(h), ==, "core");
+	g_assert_cmpstr(gsurf_keybind_help_get_action(h), ==, "show-keybinds");
+
+	{
+		g_autoptr(GsurfKeybindHelp) c = gsurf_keybind_help_copy(h);
+		gsurf_keybind_help_set_key(h, "slash");
+		g_assert_cmpstr(gsurf_keybind_help_get_key(c), ==, "question");
+	}
+
+	pretty = gsurf_keybind_help_pretty_key("question");
+	pretty_mod = gsurf_keybind_help_pretty_key("Ctrl+slash");
+	g_assert_cmpstr(pretty, ==, "?");
+	g_assert_cmpstr(pretty_mod, ==, "Ctrl+/");
+
+	entries = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_keybind_help_free);
+	gsurf_keybind_help_append(entries, "Ctrl+r", "Reload the page", "core", "reload");
+	gsurf_keybind_help_append(entries, NULL, "ignored", "core", "none");
+	gsurf_keybind_help_append(entries, "", "ignored", "core", "none");
+	g_assert_cmpuint(entries->len, ==, 1);
+	g_ptr_array_unref(entries);
+}
+
+static void
 test_mousebind(void)
 {
 	g_autoptr(GsurfMousebind) b = gsurf_mousebind_new(8, GSURF_MOD_NONE,
@@ -156,6 +189,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/boxed/navigation-action", test_navigation_action);
 	g_test_add_func("/gsurf/boxed/menu-item", test_menu_item);
 	g_test_add_func("/gsurf/boxed/keybind", test_keybind);
+	g_test_add_func("/gsurf/boxed/keybind-help", test_keybind_help);
 	g_test_add_func("/gsurf/boxed/mousebind", test_mousebind);
 	g_test_add_func("/gsurf/boxed/uri-parameters", test_uri_parameters);
 

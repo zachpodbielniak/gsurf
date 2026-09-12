@@ -92,6 +92,8 @@ keybinds:
   "Ctrl+Shift+g": find-prev
   "F11": toggle-fullscreen
   "Ctrl+q": quit
+  # `?` (GDK keyval name "question") opens the live keybinding overlay.
+  "question": show-keybinds
   # Open the address bar.  Under --lrg this drives the libregnum window's
   # built-in URL editor; on GTK the chromebar/omnibar module handles it.
   "o": open-prompt

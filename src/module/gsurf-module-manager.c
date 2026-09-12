@@ -19,6 +19,8 @@
 #include "interfaces/gsurf-status-provider.h"
 #include "interfaces/gsurf-context-menu-provider.h"
 #include "interfaces/gsurf-render-overlay.h"
+#include "interfaces/gsurf-keybind-provider.h"
+#include "boxed/gsurf-keybind-help.h"
 
 #include <gmodule.h>
 #include <yaml-glib.h>
@@ -617,6 +619,64 @@ gsurf_module_manager_dispatch_status_text(GsurfModuleManager *self, GsurfView *v
 			return text;
 	}
 	return NULL;
+}
+
+static gint
+keybind_help_cmp(gconstpointer a, gconstpointer b)
+{
+	const GsurfKeybindHelp *ha = *(const GsurfKeybindHelp * const *)a;
+	const GsurfKeybindHelp *hb = *(const GsurfKeybindHelp * const *)b;
+	gboolean a_core, b_core;
+	gint s;
+
+	a_core = (g_strcmp0(ha->source, "core") == 0);
+	b_core = (g_strcmp0(hb->source, "core") == 0);
+	if (a_core && !b_core)
+		return -1;
+	if (b_core && !a_core)
+		return 1;
+	s = g_strcmp0(ha->source, hb->source);
+	if (s != 0)
+		return s;
+	return g_strcmp0(ha->key, hb->key);
+}
+
+GPtrArray *
+gsurf_module_manager_collect_keybinds(GsurfModuleManager *self)
+{
+	GPtrArray *entries;
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), NULL);
+
+	entries = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_keybind_help_free);
+
+	/* Core table first: whatever is in the live config hash. */
+	if (self->config != NULL && self->config->keybinds != NULL) {
+		GHashTableIter iter;
+		gpointer key, value;
+
+		g_hash_table_iter_init(&iter, self->config->keybinds);
+		while (g_hash_table_iter_next(&iter, &key, &value)) {
+			GsurfAction action = (GsurfAction)GPOINTER_TO_UINT(value);
+
+			gsurf_keybind_help_append(entries, (const gchar *)key,
+				gsurf_action_get_description(action),
+				"core",
+				gsurf_action_to_string(action));
+		}
+	}
+
+	/* Active modules report their *current* keys (post-configure). */
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+
+		if (gsurf_module_is_active(m) && GSURF_IS_KEYBIND_PROVIDER(m))
+			gsurf_keybind_provider_list_keybinds(GSURF_KEYBIND_PROVIDER(m), entries);
+	}
+
+	g_ptr_array_sort(entries, keybind_help_cmp);
+	return entries;
 }
 
 void

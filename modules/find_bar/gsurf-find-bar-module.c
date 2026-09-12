@@ -35,10 +35,12 @@ struct _GsurfFindBarModule
 };
 
 static void gsurf_find_bar_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_find_bar_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfFindBarModule, gsurf_find_bar_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_find_bar_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_find_bar_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_find_bar_keybind_init))
 
 static GsurfView *
 active_view(void)
@@ -147,6 +149,25 @@ static void
 gsurf_find_bar_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_find_bar_handle_key_event;
+}
+
+static void
+gsurf_find_bar_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfFindBarModule *self = GSURF_FIND_BAR_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_open,
+		"Open find-in-page", "find_bar", "find");
+	gsurf_keybind_help_append(entries, self->key_next,
+		"Find next match", "find_bar", "find-next");
+	gsurf_keybind_help_append(entries, self->key_prev,
+		"Find previous match", "find_bar", "find-prev");
+}
+
+static void
+gsurf_find_bar_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_find_bar_list_keybinds;
 }
 
 static const gchar *gsurf_find_bar_get_name(GsurfModule *m) { return "find_bar"; }

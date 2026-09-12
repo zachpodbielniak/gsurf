@@ -27,11 +27,13 @@ struct _GsurfPlayexternalModule
 
 static void gsurf_playexternal_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_playexternal_menu_init(GsurfContextMenuProviderInterface *iface);
+static void gsurf_playexternal_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfPlayexternalModule, gsurf_playexternal_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_playexternal_input_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_CONTEXT_MENU_PROVIDER, gsurf_playexternal_menu_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_CONTEXT_MENU_PROVIDER, gsurf_playexternal_menu_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_playexternal_keybind_init))
 
 static gboolean
 gsurf_playexternal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -78,6 +80,21 @@ static void
 gsurf_playexternal_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_playexternal_handle_key_event;
+}
+
+static void
+gsurf_playexternal_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfPlayexternalModule *self = GSURF_PLAYEXTERNAL_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key,
+		"Play the current URI in an external player", "playexternal", "play-external");
+}
+
+static void
+gsurf_playexternal_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_playexternal_list_keybinds;
 }
 
 /* Add a "Play externally" entry when right-clicking a link or media. The

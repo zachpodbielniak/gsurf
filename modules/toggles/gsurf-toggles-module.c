@@ -26,10 +26,12 @@ struct _GsurfTogglesModule
 };
 
 static void gsurf_toggles_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_toggles_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfTogglesModule, gsurf_toggles_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_toggles_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_toggles_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_toggles_keybind_init))
 
 /* Toggle a named boolean field; returns -1 if unknown, else new value. */
 static gint
@@ -87,6 +89,28 @@ static void
 gsurf_toggles_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_toggles_handle_key_event;
+}
+
+static void
+gsurf_toggles_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfTogglesModule *self = GSURF_TOGGLES_MODULE(provider);
+	GHashTableIter iter;
+	gpointer key, value;
+
+	g_hash_table_iter_init(&iter, self->keys);
+	while (g_hash_table_iter_next(&iter, &key, &value)) {
+		g_autofree gchar *desc = g_strdup_printf("Toggle %s", (const gchar *)value);
+
+		gsurf_keybind_help_append(entries, (const gchar *)key,
+			desc, "toggles", (const gchar *)value);
+	}
+}
+
+static void
+gsurf_toggles_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_toggles_list_keybinds;
 }
 
 static const gchar *gsurf_toggles_get_name(GsurfModule *m) { return "toggles"; }

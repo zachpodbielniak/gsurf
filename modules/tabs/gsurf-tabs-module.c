@@ -40,10 +40,12 @@ struct _GsurfTabsModule
 };
 
 static void gsurf_tabs_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_tabs_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfTabsModule, gsurf_tabs_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_tabs_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_tabs_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_tabs_keybind_init))
 
 static void rebuild_strip(GsurfTabsModule *self);
 
@@ -295,6 +297,29 @@ static void
 gsurf_tabs_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_tabs_handle_key_event;
+}
+
+static void
+gsurf_tabs_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_new,
+		"Open a new tab", "tabs", "tab-new");
+	gsurf_keybind_help_append(entries, self->key_close,
+		"Close the current tab", "tabs", "tab-close");
+	gsurf_keybind_help_append(entries, self->key_next,
+		"Switch to the next tab", "tabs", "tab-next");
+	gsurf_keybind_help_append(entries, self->key_prev,
+		"Switch to the previous tab", "tabs", "tab-prev");
+	gsurf_keybind_help_append(entries, self->key_reopen,
+		"Reopen the last closed tab", "tabs", "tab-reopen");
+}
+
+static void
+gsurf_tabs_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_tabs_list_keybinds;
 }
 
 static const gchar *gsurf_tabs_get_name(GsurfModule *m) { return "tabs"; }

@@ -32,6 +32,17 @@ test_action_to_string(void)
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_RELOAD), ==, "reload");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_NONE), ==, "none");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_FOLLOW_HINTS), ==, "follow-hints");
+	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_SHOW_KEYBINDS), ==, "show-keybinds");
+}
+
+static void
+test_action_description(void)
+{
+	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_RELOAD), ==,
+		"Reload the page");
+	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_SHOW_KEYBINDS), ==,
+		"Show all keybindings");
+	g_assert_nonnull(gsurf_action_get_description(GSURF_ACTION_QUIT));
 }
 
 static void
@@ -79,6 +90,7 @@ main(int argc, char *argv[])
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/gsurf/enums/action-from-string", test_action_from_string);
 	g_test_add_func("/gsurf/enums/action-to-string", test_action_to_string);
+	g_test_add_func("/gsurf/enums/action-description", test_action_description);
 	g_test_add_func("/gsurf/enums/action-roundtrip", test_action_roundtrip);
 	g_test_add_func("/gsurf/enums/types", test_enum_types);
 	g_test_add_func("/gsurf/enums/values", test_enum_values);

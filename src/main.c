@@ -221,6 +221,13 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 		gsurf_window_set_fullscreen(window, !gsurf_window_get_fullscreen(window));
 		return TRUE;
 	case GSURF_ACTION_QUIT:           gsurf_application_quit(app); return TRUE;
+	case GSURF_ACTION_SHOW_KEYBINDS: {
+		GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+		g_autoptr(GPtrArray) entries = gsurf_module_manager_collect_keybinds(mgr);
+
+		gsurf_window_show_keybind_help(window, entries);
+		return TRUE;
+	}
 	case GSURF_ACTION_OPEN_PROMPT:
 #ifdef GSURF_HAVE_LRG_BACKEND
 		/* Under --lrg the GTK chromebar/omnibar can't render, so the LRG
@@ -269,6 +276,15 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 		return FALSE;
 
 	action = gsurf_config_get_keybind_action(config, keystr);
+	/* Shifted punctuation (e.g. `?` as Shift+question) still matches the
+	 * unshifted GDK name bound in the core table. */
+	if (action == GSURF_ACTION_NONE && (state & GSURF_MOD_SHIFT) != 0) {
+		g_autofree gchar *bare = gsurf_keys_to_string(keyval,
+			state & ~GSURF_MOD_SHIFT);
+
+		if (bare != NULL)
+			action = gsurf_config_get_keybind_action(config, bare);
+	}
 	if (action == GSURF_ACTION_NONE)
 		return FALSE;
 

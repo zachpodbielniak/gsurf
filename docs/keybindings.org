@@ -30,6 +30,7 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =Ctrl+g= / =Ctrl+Shift+g= | find next/prev |
 | =F11=          | toggle-fullscreen |
 | =Ctrl+q=       | quit              |
+| =?=            | show-keybinds     |
 
 Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is
 provided by the =modal= module (enabled by default), not the core table, so it
@@ -49,6 +50,22 @@ In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
 
+* Live help overlay (=?=)
+
+Press =?= (the GDK keyval is =question=; =?= is accepted in C configs) to
+open a popup listing every *currently active* binding:
+
+- Core =keybinds:= table, with action descriptions.
+- Each loaded, enabled module that implements =GsurfKeybindProvider=, using
+  the keys it actually has after =configure()= (so a custom =key_new= or a
+  disabled =tabs= module is reflected immediately).
+
+GTK backends show a native dialog; other backends inject an in-page overlay.
+Press =?= again or =Escape= to dismiss. The list is rebuilt on every press —
+do not treat it as a static cheatsheet.
+
+In a C config: =gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS);=.
+
 * Actions
 
 Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
@@ -56,7 +73,7 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 =page-{up,down}=, =half-page-{up,down}=. Zoom: =zoom-{in,out,reset}=. Find:
 =find=, =find-next=, =find-prev=. Tabs: =tab-{new,close,next,prev,reopen}=.
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
-=toggle-fullscreen=, =copy-url=, =paste-url=, =quit=.
+=toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
 
 * Modal / vim navigation
 

@@ -41,10 +41,12 @@ struct _GsurfModalModule
 };
 
 static void gsurf_modal_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_modal_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfModalModule, gsurf_modal_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_modal_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_modal_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_modal_keybind_init))
 
 static void
 scroll(GsurfView *view, const gchar *js)
@@ -340,6 +342,40 @@ static void
 gsurf_modal_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_modal_handle_key_event;
+}
+
+static void
+gsurf_modal_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfModalModule *self = GSURF_MODAL_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->hint_key,
+		"Follow link hints", "modal", "follow-hints");
+	gsurf_keybind_help_append(entries, self->hint_key_newview,
+		"Follow a hint in a new view", "modal", "follow-hints-new-view");
+	gsurf_keybind_help_append(entries, "i",
+		"Enter insert mode", "modal", "enter-insert-mode");
+	gsurf_keybind_help_append(entries, "Escape",
+		"Return to normal mode / blur", "modal", "enter-normal-mode");
+	gsurf_keybind_help_append(entries, "h", "Scroll left", "modal", "scroll-left");
+	gsurf_keybind_help_append(entries, "j", "Scroll down", "modal", "scroll-down");
+	gsurf_keybind_help_append(entries, "k", "Scroll up", "modal", "scroll-up");
+	gsurf_keybind_help_append(entries, "l", "Scroll right", "modal", "scroll-right");
+	gsurf_keybind_help_append(entries, "d", "Half-page down", "modal", "half-page-down");
+	gsurf_keybind_help_append(entries, "u", "Half-page up", "modal", "half-page-up");
+	gsurf_keybind_help_append(entries, "gg", "Scroll to the top", "modal", "scroll-top");
+	gsurf_keybind_help_append(entries, "G", "Scroll to the bottom", "modal", "scroll-bottom");
+	gsurf_keybind_help_append(entries, "H", "Go back", "modal", "back");
+	gsurf_keybind_help_append(entries, "L", "Go forward", "modal", "forward");
+	gsurf_keybind_help_append(entries, "r", "Reload the page", "modal", "reload");
+	gsurf_keybind_help_append(entries, "gt", "Next tab", "modal", "tab-next");
+	gsurf_keybind_help_append(entries, "gT", "Previous tab", "modal", "tab-prev");
+}
+
+static void
+gsurf_modal_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_modal_list_keybinds;
 }
 
 static const gchar *gsurf_modal_get_name(GsurfModule *m) { return "modal"; }

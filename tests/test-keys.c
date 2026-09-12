@@ -41,6 +41,15 @@ test_normalize(void)
 	g_assert_cmpstr(c, ==, "r");
 	g_assert_cmpstr(d, ==, "Alt+Tab");
 
+	/* "?" is the user-facing spelling of GDK's "question" keyval. */
+	{
+		g_autofree char *q = gsurf_keys_normalize("?");
+		g_autofree char *sq = gsurf_keys_normalize("Shift+?");
+
+		g_assert_cmpstr(q, ==, "question");
+		g_assert_cmpstr(sq, ==, "Shift+question");
+	}
+
 	g_assert_null(gsurf_keys_normalize(NULL));
 	g_assert_null(gsurf_keys_normalize(""));
 }
@@ -65,6 +74,7 @@ test_match(void)
 	g_assert_false(gsurf_keys_match(GDK_KEY_r, GSURF_MOD_CTRL, "r"));        /* missing mod */
 	g_assert_false(gsurf_keys_match(GDK_KEY_r, GSURF_MOD_NONE, "Ctrl+r"));   /* extra mod */
 	g_assert_false(gsurf_keys_match(GDK_KEY_r, GSURF_MOD_NONE, "k"));        /* wrong key */
+	g_assert_true(gsurf_keys_match(GDK_KEY_question, GSURF_MOD_NONE, "?"));
 }
 
 int

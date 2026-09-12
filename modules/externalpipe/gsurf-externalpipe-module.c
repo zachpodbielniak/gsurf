@@ -28,10 +28,12 @@ struct _GsurfExternalpipeModule
 };
 
 static void gsurf_externalpipe_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_externalpipe_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfExternalpipeModule, gsurf_externalpipe_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_externalpipe_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_externalpipe_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_externalpipe_keybind_init))
 
 /* --- synchronous JS via a nested main loop --- */
 typedef struct { GMainLoop *loop; GsurfView *view; gchar *result; } JsCtx;
@@ -119,6 +121,28 @@ static void
 gsurf_externalpipe_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_externalpipe_handle_key_event;
+}
+
+static void
+gsurf_externalpipe_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfExternalpipeModule *self = GSURF_EXTERNALPIPE_MODULE(provider);
+	guint i;
+
+	for (i = 0; i < self->commands->len; i++) {
+		PipeCmd *pc = g_ptr_array_index(self->commands, i);
+		g_autofree gchar *desc = g_strdup_printf("Pipe page %s to an external command",
+			pc->input != NULL ? pc->input : "html");
+
+		gsurf_keybind_help_append(entries, pc->key, desc, "externalpipe",
+			pc->input != NULL ? pc->input : "html");
+	}
+}
+
+static void
+gsurf_externalpipe_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_externalpipe_list_keybinds;
 }
 
 static const gchar *gsurf_externalpipe_get_name(GsurfModule *m) { return "externalpipe"; }

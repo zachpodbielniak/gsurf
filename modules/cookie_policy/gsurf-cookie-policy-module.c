@@ -25,10 +25,12 @@ struct _GsurfCookiePolicyModule
 };
 
 static void gsurf_cookie_policy_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_cookie_policy_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfCookiePolicyModule, gsurf_cookie_policy_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_cookie_policy_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_cookie_policy_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_cookie_policy_keybind_init))
 
 static gint
 parse_policy(const gchar *p)
@@ -60,6 +62,21 @@ static void
 gsurf_cookie_policy_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_cookie_policy_handle_key_event;
+}
+
+static void
+gsurf_cookie_policy_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfCookiePolicyModule *self = GSURF_COOKIE_POLICY_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_toggle,
+		"Cycle cookie accept policy", "cookie_policy", "toggle-cookie-policy");
+}
+
+static void
+gsurf_cookie_policy_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_cookie_policy_list_keybinds;
 }
 
 static const gchar *gsurf_cookie_policy_get_name(GsurfModule *m) { return "cookie_policy"; }

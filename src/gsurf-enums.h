@@ -324,6 +324,8 @@ typedef enum {
 	GSURF_ACTION_TOGGLE_SETTING,
 	/* Module-defined action (dispatched by name in arg) */
 	GSURF_ACTION_MODULE,
+	/* Overlay listing currently active keybindings (core + modules) */
+	GSURF_ACTION_SHOW_KEYBINDS,
 	GSURF_ACTION_LAST
 } GsurfAction;
 
@@ -372,6 +374,14 @@ GsurfAction gsurf_action_from_string(const gchar *str);
  * Returns: (transfer none): the canonical action nick, or %NULL
  */
 const gchar *gsurf_action_to_string(GsurfAction action);
+
+/**
+ * gsurf_action_get_description:
+ * @action: a #GsurfAction
+ *
+ * Returns: (transfer none): a short human-readable description, or %NULL
+ */
+const gchar *gsurf_action_get_description(GsurfAction action);
 
 /**
  * gsurf_lrg_render_mode_from_string:

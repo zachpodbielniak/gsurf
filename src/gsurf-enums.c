@@ -196,6 +196,7 @@ GSURF_DEFINE_ENUM_TYPE(GsurfAction, gsurf_action, {
 	EV(GSURF_ACTION_QUIT, "quit"),
 	EV(GSURF_ACTION_TOGGLE_SETTING, "toggle-setting"),
 	EV(GSURF_ACTION_MODULE, "module"),
+	EV(GSURF_ACTION_SHOW_KEYBINDS, "show-keybinds"),
 	END_EV
 })
 
@@ -237,6 +238,56 @@ gsurf_action_to_string(GsurfAction action)
 	g_type_class_unref(klass);
 
 	return nick;
+}
+
+const gchar *
+gsurf_action_get_description(GsurfAction action)
+{
+	switch (action) {
+	case GSURF_ACTION_NONE:                 return "No action";
+	case GSURF_ACTION_BACK:                 return "Go back";
+	case GSURF_ACTION_FORWARD:              return "Go forward";
+	case GSURF_ACTION_RELOAD:               return "Reload the page";
+	case GSURF_ACTION_RELOAD_NOCACHE:       return "Reload, bypassing the cache";
+	case GSURF_ACTION_STOP:                 return "Stop loading";
+	case GSURF_ACTION_HOME:                 return "Go to the homepage";
+	case GSURF_ACTION_OPEN_PROMPT:          return "Open the address bar";
+	case GSURF_ACTION_OPEN_NEW_VIEW:        return "Open in a new view";
+	case GSURF_ACTION_SCROLL_UP:            return "Scroll up";
+	case GSURF_ACTION_SCROLL_DOWN:          return "Scroll down";
+	case GSURF_ACTION_SCROLL_LEFT:          return "Scroll left";
+	case GSURF_ACTION_SCROLL_RIGHT:         return "Scroll right";
+	case GSURF_ACTION_SCROLL_TOP:           return "Scroll to the top";
+	case GSURF_ACTION_SCROLL_BOTTOM:        return "Scroll to the bottom";
+	case GSURF_ACTION_PAGE_UP:              return "Page up";
+	case GSURF_ACTION_PAGE_DOWN:            return "Page down";
+	case GSURF_ACTION_HALF_PAGE_UP:         return "Half-page up";
+	case GSURF_ACTION_HALF_PAGE_DOWN:       return "Half-page down";
+	case GSURF_ACTION_ZOOM_IN:              return "Zoom in";
+	case GSURF_ACTION_ZOOM_OUT:             return "Zoom out";
+	case GSURF_ACTION_ZOOM_RESET:           return "Reset zoom";
+	case GSURF_ACTION_FIND:                 return "Find in page";
+	case GSURF_ACTION_FIND_NEXT:            return "Find next match";
+	case GSURF_ACTION_FIND_PREV:            return "Find previous match";
+	case GSURF_ACTION_COPY_URL:             return "Copy the current URI";
+	case GSURF_ACTION_PASTE_URL:            return "Paste a URI and load it";
+	case GSURF_ACTION_ENTER_NORMAL_MODE:    return "Enter normal mode";
+	case GSURF_ACTION_ENTER_INSERT_MODE:    return "Enter insert mode";
+	case GSURF_ACTION_FOLLOW_HINTS:         return "Follow link hints";
+	case GSURF_ACTION_FOLLOW_HINTS_NEW_VIEW: return "Follow a hint in a new view";
+	case GSURF_ACTION_TAB_NEW:              return "Open a new tab";
+	case GSURF_ACTION_TAB_CLOSE:            return "Close the current tab";
+	case GSURF_ACTION_TAB_NEXT:             return "Switch to the next tab";
+	case GSURF_ACTION_TAB_PREV:             return "Switch to the previous tab";
+	case GSURF_ACTION_TAB_REOPEN:           return "Reopen the last closed tab";
+	case GSURF_ACTION_TOGGLE_FULLSCREEN:    return "Toggle fullscreen";
+	case GSURF_ACTION_QUIT:                 return "Quit";
+	case GSURF_ACTION_TOGGLE_SETTING:       return "Toggle a web-engine setting";
+	case GSURF_ACTION_MODULE:               return "Module-defined action";
+	case GSURF_ACTION_SHOW_KEYBINDS:        return "Show all keybindings";
+	case GSURF_ACTION_LAST:
+	default:                                return NULL;
+	}
 }
 
 gboolean

@@ -80,6 +80,7 @@ keybinds:
   "Ctrl+0": zoom-reset
   "F11": toggle-fullscreen
   "Ctrl+q": quit
+  "question": show-keybinds   # ? — live keybinding overlay
 
 mousebinds:
   "Button8": back

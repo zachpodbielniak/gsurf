@@ -24,10 +24,12 @@ struct _GsurfHomepageModule
 };
 
 static void gsurf_homepage_input_init(GsurfInputHandlerInterface *iface);
+static void gsurf_homepage_keybind_init(GsurfKeybindProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfHomepageModule, gsurf_homepage_module,
 	GSURF_TYPE_MODULE,
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_homepage_input_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_homepage_input_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_homepage_keybind_init))
 
 static gboolean
 gsurf_homepage_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
@@ -49,6 +51,21 @@ static void
 gsurf_homepage_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_homepage_handle_key_event;
+}
+
+static void
+gsurf_homepage_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
+{
+	GsurfHomepageModule *self = GSURF_HOMEPAGE_MODULE(provider);
+
+	gsurf_keybind_help_append(entries, self->key_home,
+		"Go to the homepage", "homepage", "home");
+}
+
+static void
+gsurf_homepage_keybind_init(GsurfKeybindProviderInterface *iface)
+{
+	iface->list_keybinds = gsurf_homepage_list_keybinds;
 }
 
 static const gchar *

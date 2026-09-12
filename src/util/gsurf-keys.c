@@ -62,6 +62,10 @@ gsurf_keys_normalize(const gchar *keystring)
 			key = tok;
 	}
 
+	/* "?" is the user-facing name for GDK's "question" keyval. */
+	if (key != NULL && g_strcmp0(key, "?") == 0)
+		key = "question";
+
 	out = g_string_new(NULL);
 	if (ctrl)  g_string_append(out, "Ctrl+");
 	if (alt)   g_string_append(out, "Alt+");

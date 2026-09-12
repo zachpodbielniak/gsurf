@@ -6,6 +6,7 @@
  */
 
 #include "backend/gtk3/gsurf-gtk3-window.h"
+#include "boxed/gsurf-keybind-help.h"
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -194,6 +195,94 @@ gsurf_gtk3_window_get_native_widget(GsurfWindow *window)
 }
 
 static void
+on_help_response(GtkDialog *dialog, gint response, gpointer user_data)
+{
+	(void)response;
+	(void)user_data;
+	gtk_widget_destroy(GTK_WIDGET(dialog));
+}
+
+static void
+on_help_destroy(GtkWidget *dialog, gpointer user_data)
+{
+	GsurfGtk3Window *self = user_data;
+
+	(void)dialog;
+	if (self->window != NULL)
+		g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", NULL);
+}
+
+static void
+gsurf_gtk3_window_show_keybind_help(GsurfWindow *window, GPtrArray *entries)
+{
+	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
+	GtkWidget *dialog, *content, *scrolled, *tree, *old;
+	GtkListStore *store;
+	GtkCellRenderer *renderer;
+	guint i;
+
+	if (self->window == NULL)
+		return;
+
+	old = g_object_get_data(G_OBJECT(self->window), "gsurf-keybind-help");
+	if (old != NULL) {
+		gtk_widget_destroy(old);
+		return;
+	}
+
+	dialog = gtk_dialog_new_with_buttons("Keybindings",
+		GTK_WINDOW(self->window),
+		GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT,
+		"_Close", GTK_RESPONSE_CLOSE,
+		NULL);
+	gtk_window_set_default_size(GTK_WINDOW(dialog), 760, 520);
+	g_object_set_data(G_OBJECT(self->window), "gsurf-keybind-help", dialog);
+	g_signal_connect(dialog, "response", G_CALLBACK(on_help_response), NULL);
+	g_signal_connect(dialog, "destroy", G_CALLBACK(on_help_destroy), self);
+
+	store = gtk_list_store_new(4, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
+	for (i = 0; entries != NULL && i < entries->len; i++) {
+		const GsurfKeybindHelp *h = g_ptr_array_index(entries, i);
+		g_autofree gchar *pretty = gsurf_keybind_help_pretty_key(h->key);
+		GtkTreeIter iter;
+
+		gtk_list_store_append(store, &iter);
+		gtk_list_store_set(store, &iter,
+			0, pretty != NULL ? pretty : "",
+			1, h->description != NULL ? h->description : "",
+			2, h->source != NULL ? h->source : "",
+			3, h->action != NULL ? h->action : "",
+			-1);
+	}
+
+	tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+	g_object_unref(store);
+	gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
+	gtk_tree_view_set_enable_search(GTK_TREE_VIEW(tree), TRUE);
+	gtk_tree_view_set_search_column(GTK_TREE_VIEW(tree), 0);
+
+	renderer = gtk_cell_renderer_text_new();
+	g_object_set(renderer, "family", "monospace", NULL);
+	gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+		gtk_tree_view_column_new_with_attributes("Key", renderer, "text", 0, NULL));
+	renderer = gtk_cell_renderer_text_new();
+	gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+		gtk_tree_view_column_new_with_attributes("Action", renderer, "text", 1, NULL));
+	renderer = gtk_cell_renderer_text_new();
+	gtk_tree_view_append_column(GTK_TREE_VIEW(tree),
+		gtk_tree_view_column_new_with_attributes("Source", renderer, "text", 2, NULL));
+
+	scrolled = gtk_scrolled_window_new(NULL, NULL);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scrolled),
+		GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
+	gtk_container_add(GTK_CONTAINER(scrolled), tree);
+
+	content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+	gtk_box_pack_start(GTK_BOX(content), scrolled, TRUE, TRUE, 0);
+	gtk_widget_show_all(dialog);
+}
+
+static void
 gsurf_gtk3_window_add_chrome_widget(GsurfWindow *window, gpointer widget, gboolean top)
 {
 	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
@@ -244,6 +333,7 @@ gsurf_gtk3_window_class_init(GsurfGtk3WindowClass *klass)
 	window_class->set_fullscreen = gsurf_gtk3_window_set_fullscreen;
 	window_class->get_native_widget = gsurf_gtk3_window_get_native_widget;
 	window_class->add_chrome_widget = gsurf_gtk3_window_add_chrome_widget;
+	window_class->show_keybind_help = gsurf_gtk3_window_show_keybind_help;
 }
 
 static void

@@ -5,13 +5,17 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include "boxed/gsurf-keybind-help.h"
 #include "util/gsurf-kiosk.h"
 #include "window/gsurf-window.h"
+
+#include <gdk/gdk.h>
 
 typedef struct {
 	GPtrArray *views;     /* owned refs to GsurfView */
 	GsurfView *active;    /* borrowed (element of views) */
 	gboolean   fullscreen;
+	gboolean   help_overlay; /* in-page JS help is visible */
 } GsurfWindowPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfWindow, gsurf_window, G_TYPE_OBJECT)
@@ -53,6 +57,107 @@ gsurf_window_finalize(GObject *object)
 	G_OBJECT_CLASS(gsurf_window_parent_class)->finalize(object);
 }
 
+static gchar *
+js_quote(const gchar *s)
+{
+	g_autofree gchar *esc = g_strescape(s != NULL ? s : "", "");
+
+	return g_strdup_printf("\"%s\"", esc);
+}
+
+/* Dismiss the in-page overlay injected by the default help vfunc. */
+static void
+gsurf_window_hide_js_help(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	GsurfView *view = priv->active;
+
+	priv->help_overlay = FALSE;
+	if (view == NULL)
+		return;
+	gsurf_view_run_javascript_async(view,
+		"(function(){var e=document.getElementById('gsurf-keybind-help');"
+		"if(e&&e.parentNode)e.parentNode.removeChild(e);})()",
+		NULL, NULL, NULL);
+}
+
+/*
+ * Backend-agnostic overlay: inject a page-level panel. GTK backends
+ * override this with a native dialog; LRG and embedders that do not
+ * override still get a working help menu.
+ */
+static void
+gsurf_window_show_keybind_help_js(GsurfWindow *self, GPtrArray *entries)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	GsurfView *view;
+	GString *js;
+	guint i;
+
+	view = priv->active;
+	if (view == NULL)
+		return;
+
+	if (priv->help_overlay) {
+		gsurf_window_hide_js_help(self);
+		return;
+	}
+
+	js = g_string_new(
+		"(function(){"
+		"var old=document.getElementById('gsurf-keybind-help');"
+		"if(old&&old.parentNode)old.parentNode.removeChild(old);"
+		"var rows=[");
+
+	for (i = 0; entries != NULL && i < entries->len; i++) {
+		const GsurfKeybindHelp *h = g_ptr_array_index(entries, i);
+		g_autofree gchar *pretty = gsurf_keybind_help_pretty_key(h->key);
+		g_autofree gchar *k = js_quote(pretty);
+		g_autofree gchar *d = js_quote(h->description);
+		g_autofree gchar *s = js_quote(h->source);
+
+		if (i > 0)
+			g_string_append_c(js, ',');
+		g_string_append_printf(js, "{key:%s,description:%s,source:%s}", k, d, s);
+	}
+
+	g_string_append(js,
+		"];"
+		"var wrap=document.createElement('div');"
+		"wrap.id='gsurf-keybind-help';"
+		"wrap.style.cssText='position:fixed;inset:0;z-index:2147483647;"
+		"background:rgba(17,17,27,.72);display:flex;align-items:center;"
+		"justify-content:center;';"
+		"var box=document.createElement('div');"
+		"box.style.cssText='background:#1e1e2e;color:#cdd6f4;max-width:920px;"
+		"width:90%;max-height:80vh;overflow:auto;padding:16px 20px;"
+		"border-radius:8px;font:13px/1.45 monospace;"
+		"box-shadow:0 8px 32px rgba(0,0,0,.55);';"
+		"var title=document.createElement('div');"
+		"title.textContent='Keybindings  (? or Escape to close)';"
+		"title.style.cssText='font-weight:bold;margin-bottom:12px;font-size:16px;';"
+		"box.appendChild(title);"
+		"var table=document.createElement('table');"
+		"table.style.cssText='border-collapse:collapse;width:100%;';"
+		"rows.forEach(function(r){"
+		"var tr=document.createElement('tr');"
+		"function td(text,nowrap){var c=document.createElement('td');"
+		"c.textContent=text||'';c.style.cssText='padding:3px 14px 3px 0;"
+		"vertical-align:top;'+(nowrap?'white-space:nowrap;':'');return c;}"
+		"tr.appendChild(td(r.key,true));"
+		"tr.appendChild(td(r.description,false));"
+		"tr.appendChild(td(r.source,true));"
+		"table.appendChild(tr);});"
+		"box.appendChild(table);wrap.appendChild(box);"
+		"wrap.addEventListener('click',function(e){"
+		"if(e.target===wrap&&wrap.parentNode)wrap.parentNode.removeChild(wrap);});"
+		"document.documentElement.appendChild(wrap);})()");
+
+	gsurf_view_run_javascript_async(view, js->str, NULL, NULL, NULL);
+	g_string_free(js, TRUE);
+	priv->help_overlay = TRUE;
+}
+
 static void
 gsurf_window_class_init(GsurfWindowClass *klass)
 {
@@ -60,6 +165,7 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 
 	object_class->constructed = gsurf_window_constructed;
 	object_class->finalize = gsurf_window_finalize;
+	klass->show_keybind_help = gsurf_window_show_keybind_help_js;
 
 	signals[SIG_VIEW_ADDED] = g_signal_new(
 		"view-added", G_TYPE_FROM_CLASS(klass),
@@ -359,14 +465,35 @@ gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget)
 		klass->add_chrome_widget(self, widget, FALSE);
 }
 
+void
+gsurf_window_show_keybind_help(GsurfWindow *self, GPtrArray *entries)
+{
+	GsurfWindowClass *klass;
+
+	g_return_if_fail(GSURF_IS_WINDOW(self));
+
+	klass = GSURF_WINDOW_GET_CLASS(self);
+	if (klass->show_keybind_help != NULL)
+		klass->show_keybind_help(self, entries);
+}
+
 /* --- Event emission helpers --- */
 
 gboolean
 gsurf_window_emit_key_press(GsurfWindow *self, guint keyval, guint keycode, guint state)
 {
+	GsurfWindowPrivate *priv;
 	gboolean handled = FALSE;
 
 	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	/* The in-page overlay must close before modal/core consume Escape. */
+	if (priv->help_overlay &&
+	    (keyval == GDK_KEY_Escape || keyval == GDK_KEY_question)) {
+		gsurf_window_hide_js_help(self);
+		return TRUE;
+	}
 
 	g_signal_emit(self, signals[SIG_KEY_PRESS], 0, keyval, keycode, state, &handled);
 	return handled;

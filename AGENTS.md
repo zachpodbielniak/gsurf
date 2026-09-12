@@ -155,7 +155,7 @@ module that runs its own server lifecycle on `activate()`.
 ## Tests / running
 
 ```sh
-make test                                   # headless GLib tests (53 cases)
+make test                                   # headless GLib tests
 make test-gui                               # xvfb-gated GUI smoke test (skips if no xvfb-run)
 xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 ```
@@ -172,7 +172,9 @@ verdicts for every hook — including the request-filter/status/context-menu/
 render-overlay ones — and dispatch through the real module .so files),
 `test-modules` (search-engines, history, adblock host blocking + whitelist +
 edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
-value types: new/copy/free, getters, setters, deep-copy independence). The
+value types: new/copy/free, getters, setters, deep-copy independence),
+`test-keybind-help` (live `?` overlay collection: core table, enabled
+gating, reconfigured module keys, `?`/`question` alias). The
 GTK/WebKit view+window layer (and module UIs like the find bar / tab strip,
 the per-view content-filter *application*, modal key dispatch) needs a display
 and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb harnesses
