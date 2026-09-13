@@ -23,7 +23,21 @@ Gopher connects over TCP, normally on port 70. An explicit port and IPv6 literal
 - Types =g= and =I= display GIF and detected image content respectively. Type =h= serves HTML; =URL:= menu selectors become direct links to supported schemes. Other item types use an octet-stream response for WebKit's download handling.
 - Relative Gemtext links and Gopher menu selectors are escaped independently: a selector containing =?=, =#=, or a space remains a selector, not a query or fragment.
 
-Gopher is unencrypted. Gopher+ attribute interpretation, terminal sessions (types =8= and =T=), and protocol-specific viewers for legacy binary formats are not implemented; those item types remain downloadable bytes. Gopher input rejects NUL, CR, LF, and other invalid control characters before writing any request. It does not accept a conventional =?query= in a manually typed Gopher URI; use a type-7 form or =%09=.
+Gopher is unencrypted. Terminal sessions (types =8= and =T=) and protocol-specific viewers for legacy binary formats are not implemented; those item types remain downloadable bytes. Selectors and search values reject NUL, CR, LF, and other invalid control characters before writing any request. A conventional =?query= in a manually typed Gopher URI is not accepted; use a type-7 form or =%09=.
+
+** Gopher+
+
+Gopher+ uses the same =gopher://= scheme and TCP connection. Menu items advertised with a trailing =+= use framed Gopher+ retrieval; =?= items first retrieve their ASK definition. These entries also have an =attributes / views= link. Plain Gopher entries keep their original request and response behavior.
+
+Attribute pages display =+INFO=, =+ADMIN=, =+ABSTRACT=, and arbitrary attribute blocks as escaped content. =+VIEWS= entries become selectable links, retaining the advertised language in the request. The chosen MIME type controls display or download, including =application/gopher-menu=. Image, movie, and sound types =:=, =;=, and =<= advertised as Gopher+ open attributes for view selection because those types have no default format.
+
+Explicit command URIs follow RFC 4266: =gopher://host/0selector%09%09+= fetches the default view; replace the final command with =!= for item attributes, =$= for directory-wide attributes, or =+text/plain= for a text view. Attribute filters such as =!+ABSTRACT= are forwarded. Type-7 searches occupy the middle slot, for example =gopher://host/7index%09words%09+=. The empty search slot for other types is omitted on the wire, following the original Gopher+ specification and RFC 4266's form example.
+
+Positive byte counts, dot-terminated =+-1= blocks, and EOF-terminated =+-2= blocks are supported. Fixed-length transfers finish after the declared bytes and preserve binary data and literal dot lines. Dot-framed transfers finish at the terminator and undo dot-stuffing once. Truncated or malformed blocks fail; negative server responses display the escaped server error. Gopher+ framing is never inferred from an ordinary Gopher file's contents.
+
+ASK forms support =Ask= (one line), =AskP= (masked), =AskL= (multiple lines with a count), =Choose= (one offered value), =Select= (a boolean answer), and informational =Note= lines. Answers retain field order, use CRLF, and are dot-stuffed inside a validated data block. Forms work without page JavaScript. =AskF=, =ChooseF=, and unknown field types disable submission with an explicit message; local file upload and server-selected download filenames are not supported. Normal binary responses still use browser download handling.
+
+ASK values become an encoded RFC 4266 form URI, which can appear in history, bookmarks, and the location bar. =AskP= only masks the input widget; Gopher+ remains unencrypted. Requests including form data are limited to 64 KiB. Encoded CRLF is accepted only inside a complete, validated ASK data block; premature terminators and injected request lines are rejected.
 
 * Gemini
 
@@ -57,6 +71,8 @@ There is no new compiled dependency. Fedora's GTK3 build packages are =gcc=, =ma
 
 =make test= runs =test-protocol= against loopback TCP and TLS fixtures. Tests cover request encoding and injection rejection, header framing and statuses, render escaping, query forms, binary preservation, certificate first use/reuse/change rejection, and cancellation on a private main context. Committed certificate/private-key pairs under =tests/fixtures/gemini-*.pem= are public, test-only identities for localhost; never use them for a real server. These tests require no external network and use temporary pin directories.
 
+Gopher+ regression coverage includes all transfer-length modes, incomplete and oversized frames, server errors, completion before EOF, attribute and view links, empty answers, multiline dot-stuffing, and type-7 ASK submission. Native tests exercise keyboard-only ASK submission with scripting disabled and resubmission after Back restores a cached form.
+
 =make test-gui= also runs =test-protocol-webkit= when Xvfb is available. On an existing display, run the native protocol test directly:
 
 #+begin_src sh
@@ -69,5 +85,6 @@ The GUI suite exercises actual custom-scheme dispatch, URI preservation, menu li
 
 - [[https://www.rfc-editor.org/rfc/rfc1436][RFC 1436: The Internet Gopher Protocol]]
 - [[https://www.rfc-editor.org/rfc/rfc4266][RFC 4266: The gopher URI Scheme]]
+- [[https://archives.somnolescent.net/web/gopherinfo/documentation/gopherplus.html][University of Minnesota: Gopher+ specification (1993 mirror)]]
 - [[https://geminiprotocol.net/docs/protocol-specification.gmi][Gemini network protocol specification]]
 - [[https://geminiprotocol.net/docs/gemtext-specification.gmi][Gemtext specification]]

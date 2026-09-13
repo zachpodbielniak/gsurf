@@ -51,20 +51,6 @@ request_free(gpointer data)
 	g_free(request);
 }
 
-/* Reject decoded control characters before constructing a line protocol. */
-static gboolean
-valid_selector(const gchar *text)
-{
-	const guchar *p;
-	for (p = (const guchar *)text; *p != '\0'; p++) {
-		if (*p < 32 && *p != '\t')
-			return FALSE;
-		if (*p == 127)
-			return FALSE;
-	}
-	return TRUE;
-}
-
 /* Parse without decoding the path until the Gopher type has been separated.
  * Fragments never travel on the wire; encoded CR/LF cannot inject requests. */
 gchar *
@@ -110,15 +96,32 @@ gsurf_protocol_request(const gchar *uri, gchar **host, guint16 *port,
 	} else {
 		if (*path == '/')
 			path++;
-		if (*path != '\0')
+		if (*path == '%') {
+			g_autofree gchar *encoded_type = g_strndup(path, 3);
+			g_autofree gchar *decoded_type = g_uri_unescape_string(encoded_type, NULL);
+			if (decoded_type == NULL || strlen(decoded_type) != 1) {
+				g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid Gopher item type");
+				return NULL;
+			}
+			*item_type = *decoded_type;
+			path += 3;
+		} else if (*path != '\0')
 			*item_type = *path++;
+		if ((guchar)*item_type < 33 || *item_type == 127) {
+			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "Invalid Gopher item type");
+			return NULL;
+		}
 		selector = g_uri_unescape_string(path, NULL);
-		if (selector == NULL || !valid_selector(selector) || g_uri_get_query(parsed) != NULL) {
+		if (selector == NULL || g_uri_get_query(parsed) != NULL) {
 			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
 				"Invalid Gopher selector (use %09 before search terms; no CR, LF or NUL)");
 			return NULL;
 		}
-		wire_uri = g_steal_pointer(&selector);
+		wire_uri = gsurf_gopher_request(selector, *item_type, error);
+		if (wire_uri == NULL)
+			return NULL;
+		*host = g_strdup(g_uri_get_host(parsed));
+		return g_steal_pointer(&wire_uri);
 	}
 	*host = g_strdup(g_uri_get_host(parsed));
 	return g_strconcat(wire_uri, "\r\n", NULL);
@@ -332,6 +335,7 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 	g_autofree gchar *header = NULL;
 	g_autofree gchar *text = NULL;
 	g_autofree gchar *rendered = NULL;
+	g_autofree gchar *command = NULL;
 	g_autoptr(GSocketClient) client = g_socket_client_new();
 	g_autoptr(GSocketConnection) socket = NULL;
 	g_autoptr(GIOStream) tls = NULL;
@@ -343,6 +347,7 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 	guint16 port;
 	gchar item_type;
 	gboolean gemini;
+	gboolean menu = FALSE, attributes = FALSE;
 	guchar buffer[8192];
 	gssize count;
 
@@ -351,8 +356,15 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 		goto fail;
 	response->uri = g_strdup(request->uri);
 	response->status = 20;
+	if (!gemini) {
+		command = gsurf_gopher_command(wire, item_type);
+		attributes = command != NULL && (*command == '!' || *command == '$');
+		menu = item_type == '1' || item_type == '7';
+	}
 	/* Type 7 without search terms is a local input page, not a request. */
-	if (!gemini && item_type == '7' && strchr(wire, '\t') == NULL) {
+	if (!gemini && item_type == '7' && !attributes &&
+	    strstr(wire, "\t1\r\n") == NULL &&
+	    (strchr(wire, '\t') == NULL || strchr(wire, '\t')[1] == '\t')) {
 		response->status = 10;
 		response->meta = g_strdup("Search this Gopher index");
 		goto done;
@@ -412,8 +424,21 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 		case 'h': response->mime = g_strdup("text/html; charset=utf-8"); break;
 		default: response->mime = g_strdup("application/octet-stream"); break;
 		}
+		if (command != NULL && *command == '+' && command[1] != '\0') {
+			g_free(response->mime);
+			response->mime = g_strndup(command + 1, strcspn(command + 1, " "));
+			menu = g_ascii_strcasecmp(response->mime, "application/gopher-menu") == 0;
+			if (strchr(response->mime, '/') == NULL) {
+				g_set_error_literal(&error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+					"Gopher+ view is not a MIME media type");
+				goto fail;
+			}
+		}
 	}
-	while ((count = g_input_stream_read(input, buffer, sizeof(buffer), cancellable, &error)) > 0) {
+	count = 0;
+	if (command != NULL && !gsurf_gopher_read(input, bytes, cancellable, &error))
+		goto fail;
+	while (command == NULL && (count = g_input_stream_read(input, buffer, sizeof(buffer), cancellable, &error)) > 0) {
 		if (bytes->len + count > RESPONSE_LIMIT) {
 			g_set_error_literal(&error, G_IO_ERROR, G_IO_ERROR_NO_SPACE,
 				"Protocol response exceeds the 32 MiB limit");
@@ -423,14 +448,20 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 	}
 	if (count < 0)
 		goto fail;
-	if ((!gemini && (item_type == '0' || item_type == '1' || item_type == '7')) ||
+	if (attributes) {
+		g_autofree gchar *valid = g_utf8_make_valid(bytes->len ? (const gchar *)bytes->data : "", bytes->len);
+		rendered = gsurf_gopher_attributes(valid, request->uri);
+		g_free(response->mime);
+		response->mime = g_strdup("text/html; charset=utf-8");
+		response->body = g_bytes_new(rendered, strlen(rendered));
+	} else if ((!gemini && (menu || (command == NULL && item_type == '0'))) ||
 	    (gemini && is_gemtext(response->mime))) {
 		g_autofree gchar *valid = gemini ? gemtext_decode(bytes, response->mime, &error) :
 			g_utf8_make_valid(bytes->len > 0 ? (const gchar *)bytes->data : "", bytes->len);
 		if (valid == NULL)
 			goto fail;
-		text = gemini ? g_strdup(valid) : gopher_text(valid);
-		if (gemini || item_type != '0') {
+		text = gemini || command != NULL ? g_strdup(valid) : gopher_text(valid);
+		if (gemini || menu) {
 			rendered = gsurf_protocol_render(text, request->uri, !gemini);
 			g_free(response->mime);
 			response->mime = g_strdup("text/html; charset=utf-8");
@@ -439,7 +470,7 @@ fetch_worker(GTask *task, gpointer source, gpointer task_data, GCancellable *can
 		}
 		response->body = g_bytes_new(rendered, strlen(rendered));
 	} else {
-		if (!gemini && item_type == 'I') {
+		if (!gemini && item_type == 'I' && command == NULL) {
 			g_autofree gchar *content_type = g_content_type_guess(NULL, bytes->data, bytes->len, NULL);
 			g_free(response->mime);
 			response->mime = g_content_type_get_mime_type(content_type);

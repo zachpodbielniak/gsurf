@@ -31,8 +31,11 @@ Gemini uses TLS with persistent certificate pins under
 .IR $XDG_DATA_HOME/gsurf/gemini/certificates .
 Self-signed issuers are accepted, but hostname and validity checks remain;
 a changed certificate is rejected until its pin is explicitly removed after
-verification. Client-certificate authentication and Gopher+ attributes are
-not implemented. Requests have a 30-second deadline and a 32 MiB body limit.
+verification. Gemini client-certificate authentication is not implemented.
+Gopher+ supports framed transfers, attributes, alternate views, and ASK forms;
+file-transfer form fields are unsupported. ASK values appear in the resulting
+URI and travel unencrypted. Requests have a 30-second deadline and a 32 MiB
+body limit; Gopher+ requests including form data are limited to 64 KiB.
 See
 .I docs/protocols.org
 for supported item types, trust behavior, and integration details.

@@ -6,6 +6,15 @@
 
 G_BEGIN_DECLS
 
+/* Private Gopher+ helpers shared by the transport and script-free renderer. */
+gchar *gsurf_gopher_request(const gchar *selector, gchar type, GError **error);
+gchar *gsurf_gopher_command(const gchar *wire, gchar type);
+gboolean gsurf_gopher_read(GInputStream *input, GByteArray *bytes,
+	GCancellable *cancel, GError **error);
+gchar *gsurf_gopher_uri(const gchar *uri, const gchar *command);
+gchar *gsurf_gopher_attributes(const gchar *text, const gchar *uri);
+gchar *gsurf_gopher_ask_uri(const gchar *uri, GError **error);
+
 /* Private library contract shared by WebKit backends and hermetic tests.
  * A result owns its bytes and strings. Gemini status/meta are retained for
  * native input and redirect handling; Gopher content uses status 20. */

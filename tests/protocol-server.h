@@ -17,6 +17,8 @@ typedef struct {
 	gchar *request;
 	gboolean stall;
 	gsize fragment_size;
+	gsize request_length;
+	gboolean hold_open;
 } ProtocolServer;
 
 /* Handle one connection and capture the exact request line. */
@@ -47,7 +49,7 @@ protocol_server_thread(gpointer data)
 	while (line->len < 2048 &&
 	    g_input_stream_read(g_io_stream_get_input_stream(stream), &byte, 1, server->cancel, &error) == 1) {
 		g_string_append_c(line, byte);
-		if (byte == '\n')
+		if (server->request_length > 0 ? line->len == server->request_length : byte == '\n')
 			break;
 	}
 	server->request = g_string_free(g_steal_pointer(&line), FALSE);
@@ -66,6 +68,8 @@ protocol_server_thread(gpointer data)
 			break;
 		i += chunk;
 	}
+	if (server->hold_open && error == NULL)
+		g_input_stream_read(g_io_stream_get_input_stream(stream), &byte, 1, server->cancel, &error);
 	g_io_stream_close(stream, NULL, NULL);
 	return NULL;
 }

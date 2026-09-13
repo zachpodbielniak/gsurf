@@ -200,6 +200,44 @@ send_key(GtkWidget *widget, guint keyval)
 }
 
 /* A native Enter key submits the prompt while page JavaScript is disabled. */
+/* A real Enter event submits a Gopher+ ASK form with scripting disabled. */
+static void
+test_scriptless_ask(void)
+{
+	ProtocolServer server = { 0 };
+	g_autoptr(GsurfView) view = NULL;
+	GtkWidget *window;
+	WebKitWebView *native;
+	g_autofree gchar *uri = NULL;
+	const gchar *prompt = "+-1\r\n+ASK:\r\n Ask: Name\r\n.\r\n";
+	const gchar *expected = "ask\t+\t1\r\n+-1\r\na\r\n.\r\n";
+	if (!have_display())
+		return;
+	protocol_server_start(&server, prompt, strlen(prompt), NULL);
+	view = gsurf_view_new();
+	native = WEBKIT_WEB_VIEW(gsurf_view_get_native_widget(view));
+	webkit_settings_set_hardware_acceleration_policy(webkit_web_view_get_settings(native),
+		WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
+	window = gtk_offscreen_window_new();
+	gtk_window_set_default_size(GTK_WINDOW(window), 800, 600);
+	gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(native));
+	gtk_widget_show_all(window);
+	webkit_settings_set_enable_javascript(webkit_web_view_get_settings(native), FALSE);
+	uri = g_strdup_printf("gopher://127.0.0.1:%u/0ask%%09%%09%%3F", server.port);
+	wait_load(native, uri);
+	protocol_server_stop(&server);
+	g_clear_pointer(&server.request, g_free);
+	server.request_length = strlen(expected);
+	protocol_server_start(&server, "+2\r\nOK", 6, NULL);
+	gtk_widget_grab_focus(GTK_WIDGET(native));
+	send_key(GTK_WIDGET(native), GDK_KEY_a);
+	send_key(GTK_WIDGET(native), GDK_KEY_Return);
+	wait_load(native, NULL);
+	protocol_server_stop(&server);
+	g_assert_cmpstr(server.request, ==, expected);
+	g_free(server.request);
+	gtk_widget_destroy(window);
+}
 static void
 test_scriptless_search(void)
 {
@@ -381,6 +419,53 @@ test_proxy(gconstpointer data)
 }
 
 /* Keep certificate persistence away from the user's real browser profile. */
+/* A '?' menu item retrieves attributes and submits all ASK answers through
+ * WebKit's form policy, including multiline framing and masked input. */
+static void
+test_gopher_plus_ask(void)
+{
+	ProtocolServer server = { 0 };
+	g_autoptr(GsurfView) view = NULL;
+	WebKitWebView *native;
+	g_autofree gchar *uri = NULL;
+	g_autofree gchar *ignored = NULL;
+	g_autofree gchar *text = NULL;
+	const gchar *prompt = "+-1\r\n+ASK:\r\n Ask: Name\r\n AskP: Secret\r\n AskL: Notes\r\n.\r\n";
+	const gchar *reply = "+8\r\nAccepted";
+	const gchar *expected = "ask\t+\t1\r\n+-1\r\nAlice\r\nsecret\r\n2\r\n..\r\nnext\r\n.\r\n";
+	guint i;
+	if (!have_display())
+		return;
+	protocol_server_start(&server, prompt, strlen(prompt), NULL);
+	view = gsurf_view_new();
+	native = WEBKIT_WEB_VIEW(gsurf_view_get_native_widget(view));
+	uri = g_strdup_printf("gopher://127.0.0.1:%u/0ask%%09%%09%%3F", server.port);
+	wait_load(native, uri);
+	protocol_server_stop(&server);
+	g_assert_cmpstr(server.request, ==, "ask\t!+ASK\r\n");
+	g_clear_pointer(&server.request, g_free);
+	for (i = 0; i < 2; i++) {
+		server.request_length = strlen(expected);
+		server.hold_open = TRUE;
+		protocol_server_start(&server, reply, strlen(reply), NULL);
+		g_clear_pointer(&ignored, g_free);
+		ignored = evaluate(native, "document.querySelectorAll('input')[0].value='Alice'; "
+			"document.querySelector('input[type=password]').value='secret'; "
+			"document.querySelector('textarea').value='.\\nnext'; document.querySelector('form').requestSubmit(); 'submitted'");
+		wait_load(native, NULL);
+		protocol_server_stop(&server);
+		g_assert_cmpstr(server.request, ==, expected);
+		g_clear_pointer(&server.request, g_free);
+		g_clear_pointer(&text, g_free);
+		text = evaluate(native, "document.body.textContent");
+		g_assert_nonnull(strstr(text, "Accepted"));
+		if (i == 0) {
+			webkit_web_view_go_back(native);
+			wait_load(native, NULL);
+			g_assert_cmpstr(webkit_web_view_get_uri(native), ==, uri);
+		}
+	}
+}
 int
 main(int argc, char **argv)
 {
@@ -392,10 +477,12 @@ main(int argc, char **argv)
 	g_setenv("XDG_DATA_HOME", state, TRUE);
 	g_setenv("GIO_USE_PROXY_RESOLVER", "dummy", TRUE);
 	g_test_init(&argc, &argv, NULL);
+	g_test_add_func("/protocol-webkit/gopher-plus-ask", test_gopher_plus_ask);
 	g_test_add_func("/protocol-webkit/menu", test_menu);
 	g_test_add_func("/protocol-webkit/search", test_search);
 #ifdef GSURF_BACKEND_GTK3
 	g_test_add_func("/protocol-webkit/scriptless-search", test_scriptless_search);
+	g_test_add_func("/protocol-webkit/scriptless-ask", test_scriptless_ask);
 #endif
 	g_test_add_func("/protocol-webkit/gemini", test_gemini);
 	g_test_add_func("/protocol-webkit/gemini-input", test_gemini_input);

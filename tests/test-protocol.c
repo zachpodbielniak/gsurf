@@ -342,10 +342,226 @@ test_response_limit(void)
 }
 
 /* Register the hermetic protocol contract independently of display tests. */
+/* Type-7 ASK submissions with an empty search slot carry answer data;
+ * they must not loop back to the local ordinary search prompt. */
+static void
+test_plus_index_ask(void)
+{
+	ProtocolServer server = { 0 };
+	g_autofree gchar *form = NULL;
+	g_autofree gchar *uri = NULL;
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfProtocolResponse) response = NULL;
+	const gchar *expected = "index\t\t+\t1\r\n+-1\r\nanswer\r\n.\r\n";
+	server.request_length = strlen(expected);
+	protocol_server_start(&server, "+0\r\n", 4, NULL);
+	form = g_strdup_printf("gopher://127.0.0.1:%u/7index%%09%%09%%3F?gsurf-ask-0-a=answer", server.port);
+	uri = gsurf_protocol_input_uri(form, &error);
+	g_assert_no_error(error);
+	response = fetch_uri(uri, NULL, FALSE, &error);
+	protocol_server_stop(&server);
+	g_assert_no_error(error);
+	g_assert_cmpint(response->status, ==, 20);
+	g_assert_cmpstr(server.request, ==, expected);
+	g_free(server.request);
+}
+/* Capability markers and directory attributes preserve endpoints, escape
+ * metadata, and select MIME views without accidentally treating them as menus. */
+static void
+test_plus_metadata(void)
+{
+	g_autofree gchar *menu = gsurf_protocol_render(
+		"0File\tdoc\thost\t70\t+\n0Form\task\thost\t70\t?\n"
+		":Picture\tpic\thost\t70\t+\n", "gopher://host/", TRUE);
+	g_autofree gchar *html = gsurf_gopher_attributes(
+		"+INFO: 0File\tdoc\tother\t7070\t+\r\n+ABSTRACT:\r\n <script>\r\n"
+		"+VIEWS:\r\n text/plain De_DE: <1k>\r\n+ASK:\r\n Ask: Value\r\n",
+		"gopher://host/1dir%09%09$");
+	g_autofree gchar *host = NULL;
+	g_autofree gchar *wire = NULL;
+	g_autofree gchar *root = gsurf_gopher_uri("gopher://host/", "+");
+	gchar type;
+	guint16 port;
+	gboolean gemini;
+	g_assert_nonnull(strstr(menu, "/0doc%09%09%2B"));
+	g_assert_nonnull(strstr(menu, "/0ask%09%09%3F"));
+	g_assert_nonnull(strstr(menu, "/%3Apic%09%09%21"));
+	g_assert_nonnull(strstr(html, "&lt;script&gt;"));
+	g_assert_null(strstr(html, "<script>"));
+	g_assert_nonnull(strstr(html, "gopher://other:7070/0doc%09%09%2Btext/plain%20De_DE"));
+	g_assert_null(strstr(html, "<form"));
+	g_assert_cmpstr(root, ==, "gopher://host/1%09%09%2B");
+	wire = gsurf_protocol_request("gopher://host/%3Apic%09%09%2Bimage/png", &host, &port, &type, &gemini, NULL);
+	g_assert_cmpint(type, ==, ':');
+	g_assert_cmpstr(wire, ==, "pic\t+image/png\r\n");
+	g_clear_pointer(&wire, g_free);
+	g_clear_pointer(&host, g_free);
+	wire = gsurf_protocol_request("gopher://host/7find%09%09!+ABSTRACT", &host, &port, &type, &gemini, NULL);
+	g_assert_cmpstr(wire, ==, "find\t\t!+ABSTRACT\r\n");
+}
+
+/* Positive-length and dot-framed responses must complete before EOF;
+ * an incomplete plus header remains cancellable on the private context. */
+static void
+test_plus_lifecycle(void)
+{
+	const gchar *replies[] = { "+2\r\nOK", "+-1\r\nOK\r\n.\r\n", "+" };
+	guint i;
+	for (i = 0; i < G_N_ELEMENTS(replies); i++) {
+		ProtocolServer server = { 0 };
+		g_autofree gchar *uri = NULL;
+		g_autoptr(GsurfProtocolResponse) response = NULL;
+		g_autoptr(GError) error = NULL;
+		server.hold_open = TRUE;
+		protocol_server_start(&server, replies[i], strlen(replies[i]), NULL);
+		uri = g_strdup_printf("gopher://127.0.0.1:%u/0text%%09%%09+", server.port);
+		response = fetch_uri(uri, NULL, i == 2, &error);
+		protocol_server_stop(&server);
+		if (i == 2) {
+			g_assert_null(response);
+			g_assert_error(error, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+		} else {
+			g_assert_no_error(error);
+			g_assert_nonnull(response);
+		}
+		g_free(server.request);
+	}
+}
+/* Gopher+ framing is independent of item type, and fixed/EOF bodies must
+ * retain literal dots and binary NULs. Malformed blocks fail closed. */
+static void
+test_plus_framing(void)
+{
+	const gchar *replies[] = { "+3\r\na.bignored", "+-2\r\n.\r\n", "+-1\r\n..dot\r\n.\r\nignored",
+		"+0\r\n", "+5\r\nshort", "+5\r\nno", "+-1\r\nno terminator", "+-3\r\n",
+		"+33554433\r\n", "+999999999999999999999\r\n", "+3\nabc", "--1\r\n1 <admin>\r\nMissing\r\n.\r\n", NULL };
+	const gchar *expected[] = { "a.b", ".\r\n", ".dot\r\n", "", "short" };
+	guint i;
+	for (i = 0; replies[i] != NULL; i++) {
+		g_autoptr(GInputStream) input = g_memory_input_stream_new_from_data(replies[i], strlen(replies[i]), NULL);
+		g_autoptr(GByteArray) bytes = g_byte_array_new();
+		g_autoptr(GError) error = NULL;
+		gboolean result = gsurf_gopher_read(input, bytes, NULL, &error);
+		if (i < G_N_ELEMENTS(expected)) {
+			g_assert_true(result);
+			g_assert_no_error(error);
+			g_assert_cmpmem(bytes->data, bytes->len, expected[i], strlen(expected[i]));
+		} else {
+			g_assert_false(result);
+			g_assert_nonnull(error);
+		}
+	}
+	{
+		const gchar binary[] = "+4\r\n\0.\r\n";
+		g_autoptr(GInputStream) input = g_memory_input_stream_new_from_data(binary, sizeof(binary) - 1, NULL);
+		g_autoptr(GByteArray) bytes = g_byte_array_new();
+		g_assert_true(gsurf_gopher_read(input, bytes, NULL, NULL));
+		g_assert_cmpmem(bytes->data, bytes->len, binary + 4, 4);
+	}
+}
+
+/* Exercise the real TCP worker, MIME selection, command positioning and
+ * attribute rendering, including a plus search and an ordinary '+' file. */
+static void
+test_plus_transport(void)
+{
+	const gchar *paths[] = { "0doc%09%09+", "1dir%09%09+text/plain", "7find%09words%09+",
+		"0doc%09%09!", "0plain", "0bad%09%09+", NULL };
+	const gchar *replies[] = { "+3\r\n.\r\n", "+5\r\nplain", "+-1\r\niFound\tx\tx\t0\r\n.\r\n",
+		"+-2\r\n+INFO: 0Doc\tdoc\tlocalhost\t70\t+\r\n+VIEWS:\r\n text/plain: <5k>\r\n",
+		"+hello\r\n.\r\n", "+10\r\nshort" };
+	const gchar *wires[] = { "doc\t+\r\n", "dir\t+text/plain\r\n", "find\twords\t+\r\n",
+		"doc\t!\r\n", "plain\r\n", "bad\t+\r\n" };
+	guint i;
+	for (i = 0; paths[i] != NULL; i++) {
+		ProtocolServer server = { 0 };
+		g_autofree gchar *uri = NULL;
+		g_autofree gchar *body = NULL;
+		g_autoptr(GError) error = NULL;
+		g_autoptr(GsurfProtocolResponse) response = NULL;
+		protocol_server_start(&server, replies[i], strlen(replies[i]), NULL);
+		uri = g_strdup_printf("gopher://127.0.0.1:%u/%s", server.port, paths[i]);
+		response = fetch_uri(uri, NULL, FALSE, &error);
+		protocol_server_stop(&server);
+		g_assert_cmpstr(server.request, ==, wires[i]);
+		g_free(server.request);
+		if (i == 5) {
+			g_assert_null(response);
+			g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_DATA);
+			continue;
+		}
+		g_assert_no_error(error);
+		body = g_strndup(g_bytes_get_data(response->body, NULL), g_bytes_get_size(response->body));
+		if (i == 0)
+			g_assert_cmpstr(body, ==, ".\r\n");
+		if (i == 1) {
+			g_assert_cmpstr(response->mime, ==, "text/plain");
+			g_assert_cmpstr(body, ==, "plain");
+		}
+		if (i == 2)
+			g_assert_nonnull(strstr(body, "Found"));
+		if (i == 3)
+			g_assert_nonnull(strstr(body, "%09%09%2Btext/plain"));
+		if (i == 4)
+			g_assert_cmpstr(body, ==, "+hello\n");
+	}
+}
+
+/* URI and form round trips retain search slots and dot-stuff answers, while
+ * injection outside the explicitly framed ASK payload remains prohibited. */
+static void
+test_plus_forms(void)
+{
+	g_autofree gchar *root = gsurf_gopher_request("", '1', NULL);
+	g_autofree gchar *uri = gsurf_protocol_input_uri("gopher://host/0ask%09%09%3F?gsurf-ask-0-a=A%26B&gsurf-ask-1-l=.%0D%0Atwo", NULL);
+	g_autofree gchar *wire = NULL;
+	g_autofree gchar *host = NULL;
+	g_autofree gchar *search = gsurf_protocol_input_uri("gopher://host/7find%09%09%2B?gsurf-query=words", NULL);
+	g_autofree gchar *html = gsurf_gopher_attributes("+ASK:\n Ask: Name\tDefault\n AskP: Secret\n AskL: Details\n Choose: Color\tRed\tBlue\n Select: Flag:1\n", "gopher://host/0ask%09%09%3F");
+	gboolean gemini;
+	gchar type;
+	guint16 port;
+	const gchar *bad[] = { "x\t\t+\t1\r\n+-1\r\n.\r\nINJECT\r\n.\r\n",
+		"x\t\t+\t1\r\n+-1\r\na\nb\r\n.\r\n", "x\r\nother", "x\t\t+\t1", NULL };
+	guint i;
+	g_assert_cmpstr(root, ==, "\r\n");
+	{
+		g_autofree gchar *empty_uri = gsurf_protocol_input_uri(
+			"gopher://host/0ask%09%09%3F?gsurf-ask-0-a=&gsurf-ask-1-a=next&gsurf-ask-2-l=", NULL);
+		g_autofree gchar *empty_host = NULL;
+		g_autofree gchar *empty_wire = gsurf_protocol_request(empty_uri, &empty_host, &port, &type, &gemini, NULL);
+		g_autofree gchar *empty_html = gsurf_gopher_attributes("+INFO: \n+INFO: i\n+ASK:\n Ask:\n", "gopher://host/0ask");
+		g_assert_cmpstr(empty_wire, ==, "ask\t+\t1\r\n+-1\r\n\r\nnext\r\n0\r\n.\r\n");
+		g_assert_nonnull(strstr(empty_html, "<button>Submit</button>"));
+	}
+	g_assert_nonnull(uri);
+	wire = gsurf_protocol_request(uri, &host, &port, &type, &gemini, NULL);
+	g_assert_cmpstr(wire, ==, "ask\t+\t1\r\n+-1\r\nA&B\r\n2\r\n..\r\ntwo\r\n.\r\n");
+	g_assert_cmpstr(search, ==, "gopher://host/7find%09words%09%2B");
+	g_assert_nonnull(strstr(html, "type='password'"));
+	g_assert_nonnull(strstr(html, "<textarea"));
+	g_assert_nonnull(strstr(html, "value=\"Blue\""));
+	g_assert_nonnull(strstr(html, "<button>Submit</button>"));
+	for (i = 0; bad[i] != NULL; i++) {
+		g_autoptr(GError) error = NULL;
+		g_autofree gchar *result = gsurf_gopher_request(bad[i], '0', &error);
+		g_assert_null(result);
+		g_assert_nonnull(error);
+	}
+	g_clear_pointer(&html, g_free);
+	html = gsurf_gopher_attributes("+ASK:\n ChooseF: File\n", "gopher://host/0ask");
+	g_assert_null(strstr(html, "<button>Submit</button>"));
+}
 int
 main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
+	g_test_add_func("/protocol/plus-index-ask", test_plus_index_ask);
+	g_test_add_func("/protocol/plus-metadata", test_plus_metadata);
+	g_test_add_func("/protocol/plus-lifecycle", test_plus_lifecycle);
+	g_test_add_func("/protocol/plus-framing", test_plus_framing);
+	g_test_add_func("/protocol/plus-transport", test_plus_transport);
+	g_test_add_func("/protocol/plus-forms", test_plus_forms);
 	g_test_add_func("/protocol/requests", test_requests);
 	g_test_add_func("/protocol/headers", test_headers);
 	g_test_add_func("/protocol/render", test_render);
