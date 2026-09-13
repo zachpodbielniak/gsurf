@@ -5,6 +5,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+#include "backend/webkit/gsurf-webkit-protocol.h"
+
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk3/gsurf-webkit2-view.h"
 #include "module/gsurf-module-manager.h"
@@ -641,6 +643,7 @@ gsurf_webkit2_view_set_proxy(GsurfView *view, const gchar *uri)
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
 	WebKitWebContext *ctx = webkit_web_view_get_context(self->webview);
 
+	gsurf_webkit_protocol_set_proxy(self->webview, uri);
 	/* Deprecated in newer WebKitGTK (website-data-manager API), but this
 	 * is what WebKit2GTK 4.1 exposes. */
 	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
@@ -760,6 +763,7 @@ gsurf_webkit2_view_constructed(GObject *object)
 	G_OBJECT_CLASS(gsurf_webkit2_view_parent_class)->constructed(object);
 
 	widget = webkit_web_view_new();
+	gsurf_webkit_protocol_attach(WEBKIT_WEB_VIEW(widget));
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
 	if (gsurf_kiosk_is_enabled())
 		gtk_drag_dest_unset(widget);
@@ -816,6 +820,7 @@ gsurf_webkit2_view_dispose(GObject *object)
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(object);
 
 	if (self->webview != NULL) {
+		gsurf_webkit_protocol_cancel(self->webview);
 		/* The host may retain the native widget, and the context is shared.
 		 * Neither may keep callbacks into a disposed library wrapper. */
 		g_signal_handlers_disconnect_by_data(

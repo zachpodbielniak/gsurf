@@ -1,0 +1,73 @@
+#+title: Gopher and Gemini
+#+description: Native small-web browsing in gsurf 0.2.0
+#+author: Zach Podbielniak
+
+* Opening a page
+
+Starting with version 0.2.0, gsurf accepts =gopher://= and =gemini://= addresses in the address bar, on the command line, and through =gsurf_view_load_uri()=. No proxy, external browser, or optional module is needed. The desktop entry advertises both schemes.
+
+#+begin_src sh
+gsurf gopher://gopher.floodgap.com/
+gsurf gemini://geminiprotocol.net/
+#+end_src
+
+The original protocol URI stays in the location bar. Links, back/forward navigation, reload, copying addresses, and bookmarks use protocol URIs. The shared WebKit scheme adapter is attached to GTK3, GTK4, and the LRG backend's offscreen WebKitGTK view, including views used by cmacs. The underlying client and text renderers are internal library code independent of GTK; embedders use the existing view API.
+
+* Gopher
+
+Gopher connects over TCP, normally on port 70. An explicit port and IPv6 literals are supported. The first path character is the item type; the rest is the selector. A missing path or bare slash means the root menu (type =1=).
+
+- Type =1= menus become linked, escaped HTML; informational and error records stay plain text.
+- Type =0= text removes the terminating dot line and dot-stuffing; binary data is never modified this way.
+- Type =7= indexes display a search form when no search terms are supplied. Search submissions become selector, TAB, query, CRLF on the wire. Existing RFC 4266 =%09= search URLs also work.
+- Types =g= and =I= display GIF and detected image content respectively. Type =h= serves HTML; =URL:= menu selectors become direct links to supported schemes. Other item types use an octet-stream response for WebKit's download handling.
+- Relative Gemtext links and Gopher menu selectors are escaped independently: a selector containing =?=, =#=, or a space remains a selector, not a query or fragment.
+
+Gopher is unencrypted. Gopher+ attribute interpretation, terminal sessions (types =8= and =T=), and protocol-specific viewers for legacy binary formats are not implemented; those item types remain downloadable bytes. Gopher input rejects NUL, CR, LF, and other invalid control characters before writing any request. It does not accept a conventional =?query= in a manually typed Gopher URI; use a type-7 form or =%09=.
+
+* Gemini
+
+Gemini connects over TLS on port 1965 by default, requires TLS 1.2 or newer, and sends a single absolute URI followed by CRLF. Fragments are not sent. Userinfo is rejected, and request URIs are limited to 1024 bytes. Response headers require CRLF, a valid status class, UTF-8 META, and at most 1024 bytes of META.
+
+Successful =text/gemini= responses render Gemtext headings, paragraphs, link lines, lists, quotations, and preformatted blocks. Markup is escaped, relative links resolve against the capsule URI, and preformatted text is literal. UTF-8 is the default; declared charsets are converted with GLib and unsupported or invalid encodings produce an error page. Plain text, images, and other MIME types go through WebKit's normal display/download handling. An empty successful META uses =text/gemini; charset=utf-8= for compatibility with existing capsules.
+
+Input responses (10–19) display a form. Status 11 masks the entry; the submitted value replaces any prior URI query. Spaces become =%20=, not =+=. Forms require no page JavaScript. A submitted input is still part of the resulting URI and can appear in the address bar and enabled history modules; masking the input is not a credential vault.
+
+Redirect responses (30–39) show the destination with a =Continue to destination= link. Redirects are deliberately user-followed, including cross-protocol destinations; there is no automatic redirect chain. Temporary failures, permanent failures, and unknown members of valid status classes display the status and escaped server message. Client-certificate authentication (60–69) displays an explicit unsupported message; no identity/key selection or automatic client certificate submission is provided.
+
+** Certificate trust
+
+Self-signed certificates are accepted using trust on first use (TOFU). Hostname, validity-period, and other TLS checks remain enforced; only an unknown issuer is tolerated. Every successful handshake, including a certificate trusted by the system CA store, must also match the saved SHA-256 fingerprint of the complete leaf certificate. Certificate renewals therefore need explicit verification and pin removal.
+
+Pins live under =$XDG_DATA_HOME/gsurf/gemini/certificates/=, normally =~/.local/share/gsurf/gemini/certificates/=. Each filename is the SHA-256 digest of the lowercase host followed by =:= and its effective port; its content is the leaf certificate's SHA-256 fingerprint. Directories are created with mode 0700 and new pins with mode 0600. Exclusive creation prevents silently replacing an existing pin. Pins are shared by standalone and embedded gsurf in the same user data directory and are persistent even when an embedder uses an ephemeral WebKit profile.
+
+A changed certificate fails closed and identifies the exact pin file in the error page. Verify the new certificate with the capsule operator before removing only that file, then reload to establish a new first-use pin. gsurf never silently replaces a mismatched certificate. Failure to read or persist a pin is an error, not permission to bypass trust checks.
+
+* Resource and lifecycle behavior
+
+Configured =proxy_mode: custom= / =proxy_uri= and runtime =gsurf_view_set_proxy()= changes also apply to the GIO transports. GIO handles the proxy tunnel (for example HTTP CONNECT or SOCKS); a failed explicit proxy does not fall back to a direct connection. =proxy_mode: none= forces direct connections, while the default mode uses GIO's system proxy resolver. Embedders should change proxy policy through gsurf; direct changes to WebKit's own proxy objects are not observable by this adapter.
+
+Network work runs on GTask workers, keeping the UI responsive. Completion and the total 30-second deadline use the caller's thread-default GLib context, which an embedder must iterate. Socket operations also have a 30-second timeout. Each body is limited to 32 MiB; oversized responses fail instead of being truncated. Navigation, stop, and view teardown cancel the current group of scheme requests. Late completions finish their original request and cannot replace a newer page.
+
+Generated pages contain no JavaScript. The adapter also applies a restrictive Content Security Policy to server content, including HTML: scripts, frames, automatic HTTP resources, and arbitrary form destinations are blocked. Normal user-followed links to Gopher, Gemini, HTTP, HTTPS, and mailto remain available; active or local-file links from generated menus/Gemtext are rendered as inert labels. This policy intentionally gives small-web documents fewer active capabilities than ordinary HTTPS pages.
+
+* Building and verifying
+
+There is no new compiled dependency. Fedora's GTK3 build packages are =gcc=, =make=, =pkgconf-pkg-config=, =glib2-devel=, =libyaml-devel=, =json-glib-devel=, =gtk3-devel=, and =webkit2gtk4.1-devel=. Gemini additionally needs a working GIO TLS backend (=glib-networking= at runtime). GTK4 builds replace the GTK3/WebKit development packages with =gtk4-devel= and =webkitgtk6.0-devel=. GIR generation needs =gobject-introspection-devel=.
+
+=make test= runs =test-protocol= against loopback TCP and TLS fixtures. Tests cover request encoding and injection rejection, header framing and statuses, render escaping, query forms, binary preservation, certificate first use/reuse/change rejection, and cancellation on a private main context. Committed certificate/private-key pairs under =tests/fixtures/gemini-*.pem= are public, test-only identities for localhost; never use them for a real server. These tests require no external network and use temporary pin directories.
+
+=make test-gui= also runs =test-protocol-webkit= when Xvfb is available. On an existing display, run the native protocol test directly:
+
+#+begin_src sh
+GSURF_TEST_GUI=1 LD_LIBRARY_PATH=build/release build/release/test-protocol-webkit
+#+end_src
+
+The GUI suite exercises actual custom-scheme dispatch, URI preservation, menu links, keyboard-only form submission with JavaScript disabled (GTK3), masked Gemini input, proxy routing, cancellation/owner teardown, and TLS Gemtext rendering, including the attachment path used by an offscreen WebView. Protocol tests use the currently selected WebKit build; a GTK3 run does not validate GTK4 or a complete libregnum render loop.
+
+* Specifications
+
+- [[https://www.rfc-editor.org/rfc/rfc1436][RFC 1436: The Internet Gopher Protocol]]
+- [[https://www.rfc-editor.org/rfc/rfc4266][RFC 4266: The gopher URI Scheme]]
+- [[https://geminiprotocol.net/docs/protocol-specification.gmi][Gemini network protocol specification]]
+- [[https://geminiprotocol.net/docs/gemtext-specification.gmi][Gemtext specification]]

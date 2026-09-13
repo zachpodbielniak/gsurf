@@ -13,6 +13,7 @@
  */
 
 #include "util/gsurf-kiosk.h"
+#include "backend/webkit/gsurf-webkit-protocol.h"
 #include "backend/lrg/gsurf-lrg-view.h"
 #include "backend/lrg/gsurf-lrg-engine.h"
 #include "module/gsurf-module-manager.h"
@@ -762,6 +763,7 @@ lrg_view_set_proxy(GsurfView *view, const gchar *uri)
 	GsurfLrgView *self = GSURF_LRG_VIEW(view);
 	WebKitWebContext *ctx = webkit_web_view_get_context(self->webview);
 
+	gsurf_webkit_protocol_set_proxy(self->webview, uri);
 	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 	if (uri == NULL || *uri == '\0') {
 		webkit_web_context_set_network_proxy_settings(ctx,

@@ -116,7 +116,7 @@ These are answered *synchronously*, so a host hook must decide without blocking:
 
 * GObject Introspection
 
-=make BUILD_GIR=1= produces =Gsurf-0.1.gir= / =Gsurf-0.1.typelib=, so gsurf can be
+=make BUILD_GIR=1= produces =Gsurf-0.2.gir= / =Gsurf-0.2.typelib=, so gsurf can be
 called from any introspected language. The abstract API exposes no GTK/WebKit
 types, keeping the typelib backend-agnostic.
 

@@ -10,6 +10,8 @@
  * GTK_BACKEND=gtk4 (requires webkitgtk-6.0 to compile/verify).
  */
 
+#include "backend/webkit/gsurf-webkit-protocol.h"
+
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk4/gsurf-webkit6-view.h"
 #include "module/gsurf-module-manager.h"
@@ -376,6 +378,7 @@ gsurf_webkit6_view_set_proxy(GsurfView *v, const gchar *uri)
 {
 	WebKitNetworkSession *ns = webkit_web_view_get_network_session(GSURF_WEBKIT6_VIEW(v)->webview);
 
+	gsurf_webkit_protocol_set_proxy(GSURF_WEBKIT6_VIEW(v)->webview, uri);
 	if (uri == NULL || *uri == '\0') {
 		webkit_network_session_set_proxy_settings(ns, WEBKIT_NETWORK_PROXY_MODE_DEFAULT, NULL);
 	} else {
@@ -417,6 +420,7 @@ gsurf_webkit6_view_constructed(GObject *object)
 	G_OBJECT_CLASS(gsurf_webkit6_view_parent_class)->constructed(object);
 
 	widget = webkit_web_view_new();
+	gsurf_webkit_protocol_attach(WEBKIT_WEB_VIEW(widget));
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
 	if (gsurf_kiosk_is_enabled()) {
 		g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(widget);
@@ -463,6 +467,7 @@ gsurf_webkit6_view_dispose(GObject *object)
 	GsurfWebkit6View *self = GSURF_WEBKIT6_VIEW(object);
 
 	if (self->webview != NULL) {
+		gsurf_webkit_protocol_cancel(self->webview);
 		/* The content manager can outlive the library wrapper in embedders. */
 		g_signal_handlers_disconnect_by_data(
 			webkit_web_view_get_user_content_manager(self->webview), self);

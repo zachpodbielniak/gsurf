@@ -17,6 +17,8 @@
  * webkitgtk-6.0 offscreen path is a TODO guarded below.
  */
 
+#include "backend/webkit/gsurf-webkit-protocol.h"
+
 #include "backend/lrg/gsurf-lrg-engine.h"
 
 #include <string.h>
@@ -517,6 +519,7 @@ gsurf_lrg_engine_new(GsurfView *owner, GError **error)
 	g_object_ref_sink(self->offscreen);
 
 	self->webview = WEBKIT_WEB_VIEW(webkit_web_view_new());
+	gsurf_webkit_protocol_attach(self->webview);
 
 	/* Render into the cairo/system surface (not a GL compositor) so the
 	 * offscreen window's surface contains the page pixels. */
@@ -546,6 +549,8 @@ gsurf_lrg_engine_free(GsurfLrgEngine *self)
 	if (self == NULL)
 		return;
 
+	if (self->webview != NULL)
+		gsurf_webkit_protocol_cancel(self->webview);
 	if (self->offscreen != NULL) {
 		gtk_widget_destroy(self->offscreen);
 		g_clear_object(&self->offscreen);

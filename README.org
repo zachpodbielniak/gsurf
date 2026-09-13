@@ -29,6 +29,7 @@ Design pillars:
 
 Working today:
 
+- Native =gopher://= menus/searches and =gemini://= capsules with TLS certificate pinning and Gemtext rendering; see [[file:docs/protocols.org][protocol support and limitations]].
 - Three-file build system with =GTK_BACKEND= / =MCP= / =AI= flags, dependency
   auto-detection, install/uninstall, GIR, AppImage hooks.
 - =libgsurf.so= + =libgsurf.a= + =gsurf= binary (GTK3 / WebKit2GTK 4.1), with a

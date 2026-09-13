@@ -54,6 +54,7 @@ LIB_SRCS := $(wildcard src/*.c) \
 LIB_SRCS := $(filter-out src/main.c,$(LIB_SRCS))
 
 # Backend sources (only the selected backend compiles)
+LIB_SRCS += $(wildcard src/protocol/*.c) $(wildcard src/backend/webkit/*.c)
 ifeq ($(GTK_BACKEND),gtk4)
 LIB_SRCS += $(wildcard src/backend/gtk4/*.c)
 else
@@ -218,12 +219,15 @@ tests: test
 # browser under Xvfb on about:blank and confirm it stays alive briefly.
 # Gated on xvfb-run being available so `make test` stays pure-headless.
 .PHONY: test-gui
-test-gui: gsurf modules $(OUTDIR)/test-backend-settings
+test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	echo "Running native settings regression tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-backend-settings || exit $$?; \
+	echo "Running native protocol regression tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-protocol-webkit || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \

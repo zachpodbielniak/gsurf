@@ -1,4 +1,4 @@
-.TH GSURF 1 "2026" "gsurf 0.1.0" "User Commands"
+.TH GSURF 1 "2026" "gsurf 0.2.0" "User Commands"
 .SH NAME
 gsurf \- GObject Surf, a minimal modular web browser
 .SH SYNOPSIS
@@ -23,6 +23,19 @@ Configuration is read from a YAML file and, optionally, a compiled C config.
 Vim-style modal navigation is available through the
 .B modal
 module.
+.SH GOPHER AND GEMINI
+Gopher and Gemini URIs work directly, without a proxy or optional module.
+Gopher menus and Gemini Gemtext become linked pages; search/input responses
+display forms. Gemini redirects require following the displayed link.
+Gemini uses TLS with persistent certificate pins under
+.IR $XDG_DATA_HOME/gsurf/gemini/certificates .
+Self-signed issuers are accepted, but hostname and validity checks remain;
+a changed certificate is rejected until its pin is explicitly removed after
+verification. Client-certificate authentication and Gopher+ attributes are
+not implemented. Requests have a 30-second deadline and a 32 MiB body limit.
+See
+.I docs/protocols.org
+for supported item types, trust behavior, and integration details.
 .SH OPTIONS
 .TP
 .BR \-c ", " \-\-config =\fIPATH\fR
