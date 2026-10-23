@@ -8,6 +8,8 @@ git submodule update --init --recursive
 make install-deps          # Fedora/Debian/Arch auto-detected (sudo)
 make                       # GTK3 / WebKit2GTK 4.1
 ./build/release/gsurf https://suckless.org
+./build/release/gsurf ./README.org
+./build/release/gsurf file:///usr/share/doc/
 #+end_src
 
 Optional builds:

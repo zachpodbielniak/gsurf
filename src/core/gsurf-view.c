@@ -8,6 +8,8 @@
 #include "util/gsurf-kiosk.h"
 #include "core/gsurf-view.h"
 
+#include <errno.h>
+#include <pwd.h>
 #include <string.h>
 
 typedef struct {
@@ -163,6 +165,29 @@ gsurf_uri_has_scheme(const gchar *s)
 	return TRUE;
 }
 
+/* Authority is the text before the first path, query, or fragment marker.
+ * A dot there is a domain or IPv4 address. "localhost" is special so it does
+ * not need a dot. Dots later in the path ("docs/readme.org") are not a host. */
+static gboolean
+gsurf_uri_authority_is_host(const gchar *s)
+{
+	const gchar *end;
+	gsize len;
+
+	end = s;
+	while (*end != '\0' && *end != '/' && *end != '?' && *end != '#')
+		end++;
+	len = (gsize)(end - s);
+	if (len == 0)
+		return FALSE;
+	if (memchr(s, '.', len) != NULL)
+		return TRUE;
+	if (len >= 9 && strncmp(s, "localhost", 9) == 0
+	    && (len == 9 || s[9] == ':'))
+		return TRUE;
+	return FALSE;
+}
+
 /* TRUE if S (already known to be scheme-less) looks like a host we should
  * load over https rather than a free-text search term. */
 static gboolean
@@ -172,30 +197,181 @@ gsurf_uri_looks_like_host(const gchar *s)
 		return FALSE;
 	if (strchr(s, ' ') != NULL || strchr(s, '\t') != NULL)
 		return FALSE;                    /* a search phrase */
-	if (strchr(s, '.') != NULL)
-		return TRUE;                     /* domain or IPv4 */
-	if (g_str_has_prefix(s, "localhost")
-	    && (s[9] == '\0' || s[9] == ':' || s[9] == '/'))
-		return TRUE;                     /* localhost[:port][/path] */
+	return gsurf_uri_authority_is_host(s);
+}
+
+/* TRUE when a file URI names this machine. A foreign host is left intact so
+ * it is not silently remapped onto a local path. */
+static gboolean
+gsurf_uri_file_host_is_local(const gchar *host)
+{
+	if (host == NULL || *host == '\0')
+		return TRUE;
+	return g_ascii_strcasecmp(host, "localhost") == 0;
+}
+
+/* Canonical file URI. Local forms gain a decoded, dot-segment-free path and
+ * percent-encoding, while query and fragment survive (GFile drops both).
+ * Userinfo, a port, or a non-local host is only encoding-normalized. */
+static gchar *
+gsurf_uri_canonicalize_file(const gchar *input)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GUri) parsed = NULL;
+	g_autoptr(GFile) file = NULL;
+	g_autoptr(GUri) built = NULL;
+	g_autofree gchar *local = NULL;
+	const gchar *host;
+	const gchar *path;
+	gint port;
+
+	parsed = g_uri_parse(input, G_URI_FLAGS_NONE, &error);
+	if (parsed == NULL || g_uri_get_scheme(parsed) == NULL
+	    || g_ascii_strcasecmp(g_uri_get_scheme(parsed), "file") != 0)
+		return g_strdup(input);
+
+	host = g_uri_get_host(parsed);
+	port = g_uri_get_port(parsed);
+	path = g_uri_get_path(parsed);
+	if (g_uri_get_userinfo(parsed) != NULL || port >= 0
+	    || !gsurf_uri_file_host_is_local(host)
+	    || path == NULL || !g_path_is_absolute(path))
+		return g_uri_to_string(parsed);
+
+	file = g_file_new_for_path(path);
+	local = g_file_get_path(file);
+	if (local == NULL)
+		return g_uri_to_string(parsed);
+
+	/* An empty host is what produces the three-slash form, file:///path. */
+	built = g_uri_build(G_URI_FLAGS_NONE, "file", NULL, "", -1, local,
+		g_uri_get_query(parsed), g_uri_get_fragment(parsed));
+	return g_uri_to_string(built);
+}
+
+/* Expand a leading ~, ~/path, or ~user/path. Unknown users return NULL so
+ * the caller can keep the text as a search or address. */
+static gchar *
+gsurf_uri_expand_tilde(const gchar *path)
+{
+	const gchar *slash;
+	const gchar *rest;
+	g_autofree gchar *user = NULL;
+	struct passwd pwd;
+	struct passwd *result;
+	gchar *buf;
+	gchar *full;
+	gsize bufsize;
+	gint rc;
+
+	if (path[0] != '~')
+		return NULL;
+	if (g_get_home_dir() == NULL)
+		return NULL;
+	if (path[1] == '\0')
+		return g_strdup(g_get_home_dir());
+	if (path[1] == '/')
+		return g_build_filename(g_get_home_dir(), path + 2, NULL);
+
+	slash = strchr(path + 1, '/');
+	if (slash == NULL) {
+		user = g_strdup(path + 1);
+		rest = NULL;
+	} else {
+		user = g_strndup(path + 1, (gsize)(slash - (path + 1)));
+		rest = slash + 1;
+	}
+	if (user[0] == '\0')
+		return NULL;
+
+	bufsize = 16384;
+	buf = g_malloc(bufsize);
+	result = NULL;
+	rc = getpwnam_r(user, &pwd, buf, bufsize, &result);
+	while (rc == ERANGE && bufsize < (1u << 20)) {
+		bufsize *= 2;
+		buf = g_realloc(buf, bufsize);
+		rc = getpwnam_r(user, &pwd, buf, bufsize, &result);
+	}
+	if (rc != 0 || result == NULL || pwd.pw_dir == NULL) {
+		g_free(buf);
+		return NULL;
+	}
+	if (rest == NULL || rest[0] == '\0')
+		full = g_strdup(pwd.pw_dir);
+	else
+		full = g_build_filename(pwd.pw_dir, rest, NULL);
+	g_free(buf);
+	return full;
+}
+
+/* Turn an absolute or relative filesystem location into a file URI. The
+ * path is resolved against the process working directory. */
+static gchar *
+gsurf_uri_from_local_path(const gchar *path)
+{
+	g_autoptr(GFile) file = NULL;
+
+	file = g_file_new_for_commandline_arg(path);
+	return g_file_get_uri(file);
+}
+
+/* Scheme-less text that should be opened as a file rather than https or a
+ * search. An existing relative file wins even when its name contains a dot,
+ * so "gsurf index.html" opens that file. A missing relative path needs a
+ * slash, or an explicit ./ or ../, and must not look like a host. Whitespace
+ * keeps a missing relative path as a search phrase. */
+static gboolean
+gsurf_uri_is_filesystem_path(const gchar *s)
+{
+	if (g_path_is_absolute(s))
+		return TRUE;
+	if (g_strcmp0(s, ".") == 0 || g_strcmp0(s, "..") == 0)
+		return TRUE;
+	if (g_str_has_prefix(s, "./") || g_str_has_prefix(s, "../"))
+		return TRUE;
+	if (g_file_test(s, G_FILE_TEST_EXISTS))
+		return TRUE;
+	if (strchr(s, '/') != NULL && strchr(s, ' ') == NULL && strchr(s, '\t') == NULL
+	    && !gsurf_uri_authority_is_host(s))
+		return TRUE;
 	return FALSE;
 }
 
 gchar *
 gsurf_view_normalize_uri(const gchar *input)
 {
-	gchar *trimmed;
-	gchar *out;
+	g_autofree gchar *trimmed = NULL;
+	g_autofree gchar *expanded = NULL;
 
 	if (input == NULL)
 		return NULL;
 
 	trimmed = g_strstrip(g_strdup(input));
-	if (gsurf_uri_has_scheme(trimmed) || !gsurf_uri_looks_like_host(trimmed))
-		return trimmed;                  /* leave as-is */
+	if (trimmed[0] == '\0')
+		return g_steal_pointer(&trimmed);
 
-	out = g_strconcat("https://", trimmed, NULL);
-	g_free(trimmed);
-	return out;
+	/* file: is rewritten into a canonical file URI. Every other scheme
+	 * (https, about, data, mailto, gopher, gemini, view-source, …) is
+	 * preserved, including its original spelling. */
+	if (gsurf_uri_has_scheme(trimmed)) {
+		if (g_ascii_strncasecmp(trimmed, "file:", 5) == 0)
+			return gsurf_uri_canonicalize_file(trimmed);
+		return g_steal_pointer(&trimmed);
+	}
+
+	if (trimmed[0] == '~') {
+		expanded = gsurf_uri_expand_tilde(trimmed);
+		if (expanded != NULL)
+			return gsurf_uri_from_local_path(expanded);
+	} else if (gsurf_uri_is_filesystem_path(trimmed)) {
+		return gsurf_uri_from_local_path(trimmed);
+	}
+
+	if (!gsurf_uri_looks_like_host(trimmed))
+		return g_steal_pointer(&trimmed);
+
+	return g_strconcat("https://", trimmed, NULL);
 }
 
 void
@@ -211,8 +387,7 @@ gsurf_view_load_uri(GsurfView *self, const gchar *uri)
 	if (klass->load_uri == NULL)
 		return;
 
-	/* Supply a missing scheme ("duckduckgo.com" -> "https://duckduckgo.com")
-	 * so users need not type it; full URIs / about: / file: pass through. */
+	/* Supply a missing scheme, and turn filesystem paths into file URIs. */
 	normalized = gsurf_view_normalize_uri(uri);
 	klass->load_uri(self, normalized);
 	g_free(normalized);

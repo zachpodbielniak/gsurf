@@ -9,6 +9,18 @@ gsurf [OPTIONS] [URI]
 
 If no URI is given, the configured homepage is opened.
 
+The positional argument is a URI or a filesystem path. Absolute paths, =./= and =../= paths, =~/= and =~user/= paths, relative paths that contain a slash and are not hosts, and the name of a file that exists in the working directory all open as =file://= URIs. =file:///path=, =file://localhost/path=, =file:/path=, and uppercase =FILE:= are accepted. Spaces and non-ASCII names are percent-encoded. A query or fragment on a =file:= URI is kept. A =file:= URI with a foreign host is not rewritten onto the local disk.
+
+Any other scheme is passed through with its original spelling, including =http=, =https=, =about=, =data=, =mailto=, =javascript=, =view-source=, =gopher=, and =gemini=. A bare host such as =example.com= or =localhost:8080= gains =https://=. Other text is left for the search-engine module. The address bar uses the same rules.
+
+#+begin_example
+gsurf /usr/share/doc/index.html
+gsurf ./page.html
+gsurf ~/notes/index.html
+gsurf file:///tmp/page.html#section
+gsurf about:blank
+#+end_example
+
 * Options
 
 | Option                   | Description                                           |

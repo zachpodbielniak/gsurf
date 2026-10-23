@@ -3,6 +3,7 @@
 #include "backend/webkit/gsurf-webkit-protocol.h"
 #include "protocol-server.h"
 #include <string.h>
+#include <unistd.h>
 
 /* Run only when explicitly opted into a display/web-process integration. */
 static gboolean
@@ -466,6 +467,72 @@ test_gopher_plus_ask(void)
 		}
 	}
 }
+/* Connect first, then load, so a fast file load cannot finish unobserved. */
+static void
+load_path(GsurfView *view, const gchar *input, const gchar *expected)
+{
+	g_autoptr(GMainLoop) loop = g_main_loop_new(NULL, FALSE);
+	WebKitWebView *native = WEBKIT_WEB_VIEW(gsurf_view_get_native_widget(view));
+	LoadWait wait = { loop, expected, FALSE };
+	gulong handler = g_signal_connect(native, "load-changed", G_CALLBACK(loaded), &wait);
+	guint timeout = g_timeout_add_seconds(15, deadline, NULL);
+
+	gsurf_view_load_uri(view, input);
+	g_main_loop_run(loop);
+	g_source_remove(timeout);
+	g_signal_handler_disconnect(native, handler);
+}
+
+/* A CLI path and a file URI both load through gsurf_view_load_uri. */
+static void
+test_local_file(void)
+{
+	g_autoptr(GsurfView) view = NULL;
+	WebKitWebView *native;
+	g_autoptr(GFile) absolute_file = NULL;
+	g_autoptr(GFile) other_file = NULL;
+	g_autofree gchar *dir = g_dir_make_tmp("gsurf-file-XXXXXX", NULL);
+	g_autofree gchar *previous = g_get_current_dir();
+	g_autofree gchar *page = NULL;
+	g_autofree gchar *other = NULL;
+	g_autofree gchar *expected = NULL;
+	g_autofree gchar *other_uri = NULL;
+	g_autofree gchar *title = NULL;
+	g_autofree gchar *localhost = NULL;
+	const gchar *html =
+		"<html><head><title>gsurf local file</title></head>"
+		"<body><p id=\"mark\">opened from a path</p></body></html>\n";
+
+	if (!have_display())
+		return;
+	page = g_build_filename(dir, "page.html", NULL);
+	other = g_build_filename(dir, "other.html", NULL);
+	g_assert_true(g_file_set_contents(page, html, -1, NULL));
+	g_assert_true(g_file_set_contents(other, html, -1, NULL));
+	absolute_file = g_file_new_for_path(page);
+	other_file = g_file_new_for_path(other);
+	expected = g_file_get_uri(absolute_file);
+	other_uri = g_file_get_uri(other_file);
+	view = gsurf_view_new();
+	native = WEBKIT_WEB_VIEW(gsurf_view_get_native_widget(view));
+	g_signal_connect(native, "load-failed", G_CALLBACK(load_failed), NULL);
+
+	load_path(view, page, expected);
+	g_assert_cmpstr(webkit_web_view_get_uri(native), ==, expected);
+	g_assert_cmpstr(gsurf_view_get_uri(view), ==, expected);
+	title = evaluate(native, "document.title");
+	g_assert_cmpstr(title, ==, "gsurf local file");
+
+	g_assert_cmpint(chdir(dir), ==, 0);
+	load_path(view, "./other.html", other_uri);
+	g_assert_cmpstr(webkit_web_view_get_uri(native), ==, other_uri);
+	g_assert_cmpint(chdir(previous), ==, 0);
+
+	localhost = g_strdup_printf("file://localhost%s", page);
+	load_path(view, localhost, expected);
+	g_assert_cmpstr(webkit_web_view_get_uri(native), ==, expected);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -477,6 +544,7 @@ main(int argc, char **argv)
 	g_setenv("XDG_DATA_HOME", state, TRUE);
 	g_setenv("GIO_USE_PROXY_RESOLVER", "dummy", TRUE);
 	g_test_init(&argc, &argv, NULL);
+	g_test_add_func("/protocol-webkit/local-file", test_local_file);
 	g_test_add_func("/protocol-webkit/gopher-plus-ask", test_gopher_plus_ask);
 	g_test_add_func("/protocol-webkit/menu", test_menu);
 	g_test_add_func("/protocol-webkit/search", test_search);

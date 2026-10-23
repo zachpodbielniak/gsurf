@@ -512,6 +512,10 @@ main(int argc, char *argv[])
 	context = g_option_context_new("[URI] - GObject Surf web browser");
 	g_option_context_set_description(context,
 		"Examples:\n  gsurf --kiosk https://example.org\n"
+		"  gsurf ./page.html\n"
+		"  gsurf /usr/share/doc/index.html\n"
+		"  gsurf ~/notes/index.html\n"
+		"  gsurf file:///tmp/page.html\n"
 		"  gsurf --pwa --pwa-name Mail https://mail.example.org\n"
 		"  sudo gsurf --pwa https://example.org");
 	g_option_context_add_main_entries(context, entries, NULL);

@@ -111,15 +111,26 @@ struct _GsurfViewClass
  * gsurf_view_normalize_uri:
  * @input: a URI or bare address as typed by the user
  *
- * Normalizes @input into a loadable URI by supplying a missing scheme: a bare
- * host like "duckduckgo.com", "localhost:8080" or "192.168.0.1" gains an
- * "https://" prefix.  Inputs that already carry a scheme ("https://…",
- * "about:blank", "file:///…", "data:…", "mailto:…", …) are returned unchanged,
- * as are things that don't look like a host (e.g. a search phrase with spaces).
- * Leading/trailing whitespace is trimmed.  Applied automatically by
- * gsurf_view_load_uri().
+ * Normalizes @input into a loadable URI.
  *
- * Returns: (transfer full): a newly-allocated normalized URI.
+ * A bare host such as "duckduckgo.com", "localhost:8080" or "192.168.0.1"
+ * gains an "https://" prefix. Filesystem locations become file URIs: absolute
+ * paths, "~/…" and "~user/…" paths, "./" and "../" paths, relative paths that
+ * contain a slash and do not look like a host, and any relative name that
+ * names an existing file or directory. "file:" URIs are canonicalized to the
+ * local "file:///…" form when they have no userinfo, port, or foreign host.
+ * Their query and fragment are kept. Percent-encoding, dot segments, and
+ * scheme case are normalized. A non-local file host is not remapped onto the
+ * local disk.
+ *
+ * Every other scheme ("https://…", "about:blank", "data:…", "mailto:…",
+ * "gopher://…", "gemini://…", "view-source:…", and so on) is returned with
+ * its original spelling. Search phrases stay unchanged. Leading and trailing
+ * whitespace is trimmed. %NULL stays %NULL. Applied automatically by
+ * gsurf_view_load_uri(), which is how the command line, the address bar, and
+ * embedders load a path.
+ *
+ * Returns: (transfer full) (nullable): a newly-allocated normalized URI.
  */
 gchar       *gsurf_view_normalize_uri(const gchar *input);
 void         gsurf_view_load_uri(GsurfView *self, const gchar *uri);

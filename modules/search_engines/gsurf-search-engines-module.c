@@ -34,23 +34,18 @@ G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfSearchEnginesModule, gsurf_search_engines_mod
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_URI_HANDLER,
 		gsurf_search_engines_uri_handler_init))
 
-/* Heuristic: does this look like a URL we should load verbatim? */
+/* TRUE when normalization produces a real URI, including https hosts,
+ * file paths, and schemes such as mailto:, magnet:, and about:. Those must
+ * not be sent to the default search engine. The same helper backs the
+ * address bar and the command line. */
 static gboolean
 looks_like_url(const gchar *s)
 {
-	/* Schemes need not contain :// (mailto:, magnet:, javascript:, etc.). */
-	if (g_uri_peek_scheme(s) != NULL)
-		return TRUE;
-	if (strpbrk(s, " \t\r\n\f\v") != NULL)
+	g_autofree gchar *normalized = gsurf_view_normalize_uri(s);
+
+	if (normalized == NULL)
 		return FALSE;
-	if (g_str_has_prefix(s, "localhost") &&
-	    (s[9] == '\0' || s[9] == '/' || s[9] == ':' ||
-	     s[9] == '?' || s[9] == '#'))
-		return TRUE;
-	/* No spaces and contains a dot -> probably a bare hostname. */
-	if (strchr(s, '.') != NULL)
-		return TRUE;
-	return FALSE;
+	return g_uri_peek_scheme(normalized) != NULL;
 }
 
 /* Replace the first "%s" in @template with the URL-escaped @query. */

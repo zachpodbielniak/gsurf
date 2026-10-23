@@ -87,8 +87,50 @@ as effective root. Reinstalling the same URI updates its launcher.
 Desktop launcher display name. Defaults to the site's hostname. Requires
 \-\-pwa. Launchers use the gsurf icon and ordinary browser storage; this does
 not install a web manifest, offline bundle, or separate profile.
+.SH ADDRESSES
+The positional argument and the address bar share one normalizer.
+A bare host such as
+.I example.com
+or
+.I localhost:8080
+gains an
+.B https://
+prefix. Absolute paths,
+.IR ./ ,
+.IR ../ ,
+.I ~/
+and
+.I ~user/
+paths, relative paths containing a slash that are not hosts, and the name of
+a file that exists in the working directory open as
+.B file://
+URIs.
+.BR file:///path ,
+.BR file://localhost/path ,
+.B file:/path
+and uppercase
+.B FILE:
+are accepted. Spaces and non-ASCII names are percent-encoded. A query or
+fragment on a file URI is kept. A file URI with a foreign host is not
+rewritten onto the local disk.
+.PP
+Other schemes are passed through with their original spelling, including
+.BR http ,
+.BR https ,
+.BR about ,
+.BR data ,
+.BR mailto ,
+.BR view-source ,
+.B gopher
+and
+.BR gemini .
+Text that is neither a URI nor a path is left for the search-engine module.
 .SH EXAMPLES
 .nf
+gsurf /usr/share/doc/index.html
+gsurf ./page.html
+gsurf ~/notes/index.html
+gsurf file:///tmp/page.html#section
 gsurf \-\-kiosk https://example.org
 gsurf \-\-pwa \-\-pwa\-name 'My Mail' https://mail.example.org
 sudo gsurf \-\-pwa https://dashboard.example.org
