@@ -6,6 +6,7 @@
  */
 
 #include "backend/webkit/gsurf-webkit-protocol.h"
+#include "backend/webkit/gsurf-webkit-content.h"
 
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk3/gsurf-webkit2-view.h"
@@ -484,50 +485,11 @@ gsurf_webkit2_view_add_user_style_full(GsurfView *view, const gchar *css,
 }
 
 /* --- content filter (sub-resource adblock) --- */
-typedef struct { WebKitWebView *webview; gchar *id; } FilterCtx;
-
-static void
-on_filter_saved(GObject *source, GAsyncResult *res, gpointer data)
-{
-	FilterCtx *ctx = data;
-	WebKitUserContentFilter *filter;
-	g_autoptr(GError) error = NULL;
-
-	filter = webkit_user_content_filter_store_save_finish(
-		WEBKIT_USER_CONTENT_FILTER_STORE(source), res, &error);
-	if (filter != NULL) {
-		webkit_user_content_manager_add_filter(
-			webkit_web_view_get_user_content_manager(ctx->webview), filter);
-		webkit_user_content_filter_unref(filter);
-	} else if (error != NULL) {
-		g_warning("gsurf: content filter '%s': %s", ctx->id, error->message);
-	}
-	g_free(ctx->id);
-	g_free(ctx);
-}
-
 static void
 gsurf_webkit2_view_add_content_filter(GsurfView *view, const gchar *identifier,
                                       const gchar *json_rules)
 {
-	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
-	g_autofree gchar *dir = g_build_filename(g_get_user_cache_dir(), "gsurf", "filters", NULL);
-	WebKitUserContentFilterStore *store;
-	GBytes *bytes;
-	FilterCtx *ctx;
-
-	g_mkdir_with_parents(dir, 0755);
-	store = webkit_user_content_filter_store_new(dir);
-	bytes = g_bytes_new(json_rules, strlen(json_rules));
-
-	ctx = g_new0(FilterCtx, 1);
-	ctx->webview = self->webview;
-	ctx->id = g_strdup(identifier);
-	webkit_user_content_filter_store_save(store, identifier, bytes, NULL,
-		on_filter_saved, ctx);
-
-	g_bytes_unref(bytes);
-	g_object_unref(store);
+	gsurf_webkit_content_add_filter(GSURF_WEBKIT2_VIEW(view)->webview, identifier, json_rules);
 }
 
 /* --- clipboard --- */
@@ -762,6 +724,9 @@ gsurf_webkit2_view_constructed(GObject *object)
 
 	G_OBJECT_CLASS(gsurf_webkit2_view_parent_class)->constructed(object);
 
+	/* Web-process extensions must be wired before the context launches
+	 * its first web process. */
+	gsurf_webkit_content_attach_context(webkit_web_context_get_default());
 	widget = webkit_web_view_new();
 	gsurf_webkit_protocol_attach(WEBKIT_WEB_VIEW(widget));
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));

@@ -14,6 +14,7 @@
 
 #include "util/gsurf-kiosk.h"
 #include "backend/webkit/gsurf-webkit-protocol.h"
+#include "backend/webkit/gsurf-webkit-content.h"
 #include "backend/lrg/gsurf-lrg-view.h"
 #include "backend/lrg/gsurf-lrg-engine.h"
 #include "module/gsurf-module-manager.h"
@@ -606,50 +607,11 @@ lrg_view_add_user_style_full(GsurfView *view, const gchar *css,
 	webkit_user_style_sheet_unref(sheet);
 }
 
-typedef struct { WebKitWebView *webview; gchar *id; } FilterCtx;
-
-static void
-on_filter_saved(GObject *source, GAsyncResult *res, gpointer data)
-{
-	FilterCtx *ctx = data;
-	WebKitUserContentFilter *filter;
-	g_autoptr(GError) error = NULL;
-
-	filter = webkit_user_content_filter_store_save_finish(
-		WEBKIT_USER_CONTENT_FILTER_STORE(source), res, &error);
-	if (filter != NULL) {
-		webkit_user_content_manager_add_filter(
-			webkit_web_view_get_user_content_manager(ctx->webview), filter);
-		webkit_user_content_filter_unref(filter);
-	} else if (error != NULL) {
-		g_warning("gsurf: content filter '%s': %s", ctx->id, error->message);
-	}
-	g_free(ctx->id);
-	g_free(ctx);
-}
-
 static void
 lrg_view_add_content_filter(GsurfView *view, const gchar *identifier,
                             const gchar *json_rules)
 {
-	GsurfLrgView *self = GSURF_LRG_VIEW(view);
-	g_autofree gchar *dir = g_build_filename(g_get_user_cache_dir(), "gsurf", "filters", NULL);
-	WebKitUserContentFilterStore *store;
-	GBytes *bytes;
-	FilterCtx *ctx;
-
-	g_mkdir_with_parents(dir, 0755);
-	store = webkit_user_content_filter_store_new(dir);
-	bytes = g_bytes_new(json_rules, strlen(json_rules));
-
-	ctx = g_new0(FilterCtx, 1);
-	ctx->webview = self->webview;
-	ctx->id = g_strdup(identifier);
-	webkit_user_content_filter_store_save(store, identifier, bytes, NULL,
-		on_filter_saved, ctx);
-
-	g_bytes_unref(bytes);
-	g_object_unref(store);
+	gsurf_webkit_content_add_filter(GSURF_LRG_VIEW(view)->webview, identifier, json_rules);
 }
 
 static void

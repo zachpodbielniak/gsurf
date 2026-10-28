@@ -44,6 +44,7 @@
 #include "core/gsurf-download.h"
 #include "core/gsurf-find-controller.h"
 #include "core/gsurf-permission-request.h"
+#include "core/gsurf-web-process.h"
 
 /* Window */
 #include "window/gsurf-window.h"
