@@ -59,11 +59,22 @@ from the directory). Add an =enabled:= block under =modules:= in
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
 | =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed= | navigation lifecycle (history, homepage) | =before=: veto    |
 
-More interfaces (request-filter for adblock, download-handler, status-provider,
+More interfaces (request-filter, download-handler, status-provider,
 script-injector, permission-handler, cert-handler, context-menu-provider,
 render-overlay, setting-provider, keybind-provider) follow the same
 =G_DECLARE_INTERFACE= + manager-dispatch pattern and are added as their modules
 are implemented.
+
+** Web-process extensions
+
+Some work has to happen inside the engine's web process, next to the page (rewriting a sub-resource request, running script before the page's own). A module ships such a shared object next to its =.so= and registers it from =configure()=, before the first view exists:
+
+#+begin_src c
+gsurf_web_process_extension_register("adblock", "/path/to/adblock-webext/gsurf-adblock-webext.so",
+	init_data);   /* any GVariant; delivered under the "adblock" key */
+#+end_src
+
+The WebKit backends hand every registered extension, and an =a{sv}= of each one's data, to each web process they launch. The registry itself (=src/core/gsurf-web-process.h=) is backend-agnostic. =modules/adblock/webext/= is the reference.
 
 A module that owns keys should implement =GsurfKeybindProvider::list_keybinds=
 and append =GsurfKeybindHelp= rows with its *current* configured keys. The =?=

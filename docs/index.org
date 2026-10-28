@@ -20,6 +20,7 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:architecture.org][Architecture]] — the object model and event flow.
 - [[file:module-system.org][Module system]] — writing modules and the hook interfaces.
 - [[file:modules.org][Modules]] — the module catalog (surf-patch lineage).
+- [[file:adblock.org][Content blocking]] — uBlock Origin / EasyList filter lists in the adblock module.
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
 - [[file:embedding.org][Embedding]] — using libgsurf in another application.
 

@@ -229,6 +229,12 @@ install-modules:
 	@for mod in $(OUTDIR)/modules/*.so; do \
 		if [ -f "$$mod" ]; then $(INSTALL_DATA) "$$mod" $(DESTDIR)$(MODULEDIR)/; fi \
 	done
+	@# The adblock web-process extension must sit next to adblock.so.
+	@if [ -f $(OUTDIR)/modules/adblock-webext/gsurf-adblock-webext.so ]; then \
+		$(MKDIR_P) $(DESTDIR)$(MODULEDIR)/adblock-webext; \
+		$(INSTALL_DATA) $(OUTDIR)/modules/adblock-webext/gsurf-adblock-webext.so \
+			$(DESTDIR)$(MODULEDIR)/adblock-webext/; \
+	fi
 
 install-gsurf-mcp: gsurf-mcp
 	$(MKDIR_P) $(DESTDIR)$(BINDIR)

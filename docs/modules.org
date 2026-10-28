@@ -18,7 +18,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =toggles=        | toggle keybinds      | =GsurfInputHandler=              | implemented |
 | =tabs=           | tabbed(1)            | =GsurfInputHandler=              | implemented |
 | =chromebar=      | (address bar)        | =GsurfInputHandler= + window chrome | implemented |
-| =adblock=        | (new; high value)    | =GsurfNavigationHook=            | implemented |
+| =adblock=        | (new; high value)    | =GsurfNavigationHook= + =GsurfScriptInjector= + =GsurfRequestFilter= | implemented (uBO/ABP lists; see [[file:adblock.org][adblock.org]]) |
 | =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |
 | =find_bar=       | WebKit find          | =GsurfInputHandler=             | implemented |
 

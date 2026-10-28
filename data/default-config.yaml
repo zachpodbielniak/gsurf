@@ -180,21 +180,33 @@ modules:
 
   adblock:
     enabled: false
-    default_action: allow          # allow or block
+    # uBlock Origin / Adblock Plus filter lists, parsed natively: network
+    # rules, element hiding, procedural cosmetics, scriptlets, $redirect and
+    # $removeparam. Fetch EasyList + uBO's lists (with their !#includes):
+    #   make adblock-lists      # -> ~/.config/gsurf/adblock/*.txt
+    # Lists marked trusted may use trusted-* scriptlets (uBO's own lists).
+    filter_lists:
+      - "~/.config/gsurf/adblock/easylist.txt"
+      - "~/.config/gsurf/adblock/easyprivacy.txt"
+      - { path: "~/.config/gsurf/adblock/ublock-filters.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-privacy.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-badware.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-quick-fixes.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-unbreak.txt", trusted: true }
+    # Your own filters, same syntax ("My filters"; always trusted).
+    filters: |
+      ! example.com##.cookie-banner
+    cosmetic: true                 # element hiding + procedural cosmetics
+    scriptlets: true               # ##+js(...) injections
+    redirects: true                # $redirect / $removeparam
     # Hosts-format lists (one host per line, or "0.0.0.0 host"): domain-level
-    # blocking. host_files and block_lists are parsed identically.
+    # blocking, including top-level navigations. Parsed identically.
     host_files:
       - "~/.config/gsurf/adblock/hosts"
     block_lists: []
-    # Pre-converted WebKit content-blocker JSON: per-path, resource-type, and
-    # element-hiding rules — this is where EasyList / uBlock Origin lists go.
-    # Generate them from those lists with `make adblock-lists` (or abp2blocklist):
-    #   make adblock-lists      # -> ~/.config/gsurf/adblock/{easylist,easyprivacy}.json
-    content_filters:
-      - "~/.config/gsurf/adblock/easylist.json"
-      - "~/.config/gsurf/adblock/easyprivacy.json"
-    block_third_party: false
-    update_interval_hours: 24
+    # Pre-converted WebKit content-blocker JSON (rarely needed now).
+    content_filters: []
+    # Sites (and their subdomains) where nothing is filtered.
     whitelist: []
 
   cookie_policy:

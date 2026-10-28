@@ -144,7 +144,10 @@ and `GTlsCertificate` instead.
 4. `make` (modules are auto-discovered) and add a test under `tests/`.
 
 `modules/search_engines/` is the reference implementation; `modules/mcp/` shows a
-module that runs its own server lifecycle on `activate()`.
+module that runs its own server lifecycle on `activate()`; `modules/adblock/`
+shows a module that also ships a WebKit web-process extension (built into
+`modules/adblock-webext/`, registered via `gsurf_web_process_extension_register()`)
+and embeds JS assets — see `docs/adblock.org`.
 
 ## Conventions
 
@@ -170,6 +173,11 @@ regression and bad-source handling; skips with no compiler), `test-manager`
 (loading, search paths, enabled gating, priority, input passthrough, default
 verdicts for every hook — including the request-filter/status/context-menu/
 render-overlay ones — and dispatch through the real module .so files),
+`test-adblock` (uBO/ABP filter compiler: ruleset precedence, cosmetic
+exceptions, redirect/removeparam via the request filter, scriptlet and
+procedural tables for the web-process extension, trusted-list gating, the
+web-process extension registry), `test-adblock-webkit` (`make test-gui`: every
+adblock layer enforced in a real WebKit view),
 `test-modules` (search-engines, history, adblock host blocking + whitelist +
 edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
 value types: new/copy/free, getters, setters, deep-copy independence),

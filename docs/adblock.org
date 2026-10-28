@@ -1,0 +1,140 @@
+#+title: Content blocking (adblock module)
+#+description: uBlock Origin / Adblock Plus filter lists in gsurf
+#+author: Zach Podbielniak
+
+* Overview
+
+The =adblock= module reads uBlock Origin and Adblock Plus filter lists (EasyList, EasyPrivacy, uBO's own lists, your hand-written filters) directly, in their native text syntax, and enforces them inside WebKit. It is not a port of the uBO extension: WebKitGTK has no WebExtensions runtime. Instead the module compiles each kind of filter for the part of the engine that can enforce it best:
+
+| Filter kind                                   | Example                                   | Enforced by                                |
+|-----------------------------------------------+-------------------------------------------+--------------------------------------------|
+| Network block / exception                     | =\vert{}\vert{}ads.example^$script,3p=, =@@...=         | WebKit content blocker (native, compiled)  |
+| Element hiding                                | =##.ad=, =example.com##.banner=           | WebKit content blocker (=css-display-none=) |
+| Procedural cosmetics, =:style()=, =:remove()= | =example.com##.post:has-text(Sponsored)=  | web-process extension, isolated JS world   |
+| Scriptlets                                    | =example.com##+js(set, ads.on, false)=    | web-process extension, page's main world   |
+| Redirects                                     | =\vert{}\vert{}cdn.example/gpt.js$script,redirect=noop.js= | web-process extension (=send-request=)     |
+| Parameter stripping                           | =$removeparam=utm_source=                 | web-process extension (=send-request=)     |
+| Hosts files                                   | =0.0.0.0 ads.example=                     | navigation hook + content blocker          |
+
+Everything the module does stays inside =modules/adblock/=. The only core additions are generic: a web-process extension registry (=src/core/gsurf-web-process.h=) and a per-process content-rule cache in the WebKit backends.
+
+* Quick start
+
+#+begin_src sh
+make adblock-lists            # EasyList, EasyPrivacy + uBO's lists -> ~/.config/gsurf/adblock/
+#+end_src
+
+Then enable the module. The default config already lists those files:
+
+#+begin_src yaml
+modules:
+  adblock:
+    enabled: true
+    filter_lists:
+      - "~/.config/gsurf/adblock/easylist.txt"
+      - "~/.config/gsurf/adblock/easyprivacy.txt"
+      - { path: "~/.config/gsurf/adblock/ublock-filters.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-privacy.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-badware.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-quick-fixes.txt", trusted: true }
+      - { path: "~/.config/gsurf/adblock/ublock-unbreak.txt", trusted: true }
+    filters: |
+      example.com##.cookie-banner
+#+end_src
+
+Refresh lists by re-running =make adblock-lists= (or =modules/adblock/fetch-lists.sh= directly); the next gsurf launch recompiles only rulesets whose content changed.
+
+* Configuration
+
+| Key                     | Default | Meaning                                                                                         |
+|-------------------------+---------+-------------------------------------------------------------------------------------------------|
+| =filter_lists=          | =[]=    | uBO/ABP list files: a path, or ={ path: ..., trusted: true }=                                    |
+| =filters=               | (none)  | Inline filters in the same syntax ("My filters"); always trusted                               |
+| =cosmetic=              | =true=  | Element hiding and procedural cosmetics                                                         |
+| =scriptlets=            | =true=  | =##+js(...)= injections                                                                         |
+| =redirects=             | =true=  | =$redirect= / =$redirect-rule= / =$removeparam= (off: redirects become plain blocks)            |
+| =whitelist=             | =[]=    | Sites (and subdomains) where nothing is filtered by any layer                                   |
+| =host_files=, =block_lists= | =[]= | Hosts-format lists; also veto top-level navigation to those hosts                               |
+| =content_filters=       | =[]=    | Pre-built WebKit content-blocker JSON files, applied verbatim                                   |
+| =web_process_extension= | (auto)  | Path to =gsurf-adblock-webext.so=; by default found in =adblock-webext/= next to =adblock.so=  |
+
+** Trusted lists
+
+uBO only lets its own lists use =trusted-*= scriptlets (arbitrary values, node-text replacement, ...). gsurf follows the same rule: a list may use them only when its =filter_lists:= entry says =trusted: true=. Inline =filters:= are yours, so they are trusted. Untrusted lists still get every ordinary scriptlet.
+
+* Supported syntax
+
+** Network filters
+- Patterns: =||host^=, =|https://=, =*=, =^= separator, end anchor =|=, =/regex/= (translated to WebKit's regex subset when possible; =\d= and =\w= are rewritten, alternation and counted repetition are not expressible).
+- Bare hostnames and hosts-file lines inside filter lists are =||host^= filters, as in uBO.
+- Types: =script=, =image=, =stylesheet=/=css=, =font=, =media=, =xmlhttprequest=/=xhr=, =subdocument=/=frame=, =document=/=doc=, =websocket=, =ping=/=beacon=, =other=, =popup=, =object=, =all=, and their =~= negations.
+- Options: =third-party=/=3p=, =first-party=/=1p= (and =strict*=), =domain==/=from== (including =~= exclusions and =example.*= entities), =to== on an empty pattern, =match-case=, =important=, =badfilter=, =redirect==, =redirect-rule==, =empty=, =mp4=, =removeparam==/=queryprune==.
+- Exceptions: =@@= filters; =@@...$document= disables everything on a site; =$generichide=, =$specifichide=, =$elemhide= turn off cosmetic filtering on a site.
+- A filter without a type option blocks sub-resources and frames but not the top-level page, unless it is a pure =||host^= filter (uBO's "strict blocking").
+- Precedence matches uBO: exceptions beat blocks, =$important= beats exceptions, and site allowances (=whitelist:=, =$document=) beat everything.
+
+** Cosmetic filters
+- =##selector=, =domain##selector=, =~domain= exclusions, =example.*= entities, =#@#= exceptions (generic or per site), =:-abp-has()= (native =:has()=).
+- Procedural operators: =:has-text()=, =:-abp-contains()=, =:upward()=, =:nth-ancestor()=, =:xpath()=, =:matches-css()= (and =-before=/=-after=), =:min-text-length()=, =:matches-attr()=, =:matches-path()=, =:matches-media()=, =:if()=, =:if-not()=, and =:has()=/=:not()= wrapping procedural selectors.
+- Actions: =:style(declarations)= (no =url()=), =:remove()=, =:remove-attr()=, =:remove-class()=.
+- AdGuard =#$#selector { style }= becomes =:style()=; ABP =#$#= snippets map onto the scriptlets with the same behaviour.
+- As in uBO, procedural filters must name a site; generic ones are refused.
+
+** Scriptlets
+Independent implementations (=modules/adblock/js/scriptlets.js=) of the behaviour behind uBO's scriptlet names, so its lists work unchanged:
+
+=set-constant= (=set=), =abort-on-property-read= (=aopr=), =abort-on-property-write= (=aopw=), =abort-current-script= (=acs=, =acis=), =abort-on-stack-trace= (=aost=), =no-setTimeout-if= (=nostif=), =no-setInterval-if= (=nosiif=), =adjust-setTimeout= (=nano-stb=), =adjust-setInterval= (=nano-sib=), =no-requestAnimationFrame-if= (=norafif=), =addEventListener-defuser= (=aeld=), =no-fetch-if=, =no-xhr-if=, =json-prune=, =json-prune-fetch-response=, =window.open-defuser= (=nowoif=), =noeval=, =noeval-if=, =nowebrtc=, =remove-attr= (=ra=), =remove-class= (=rc=), =set-attr=, =remove-node-text= (=rmnt=), =set-local-storage-item=, =set-session-storage-item=, =set-cookie=, =remove-cookie=, =refresh-defuser=, =href-sanitizer=, =nobab=/=nofab=, =noop=; trusted only: =trusted-set-constant= (=trusted-set=), =trusted-replace-node-text= (=rpnt=), =trusted-set-cookie=, =trusted-set-local-storage-item=.
+
+Unknown scriptlet names are skipped and counted.
+
+** Redirect resources
+Neutered stand-ins served as =data:= URIs: =noop.js=, =noop.txt=/=empty=, =noop.css=, =noop.html=, =noop.json=, =1x1.gif=, =2x2.png=, =3x2.png=, =32x32.png=, silent audio/video placeholders, empty VAST/VMAP documents, and API-compatible surrogates for Google Publisher Tag, Google Analytics, Google Tag Manager, AdSense, Amazon apstag, comScore and (Fuck|Block)AdBlock. Unknown =.js= resources fall back to =noop.js=; any other unknown resource blocks the request.
+
+** List preprocessor
+=!#if= / =!#else= / =!#endif= with =!=, =&&=, =||= and parentheses (=ext_ublock=, =cap_user_stylesheet= and =true= hold; browser-specific =env_*= tokens do not), and =!#include= of files next to the including list.
+
+* Not supported
+
+These are skipped and counted as "unsupported" in the startup log line rather than approximated:
+- HTML filtering (=##^...=, =$$=), response-header filtering, =$csp=, =$header=, =$permissions=, =$replace=, =$urltransform=, =$urlskip=, =$method=, =$denyallow=, =$ipaddress=, =$cname=, regex =domain==.
+- =/regex/= network filters using alternation, counted repetition, lookaround or backreferences (outside =$redirect=/=$removeparam=, which use full PCRE).
+- Procedural =:others()=, =:shadow()=, =:matches-prop()=.
+- AdGuard JavaScript rules (=#%#=).
+- uBO's dynamic filtering matrix, element picker and request logger (no UI yet).
+
+With EasyList, EasyPrivacy and uBO's default lists (about 190k lines) roughly 1% of filters land here.
+
+* How it works
+
+** Startup
+1. =configure()= parses every list (about 150 ms for the default set) and compiles three content-blocker rulesets: =gsurf-adblock-net=, =gsurf-adblock-cosmetic-generic=, =gsurf-adblock-cosmetic-specific=. Cosmetic exceptions and =$generichide=-style site switches are applied at compile time; =ignore-previous-rules= gives uBO's precedence inside each ruleset.
+2. It locates =adblock-webext/gsurf-adblock-webext.so= next to itself and registers it with =gsurf_web_process_extension_register()=, passing the redirect/removeparam rules and the per-page scriptlet and cosmetic tables as one =GVariant=.
+3. Each view gets the rulesets through the =GsurfScriptInjector= hook. The WebKit backends compile a ruleset once per process (the default lists take WebKit about 5 s the first time) and keep it in =$XDG_CACHE_HOME/gsurf/filters/= keyed by a checksum, so later launches load it from disk and recompile only rulesets whose content changed. Pages that load before the first compilation finishes are not yet filtered.
+
+** In each web process
+- =send-request=: a token-indexed matcher (one literal token per rule, as uBO does) applies =$redirect= (a =data:= stand-in), or =$removeparam= (the URL minus the matching parameters). The request type is inferred from the URL's extension because WebKit does not report it; typed redirect rules never fire on requests of unknown type.
+- =window-object-cleared= (before any page script runs, per frame): the scriptlets whose domains match the frame's host are wrapped in a single closure with their helpers and evaluated in the page's main world; the matching procedural filters are handed to the cosmetic engine (=js/cosmetic.js=) in an isolated script world, which re-applies them as the DOM changes.
+
+** The request-filter hook
+The module also implements =GsurfRequestFilter= with the same matcher, so a host (or a test) can ask "what would happen to this request on this page" without a web process.
+
+* Files
+
+| Path                                           | Role                                                     |
+|------------------------------------------------+----------------------------------------------------------|
+| =modules/adblock/gsurf-adblock-module.c=       | module glue: config, hooks, extension registration       |
+| =modules/adblock/gsurf-adblock-filters.[ch]=   | list parser and compiler                                 |
+| =modules/adblock/gsurf-adblock-match.[ch]=     | request matcher and redirect resources (shared)          |
+| =modules/adblock/webext/gsurf-adblock-webext.c= | web-process extension                                   |
+| =modules/adblock/js/scriptlets.js=             | scriptlet library (embedded into =adblock.so=)           |
+| =modules/adblock/js/cosmetic.js=               | procedural cosmetic engine (embedded into =adblock.so=)  |
+| =modules/adblock/fetch-lists.sh=               | list downloader behind =make adblock-lists=              |
+| =src/core/gsurf-web-process.[ch]=              | web-process extension registry (generic, core)           |
+| =src/backend/webkit/gsurf-webkit-content.[ch]= | ruleset cache + extension wiring for WebKit backends     |
+
+=make install= puts the extension at =$(MODULEDIR)/adblock-webext/=; it must stay next to =adblock.so=. Without it, network and element-hiding filters still work, redirects degrade to blocks, and scriptlets, procedural cosmetics and =$removeparam= are disabled (the startup log says so).
+
+* Tests
+
+- =tests/test-adblock.c= (=make test=): ruleset generation and precedence, cosmetic exceptions, redirect/removeparam decisions, scriptlet and cosmetic tables for the extension, trusted-list gating, and the core registry.
+- =tests/test-adblock-webkit.c= (=make test-gui=): a real WebKit view loads a page from a loopback server and every layer is checked: network block, =$redirect= (the server never sees the request), =$removeparam=, generic and specific hiding, =:has-text()=, and a =set= scriptlet.

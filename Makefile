@@ -185,6 +185,8 @@ modules: lib $(OUTDIR)/modules
 				LDFLAGS="$(MODULE_LDFLAGS)" \
 				MCP_CFLAGS="$(MCP_CFLAGS)" \
 				MCP_LDFLAGS="$(MCP_LDFLAGS)" \
+				GTK_BACKEND=$(GTK_BACKEND) \
+				PKG_CONFIG="$(PKG_CONFIG)" \
 				$(STATIC_MODULE_FLAGS); \
 		fi \
 	done
@@ -219,7 +221,7 @@ tests: test
 # browser under Xvfb on about:blank and confirm it stays alive briefly.
 # Gated on xvfb-run being available so `make test` stays pure-headless.
 .PHONY: test-gui
-test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit
+test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	echo "Running native settings regression tests..."; \
@@ -228,6 +230,9 @@ test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-
 	echo "Running native protocol regression tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-protocol-webkit || exit $$?; \
+	echo "Running adblock WebKit enforcement tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-adblock-webkit || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \
@@ -261,43 +266,18 @@ appimage: all
 		echo "Install appimagetool and re-run, or: APPIMAGETOOL=/path/to/appimagetool make appimage"; \
 	fi
 
-# Fetch EasyList-style filter lists and convert them to WebKit content-blocker
-# JSON for the adblock module's `content_filters:`. Requires curl and an
-# Adblock-Plus -> WebKit converter (abp2blocklist) that reads filter text on
-# stdin and writes JSON on stdout. Override:
-#   ADBLOCK_DIR=...     output dir (default ~/.config/gsurf/adblock)
-#   ABP2BLOCKLIST=...   converter command (default: abp2blocklist, else `npx --yes abp2blocklist`)
-#   ADBLOCK_LISTS="name=url ..."   lists to fetch (default EasyList + EasyPrivacy)
+# Fetch uBlock Origin / EasyList filter lists (plus their !#include files)
+# for the adblock module's `filter_lists:`. The module parses the lists
+# natively, so this is only a download. Override:
+#   ADBLOCK_DIR=...                 output dir (default ~/.config/gsurf/adblock)
+#   ADBLOCK_LISTS="name=url ..."    lists to fetch (default EasyList,
+#                                   EasyPrivacy and uBO's own lists)
 ADBLOCK_DIR ?= $(HOME)/.config/gsurf/adblock
-ABP2BLOCKLIST ?=
-ADBLOCK_LISTS ?= easylist=https://easylist.to/easylist/easylist.txt easyprivacy=https://easylist.to/easylist/easyprivacy.txt
+ADBLOCK_LISTS ?=
 
 .PHONY: adblock-lists
 adblock-lists:
-	@command -v curl >/dev/null 2>&1 || { echo "adblock-lists: curl is required"; exit 1; }
-	@conv="$(ABP2BLOCKLIST)"; \
-	if [ -z "$$conv" ]; then \
-		if command -v abp2blocklist >/dev/null 2>&1; then conv="abp2blocklist"; \
-		elif command -v npx >/dev/null 2>&1; then conv="npx --yes abp2blocklist"; \
-		else echo "adblock-lists: no converter found. Install one (npm i -g abp2blocklist)"; \
-		     echo "  or set ABP2BLOCKLIST to a command reading filters on stdin, JSON on stdout."; exit 1; fi; \
-	fi; \
-	echo "Converter: $$conv"; \
-	mkdir -p "$(ADBLOCK_DIR)"; \
-	for spec in $(ADBLOCK_LISTS); do \
-		name="$${spec%%=*}"; url="$${spec#*=}"; \
-		echo "=== $$name <- $$url ==="; \
-		tmp="$$(mktemp)"; \
-		if ! curl -fsSL "$$url" -o "$$tmp"; then echo "  download failed; skipping"; rm -f "$$tmp"; continue; fi; \
-		if ! $$conv < "$$tmp" > "$(ADBLOCK_DIR)/$$name.json"; then \
-			echo "  conversion failed (converter: $$conv)"; rm -f "$$tmp" "$(ADBLOCK_DIR)/$$name.json"; exit 1; fi; \
-		rm -f "$$tmp"; \
-		echo "  wrote $(ADBLOCK_DIR)/$$name.json"; \
-	done; \
-	echo ""; \
-	echo "Add under modules.adblock in your config:"; \
-	echo "  content_filters:"; \
-	for spec in $(ADBLOCK_LISTS); do name="$${spec%%=*}"; echo "    - \"$(ADBLOCK_DIR)/$$name.json\""; done
+	@modules/adblock/fetch-lists.sh -d "$(ADBLOCK_DIR)" $(ADBLOCK_LISTS)
 
 # Check dependencies
 check-deps:
@@ -343,7 +323,7 @@ help:
 	@echo "  check-deps       - Check for required dependencies"
 	@echo "  show-config      - Show current build configuration"
 	@echo "  appimage         - Build a self-contained AppImage"
-	@echo "  adblock-lists    - Fetch + convert EasyList/uBO lists to WebKit"
+	@echo "  adblock-lists    - Fetch EasyList + uBlock Origin filter lists"
 	@echo "                     JSON for the adblock content_filters: option"
 	@echo "  help             - Show this help message"
 
