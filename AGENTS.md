@@ -154,6 +154,54 @@ and embeds JS assets — see `docs/adblock.org`.
 - C: `-std=gnu11`, tabs, GLib style, AGPL-3.0 SPDX headers, `gsurf_`/`Gsurf` prefixes.
 - Keep core backend-agnostic; put GTK/WebKit only under `src/backend/<backend>/`.
 - clangd false-positives ("glib.h not found") clear after `make compile-commands`.
+- Feature and fix work happens in a worktree (`git worktree add trees/<name> -b <branch>
+  master`), not in the main checkout. Commits follow Conventional Commits (`feat(scope): ...`,
+  `fix`, `docs`, `test`, `refactor`, `chore`, ...). Do not push unless asked, except that a
+  version bump is always pushed with its tag (see Versioning).
+
+## Versioning
+
+The version lives in `config.mk` (`VERSION_MAJOR`, `VERSION_MINOR`, `VERSION_MICRO`); the
+generated `src/gsurf-version.h`, the shared library file name and the man page header
+(`data/gsurf.1`, update it in the same commit) follow it. Every release on master carries an
+annotated tag `v<MAJOR>.<MINOR>.<MICRO>` (e.g. `v0.2.1`) on a commit whose `config.mk` sets
+that version. (`latest` is CI's rolling AppImage tag; never use it for a release.)
+
+- **Micro** (+1): every change landing on master that changes what is built: bug fixes,
+  small features, new module options, polish (`fix`, `perf`, small `feat`, `refactor`).
+  Changes that touch only docs, tests or tooling (`docs`, `test`, `ci`, `chore`) do not bump;
+  they ride with the next release.
+- **Minor** (+1, micro back to 0): a major feature (a new backend, a new subsystem, a large
+  module) or anything that breaks compatibility: config keys, the C-config API, module hook
+  interfaces, public/GIR API. Note `GIR_VERSION` is `MAJOR.MINOR`, so a minor bump renames
+  the `Gsurf-<MAJOR>.<MINOR>.gir`/`.typelib` namespace.
+- **Major**: never bumped without asking the user first (it changes the
+  `libgsurf.so.<MAJOR>` SONAME).
+
+One bump per landing, the highest kind it contains: a merge that brings in several changes
+bumps once.
+
+- **Every landing is released at once.** A landing that changes the build bumps, is tagged
+  and pushed immediately; nothing that changes the build waits on master untagged.
+- **Merging a branch** (the usual case): bump in the merge commit itself, so the tag marks
+  the merge and the branch never carries a version:
+
+  ```sh
+  git merge --no-ff --no-commit feat/x     # resolve conflicts if any
+  $EDITOR config.mk data/gsurf.1           # bump VERSION_MINOR or VERSION_MICRO
+  make clean all && make test              # plus make test-gui for view/WebKit changes
+  git commit                               # merge message names the new version
+  git tag -a v0.3.0 -m 'v0.3.0'
+  git push origin master v0.3.0
+  ```
+
+  Fast-forward merges have no commit to hold the bump; use `--no-ff`. A merge that lands only
+  docs/tests may fast-forward and is not tagged.
+- **Working directly on master**: bump `config.mk` in the change's own commit (or, for a run
+  of commits, in the last one), then tag that commit and push it with the tag.
+- Tag only a commit whose `config.mk` matches the tag, after its build and tests pass with
+  zero warnings; never move or delete a pushed tag; a broken release is fixed by the next
+  micro.
 
 ## Tests / running
 
