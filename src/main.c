@@ -704,6 +704,11 @@ main(int argc, char *argv[])
 	/* Activate modules now that the app/window/view exist. */
 	gsurf_module_manager_activate_all(mgr);
 
+	/* The initial view was constructed before any module was active, so
+	 * its script-injector hooks (content filters, user scripts, styles)
+	 * have not run yet; views created from here on get them on creation. */
+	gsurf_module_manager_dispatch_inject_scripts(mgr, view, NULL);
+
 	/* A module (session restore) may have already populated the views and
 	 * flagged startup as handled; otherwise load the CLI URI or homepage. */
 	if (argc > 1) {
