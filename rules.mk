@@ -126,7 +126,7 @@ $(OUTDIR)/gsurf.pc: gsurf.pc.in | $(OUTDIR)
 		$< > $@
 
 # Version header generation
-src/gsurf-version.h: src/gsurf-version.h.in
+src/gsurf-version.h: src/gsurf-version.h.in config.mk
 	sed \
 		-e 's|@GSURF_VERSION_MAJOR@|$(VERSION_MAJOR)|g' \
 		-e 's|@GSURF_VERSION_MINOR@|$(VERSION_MINOR)|g' \
