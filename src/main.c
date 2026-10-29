@@ -596,18 +596,19 @@ main(int argc, char *argv[])
 
 #if defined(__FreeBSD__)
 	/*
-	 * FreeBSD: GTK3's AT-SPI bridge crashes any process holding a
-	 * WebKitWebView (webkit2-gtk_41 2.46, gtk3 3.24.52, at-spi2-core
-	 * 2.60): once a session bus is reachable, GTK calls through a garbage
-	 * function pointer as soon as the view's window is shown or a widget
-	 * is added to it. A 40-line GTK program with only a web view crashes
-	 * the same way, so this is not gsurf's. Keep the bridge out of this
-	 * process unless the user asked for it (GSURF_AT_BRIDGE=1) or set
-	 * NO_AT_BRIDGE themselves; everything else on the desktop keeps
-	 * accessibility. Must run before any GTK initialisation.
+	 * FreeBSD: with GIO's GVfs client module (gvfs 1.58, libgvfsdbus.so)
+	 * active, a process holding a WebKitWebView (webkit2-gtk_41 2.46,
+	 * glib 2.88) has GTK's own type data overwritten early on: GtkBox's
+	 * type name and property specs turn to garbage, widgets come out
+	 * NULL (a blank window and a stream of GTK criticals), and with the
+	 * AT-SPI bridge loaded the process crashes. A 40-line GTK program
+	 * with only a web view crashes the same way; GIO's local VFS makes
+	 * both clean. gsurf needs no GVfs mounts (sftp://, smb://, trash),
+	 * so it uses the local VFS unless GIO_USE_VFS is already set or
+	 * GSURF_GVFS=1 asks for GVfs. Must run before anything touches GIO.
 	 */
-	if (g_strcmp0(g_getenv("GSURF_AT_BRIDGE"), "1") != 0)
-		g_setenv("NO_AT_BRIDGE", "1", FALSE);
+	if (g_strcmp0(g_getenv("GSURF_GVFS"), "1") != 0)
+		g_setenv("GIO_USE_VFS", "local", FALSE);
 #endif
 
 	gsurf_init(&argc, &argv);
