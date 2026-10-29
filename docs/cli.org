@@ -47,6 +47,9 @@ gsurf about:blank
 | =GSURF_CONFIG_C=     | Path to a C config file                            |
 | =XDG_CONFIG_HOME=    | Base for =gsurf/config.yaml= and =config.c=        |
 | =XDG_RUNTIME_DIR=    | Where the MCP module's Unix socket is created      |
+| =GSURF_AT_BRIDGE=    | FreeBSD only: =1= keeps GTK's AT-SPI bridge loaded |
+
+On FreeBSD gsurf sets =NO_AT_BRIDGE=1= for itself before GTK starts (unless =NO_AT_BRIDGE= is already set or =GSURF_AT_BRIDGE=1=): with the AT-SPI bridge active, the FreeBSD packages of WebKitGTK 4.1 (2.46), GTK 3.24.52 and at-spi2-core 2.60 crash any process that shows a =WebKitWebView= -- a minimal GTK program with only a web view does too. Other applications keep accessibility; screen readers do not see gsurf until that is fixed.
 
 * Kiosk and PWA launchers
 

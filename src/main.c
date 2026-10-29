@@ -594,6 +594,22 @@ main(int argc, char *argv[])
 		return EXIT_SUCCESS;
 	}
 
+#if defined(__FreeBSD__)
+	/*
+	 * FreeBSD: GTK3's AT-SPI bridge crashes any process holding a
+	 * WebKitWebView (webkit2-gtk_41 2.46, gtk3 3.24.52, at-spi2-core
+	 * 2.60): once a session bus is reachable, GTK calls through a garbage
+	 * function pointer as soon as the view's window is shown or a widget
+	 * is added to it. A 40-line GTK program with only a web view crashes
+	 * the same way, so this is not gsurf's. Keep the bridge out of this
+	 * process unless the user asked for it (GSURF_AT_BRIDGE=1) or set
+	 * NO_AT_BRIDGE themselves; everything else on the desktop keeps
+	 * accessibility. Must run before any GTK initialisation.
+	 */
+	if (g_strcmp0(g_getenv("GSURF_AT_BRIDGE"), "1") != 0)
+		g_setenv("NO_AT_BRIDGE", "1", FALSE);
+#endif
+
 	gsurf_init(&argc, &argv);
 
 	/* Select the libregnum backend before backend_init so the right backend
