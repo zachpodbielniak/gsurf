@@ -56,6 +56,7 @@ from the directory). Add an =enabled:= block under =modules:= in
 |------------------------+-------------------------------------------+-----------------------------------------------+-------------------|
 | =GsurfInputHandler=    | =handle_key_event=, =handle_mouse_event=  | key/button before default binds (modal, tabs) | first TRUE wins   |
 | =GsurfKeybindProvider= | =list_keybinds=                           | =?= help overlay; queried at display time     | additive          |
+| =GsurfActionHandler=   | =handle_action=                           | a core keybind action with no built-in implementation (open-prompt → chromebar, find → find_bar, tab-* → tabs, follow-hints → modal) | first TRUE wins |
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
 | =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed= | navigation lifecycle (history, homepage) | =before=: veto    |
 
@@ -75,6 +76,10 @@ gsurf_web_process_extension_register("adblock", "/path/to/adblock-webext/gsurf-a
 #+end_src
 
 The WebKit backends hand every registered extension, and an =a{sv}= of each one's data, to each web process they launch. The registry itself (=src/core/gsurf-web-process.h=) is backend-agnostic. =modules/adblock/webext/= is the reference.
+
+A module that owns a UI a core action refers to should implement =GsurfActionHandler::handle_action= and answer that =GsurfAction=. The host's keymap only knows the action (=o= → =open-prompt=); it calls =gsurf_module_manager_dispatch_action()= when it has no built-in implementation, and the first active module in priority order that returns =TRUE= performs it. That keeps the binding in the user's =keybinds:= table while the module stays free to own its widget.
+
+Priority is read when dispatching: the manager sorts its modules before activating them and again afterwards, so a priority set inside =activate()= (=modal= claims =GSURF_PRIORITY_HIGHEST=) takes effect.
 
 A module that owns keys should implement =GsurfKeybindProvider::list_keybinds=
 and append =GsurfKeybindHelp= rows with its *current* configured keys. The =?=

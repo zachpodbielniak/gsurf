@@ -13,6 +13,8 @@ modifier prefixes plus a [[https://gitlab.gnome.org/GNOME/gtk/-/blob/main/gdk/gd
 Modifiers: =Ctrl= (=Control=), =Alt= (=Mod1=), =Shift=, =Super= (=Logo=/=Mod4=).
 Order and case are normalized, so =ctrl+shift+g= and =Shift+Ctrl+g= match.
 
+A single letter's case means Shift: =N=, =Shift+n= and =Shift+N= are all the same key (GDK reports Shift+n as the keyval =N= with the Shift modifier, and both spellings meet it). So =Ctrl+Shift+s= matches Ctrl+Shift+s as typed, and a lowercase =o= never fires for Shift+o. Caps Lock produces the uppercase keyval, so with Caps Lock on, =h= arrives as =H=, as in vim. Shift+Tab, which GDK names =ISO_Left_Tab=, matches =Shift+Tab=.
+
 Values are action nicks (see =gsurf --generate-yaml-config=). Both =-= and =_=
 separators are accepted (=reload-nocache= or =reload_nocache=).
 
@@ -31,6 +33,10 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =F11=          | toggle-fullscreen |
 | =Ctrl+q=       | quit              |
 | =?=            | show-keybinds     |
+| =o= / =Ctrl+l= | open-prompt       |
+| =Ctrl+e= / =Ctrl+y= | scroll down/up |
+
+Some actions are performed by the module that owns their UI, through =GsurfActionHandler=: =open-prompt= by =chromebar= (the =--lrg= window draws its own address bar), =find= by =find_bar=, =tab-*= by =tabs=, and =follow-hints= / =enter-*-mode= by =modal=. With that module disabled the key does nothing and goes to the page.
 
 Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is
 provided by the =modal= module (enabled by default), not the core table, so it
@@ -49,6 +55,19 @@ In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf
 
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
+
+* Focus: the page and the address bar
+
+The page has keyboard focus when the window opens and after every tab switch, so command keys work from the first keystroke.
+
+- =o= (or =Ctrl+l=) focuses the address bar with its text selected: type to replace it.
+- =Enter= loads the address and gives focus back to the page, so =j=/=k=/=f= work on what loads.
+- =Escape= in the address bar abandons the edit: the bar shows the current URI again and the page takes focus.
+- =Escape= in a page field (one you clicked, or one the page focused itself with =autofocus=) blurs the field, so the next key is a command again. This is core behaviour and works without the =modal= module.
+- =Escape= anywhere else runs the =stop= binding.
+- Shortcut chords that the address bar or find box doesn't use itself (=Ctrl+t=, =Ctrl+w=, =Ctrl+q=, =Ctrl+Tab=, =F11=, ...) still work while typing in them. Editing keys (=Ctrl+a=/=c=/=v=/=x=/=z=, arrows, Home/End) stay with the field.
+
+The find bar (=/= or =Ctrl+f=) works the same way: =Enter= confirms the search and returns focus to the page, where =n= / =N= step through the matches. =n= / =N= are only taken while a search is up; =Escape= in the find box closes it and clears the highlight.
 
 * Live help overlay (=?=)
 
@@ -87,13 +106,15 @@ The =modal= module (enabled by default) provides vim-style navigation. It is
 
 - When an editable element is focused — a page text field, =textarea=,
   =contenteditable=, =select=, *or the address bar* — keystrokes go straight to
-  it. You do *not* need to press =i= first. =Escape= blurs the field and returns
-  to command context.
+  it. You do *not* need to press =i= first. =Escape= blurs a page field, or
+  leaves the address bar, and returns to command context.
 - When nothing editable is focused (you're reading a page), bare letters are
   commands: =hjkl= scroll, =gg=/=G= top/bottom, =H=/=L= history, =r= reload,
   =d=/=u= half-page, =f= link hints (=F= follows in a new view).
 - =i= forces INSERT mode (all keys pass to the page until =Escape=) for the rare
   web app that wants raw keys without a focused field.
+- =Escape= in normal mode cancels a pending =g= chord; otherwise it reaches the
+  core =Escape: stop= binding.
 
 Focus is tracked by a small content script that reports DOM focus changes to the
 browser, so the right behavior happens automatically as you move between the
