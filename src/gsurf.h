@@ -55,6 +55,7 @@
 
 /* Hook-point interfaces */
 #include "interfaces/gsurf-input-handler.h"
+#include "interfaces/gsurf-action-handler.h"
 #include "interfaces/gsurf-uri-handler.h"
 #include "interfaces/gsurf-navigation-hook.h"
 #include "interfaces/gsurf-script-injector.h"
