@@ -65,7 +65,9 @@ test_keybinds(void)
 		"keybinds:\n"
 		"  \"ctrl+r\": reload\n"          /* lower-case + reordered on load */
 		"  \"shift+ctrl+g\": find-prev\n"
-		"  \"j\": scroll-down\n";
+		"  \"j\": scroll-down\n"
+		"  \"o\": open-prompt\n"
+		"  \"G\": scroll-bottom\n";      /* uppercase letter == Shift+g */
 
 	g_assert_true(gsurf_config_load_from_data(c, yaml, -1, &error));
 	g_assert_no_error(error);
@@ -74,6 +76,11 @@ test_keybinds(void)
 	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+r"), ==, GSURF_ACTION_RELOAD);
 	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+Shift+g"), ==, GSURF_ACTION_FIND_PREV);
 	g_assert_cmpint(gsurf_config_get_keybind_action(c, "j"), ==, GSURF_ACTION_SCROLL_DOWN);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "o"), ==, GSURF_ACTION_OPEN_PROMPT);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Shift+g"), ==, GSURF_ACTION_SCROLL_BOTTOM);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Shift+G"), ==, GSURF_ACTION_SCROLL_BOTTOM);
+	/* Shift+o is its own key, not `o`. */
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Shift+o"), ==, GSURF_ACTION_NONE);
 
 	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+z"), ==, GSURF_ACTION_NONE);
 	g_assert_cmpint(gsurf_config_get_keybind_action(c, NULL), ==, GSURF_ACTION_NONE);

@@ -27,6 +27,9 @@ G_BEGIN_DECLS
  * @mods: a #GsurfKeyMod modifier mask
  *
  * Builds the canonical "Ctrl+Alt+Shift+Super+key" string for a key event.
+ * A letter key is always spelled lowercase with an explicit Shift for an
+ * uppercase keyval or the Shift mask: GDK's Shift+n event ("N" with Shift)
+ * gives "Shift+n". ISO_Left_Tab (GDK's Shift+Tab) gives "Shift+Tab".
  *
  * Returns: (transfer full) (nullable): the string, or %NULL if @keyval
  *   has no name
@@ -34,11 +37,29 @@ G_BEGIN_DECLS
 gchar *gsurf_keys_to_string(guint keyval, guint mods);
 
 /**
+ * gsurf_keys_to_name:
+ * @keyval: a GDK keyval
+ * @mods: a #GsurfKeyMod modifier mask
+ *
+ * The bare key name of an event without modifier prefixes, for vi-style
+ * keymaps that tell `g` from `G`. A letter is uppercase when @keyval is
+ * or when @mods carries Shift; ISO_Left_Tab is "Tab"; other keys keep
+ * their GDK name ("Escape", "slash").
+ *
+ * Returns: (transfer full) (nullable): the name, or %NULL if @keyval has
+ *   no name
+ */
+gchar *gsurf_keys_to_name(guint keyval, guint mods);
+
+/**
  * gsurf_keys_normalize:
  * @keystring: a possibly unordered "shift+CTRL+r" string
  *
  * Reorders modifiers and normalizes case so the result matches what
- * gsurf_keys_to_string() produces. The key token keeps its spelling.
+ * gsurf_keys_to_string() produces. An uppercase letter means its shifted
+ * key ("N", "Shift+N" and "Shift+n" all give "Shift+n"); "?" gives
+ * "question" and "ISO_Left_Tab" gives "Shift+Tab". Any other key token
+ * keeps its spelling.
  *
  * Returns: (transfer full) (nullable): the normalized string
  */
