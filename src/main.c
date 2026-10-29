@@ -260,17 +260,23 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 	}
 	case GSURF_ACTION_OPEN_PROMPT:
 #ifdef GSURF_HAVE_LRG_BACKEND
-		/* Under --lrg the GTK chromebar/omnibar can't render, so the LRG
-		 * window draws its own address bar.  On GTK, fall through so the
-		 * chromebar/omnibar module handles the prompt. */
+		/* Under --lrg the GTK chromebar can't render, so the LRG window
+		 * draws its own address bar.  On GTK, the chromebar module owns
+		 * the prompt and answers through the action dispatch below. */
 		if (GSURF_IS_LRG_WINDOW(window)) {
 			gsurf_lrg_window_begin_url_edit(GSURF_LRG_WINDOW(window));
 			return TRUE;
 		}
 #endif
-		return FALSE;
-	default:                          return FALSE;
+		break;
+	default:
+		break;
 	}
+
+	/* No built-in implementation: the module owning the UI performs it
+	 * (chromebar: open-prompt, find_bar: find, tabs/modal: theirs). */
+	return gsurf_module_manager_dispatch_action(gsurf_module_manager_get_default(),
+		view, action);
 }
 
 static gboolean
@@ -301,14 +307,24 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 			state, GSURF_MODE_NORMAL))
 		return TRUE;
 
+	/* Escape leaves a focused page field (an autofocused search box, a
+	 * clicked input) so the next key is a command again. Core behaviour,
+	 * so it works with the modal module disabled too. */
+	if (is_escape && !has_mod && view != NULL && gsurf_view_get_editing(view)) {
+		gsurf_view_blur_editable(view);
+		return TRUE;
+	}
+
 	keystr = gsurf_keys_to_string(keyval, state);
 	if (keystr == NULL)
 		return FALSE;
 
 	action = gsurf_config_get_keybind_action(config, keystr);
 	/* Shifted punctuation (e.g. `?` as Shift+question) still matches the
-	 * unshifted GDK name bound in the core table. */
-	if (action == GSURF_ACTION_NONE && (state & GSURF_MOD_SHIFT) != 0) {
+	 * unshifted GDK name bound in the core table. Not letters: Shift+o
+	 * is its own key and must not fall back to `o`. */
+	if (action == GSURF_ACTION_NONE && (state & GSURF_MOD_SHIFT) != 0 &&
+	    !g_unichar_isalpha(gdk_keyval_to_unicode(keyval))) {
 		g_autofree gchar *bare = gsurf_keys_to_string(keyval,
 			state & ~GSURF_MOD_SHIFT);
 

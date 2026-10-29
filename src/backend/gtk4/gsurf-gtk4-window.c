@@ -38,13 +38,31 @@ translate_modifiers(GdkModifierType state)
 	return mods;
 }
 
+/* Shortcut chords (and function keys) still reach the keymap while a
+ * chrome text entry has focus; bare keys and Escape stay with the entry. */
+static gboolean
+is_shortcut_key(guint keyval, guint mods)
+{
+	if ((mods & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0)
+		return TRUE;
+	return keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F35;
+}
+
+/* Capture phase: runs before the focused web view, like the GTK3
+ * window's key-press-event handler, so TRUE consumes a command key. */
 static gboolean
 on_key_pressed(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
                GdkModifierType state, gpointer user_data)
 {
 	GsurfGtk4Window *self = user_data;
-	return gsurf_window_emit_key_press(GSURF_WINDOW(self), keyval, keycode,
-		translate_modifiers(state));
+	GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(self->window));
+	guint mods = translate_modifiers(state);
+
+	/* Typing in the address bar / find box: not a keymap command. */
+	if (focus != NULL && GTK_IS_EDITABLE(focus) && !is_shortcut_key(keyval, mods))
+		return FALSE;
+
+	return gsurf_window_emit_key_press(GSURF_WINDOW(self), keyval, keycode, mods);
 }
 
 static gboolean
@@ -71,6 +89,7 @@ gsurf_gtk4_window_realize(GsurfWindow *window)
 		GSURF_DEFAULT_WIDTH, GSURF_DEFAULT_HEIGHT);
 
 	key = gtk_event_controller_key_new();
+	gtk_event_controller_set_propagation_phase(key, GTK_PHASE_CAPTURE);
 	g_signal_connect(key, "key-pressed", G_CALLBACK(on_key_pressed), self);
 	gtk_widget_add_controller(self->window, key);
 
@@ -104,15 +123,22 @@ gsurf_gtk4_window_set_active_view(GsurfWindow *window, GsurfView *view)
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
 	GtkWidget *widget = gsurf_view_get_native_widget(view);
 
-	if (widget != NULL)
-		gtk_stack_set_visible_child(GTK_STACK(self->stack), widget);
+	if (widget == NULL)
+		return;
+	gtk_stack_set_visible_child(GTK_STACK(self->stack), widget);
+	gsurf_view_focus(view);
 }
 
 static void
 gsurf_gtk4_window_present(GsurfWindow *window)
 {
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
+	GsurfView *view = gsurf_window_get_active_view(window);
+
 	gtk_window_present(GTK_WINDOW(self->window));
+	/* Start on the page rather than the first focusable chrome widget. */
+	if (view != NULL)
+		gsurf_view_focus(view);
 }
 
 static void

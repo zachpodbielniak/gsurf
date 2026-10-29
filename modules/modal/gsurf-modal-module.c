@@ -42,11 +42,13 @@ struct _GsurfModalModule
 
 static void gsurf_modal_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_modal_keybind_init(GsurfKeybindProviderInterface *iface);
+static void gsurf_modal_action_init(GsurfActionHandlerInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfModalModule, gsurf_modal_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_modal_input_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_modal_keybind_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_modal_keybind_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_modal_action_init))
 
 static void
 scroll(GsurfView *view, const gchar *js)
@@ -232,7 +234,9 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
                              GsurfModePolicy mode_hint)
 {
 	GsurfModalModule *self = GSURF_MODAL_MODULE(handler);
-	g_autofree gchar *name = gsurf_keys_to_string(keyval, 0); /* bare name */
+	/* Bare name with Shift folded into a letter's case: Shift+g is "G",
+	 * while a Caps Lock "G" stays "g" (no accidental back/forward). */
+	g_autofree gchar *name = gsurf_keys_to_name(keyval, state);
 	gboolean has_mod = (state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0;
 	g_autofree gchar *js = NULL;
 
@@ -247,7 +251,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	/* FOLLOW (link-hint) mode owns all keys until a match or cancel. */
 	if (self->mode == GSURF_MODE_FOLLOW) {
 		if (g_strcmp0(name, "Escape") == 0) {
-			run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()");
+			g_free(run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()"));
 			set_mode(self, GSURF_MODE_NORMAL);
 			return TRUE;
 		}
@@ -279,9 +283,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	 * way vimium/qutebrowser behave. */
 	if (gsurf_view_get_editing(view)) {
 		if (g_strcmp0(name, "Escape") == 0) {
-			gsurf_view_run_javascript_async(view,
-				"document.activeElement&&document.activeElement.blur&&document.activeElement.blur()",
-				NULL, NULL, NULL);
+			gsurf_view_blur_editable(view);
 			return TRUE;
 		}
 		return FALSE;
@@ -316,7 +318,14 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	}
 
 	if (g_strcmp0(name, "i") == 0) { set_mode(self, GSURF_MODE_INSERT); return TRUE; }
-	if (g_strcmp0(name, "Escape") == 0) { self->pending_g = FALSE; return TRUE; }
+	/* Escape cancels a pending `g` chord; otherwise it falls through to the
+	 * core keymap (Escape: stop). */
+	if (g_strcmp0(name, "Escape") == 0) {
+		gboolean had_chord = self->pending_g;
+
+		self->pending_g = FALSE;
+		return had_chord;
+	}
 	if (g_strcmp0(name, "g") == 0) { self->pending_g = TRUE; return TRUE; }
 	if (g_strcmp0(name, "G") == 0) { scroll(view, "window.scrollTo(0,document.body.scrollHeight)"); return TRUE; }
 	if (g_strcmp0(name, "H") == 0) { gsurf_view_go_back(view); return TRUE; }
@@ -342,6 +351,42 @@ static void
 gsurf_modal_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_modal_handle_key_event;
+}
+
+/* Core keybind actions this module owns: hinting and mode switches. */
+static gboolean
+gsurf_modal_handle_action(GsurfActionHandler *handler, GsurfView *view,
+                          GsurfAction action)
+{
+	GsurfModalModule *self = GSURF_MODAL_MODULE(handler);
+
+	if (view == NULL)
+		return FALSE;
+
+	switch (action) {
+	case GSURF_ACTION_FOLLOW_HINTS:
+		start_hints(self, view, FALSE);
+		return TRUE;
+	case GSURF_ACTION_FOLLOW_HINTS_NEW_VIEW:
+		start_hints(self, view, TRUE);
+		return TRUE;
+	case GSURF_ACTION_ENTER_INSERT_MODE:
+		set_mode(self, GSURF_MODE_INSERT);
+		return TRUE;
+	case GSURF_ACTION_ENTER_NORMAL_MODE:
+		if (self->mode == GSURF_MODE_FOLLOW)
+			g_free(run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()"));
+		set_mode(self, GSURF_MODE_NORMAL);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
+static void
+gsurf_modal_action_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = gsurf_modal_handle_action;
 }
 
 static void

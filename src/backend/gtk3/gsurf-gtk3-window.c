@@ -40,6 +40,17 @@ translate_modifiers(GdkModifierType state)
 	return mods;
 }
 
+/* Whether a key, pressed while a chrome text entry has focus, may still
+ * reach the keymap once the entry has declined it: modified chords and
+ * function keys only. Bare keys and Escape belong to the entry. */
+static gboolean
+is_shortcut_key(guint keyval, guint mods)
+{
+	if ((mods & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0)
+		return TRUE;
+	return keyval >= GDK_KEY_F1 && keyval <= GDK_KEY_F35;
+}
+
 static gboolean
 on_key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 {
@@ -47,13 +58,19 @@ on_key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 	GtkWidget *focus = gtk_window_get_focus(GTK_WINDOW(self->window));
 	guint mods;
 
-	/* If a chrome text entry (address bar, find box) has focus, let it
-	 * handle its own keys — don't route them through the keymap/modal
-	 * layer. The web view is not a GtkEditable, so it still routes. */
-	if (focus != NULL && GTK_IS_EDITABLE(focus))
-		return FALSE;
-
 	mods = translate_modifiers(event->state);
+
+	/* A chrome text entry (address bar, find box) has focus: it handles
+	 * its own keys first (typing, Ctrl+a/c/v, its Escape handler). Only a
+	 * shortcut it declines (Ctrl+t, Ctrl+q, F11, ...) goes on to the
+	 * keymap, so window-level bindings keep working while typing a URL.
+	 * The web view is not a GtkEditable, so it routes as usual. */
+	if (focus != NULL && GTK_IS_EDITABLE(focus)) {
+		if (gtk_window_propagate_key_event(GTK_WINDOW(self->window), event))
+			return TRUE;
+		if (!is_shortcut_key(event->keyval, mods))
+			return FALSE;
+	}
 
 	/* Runs before the focused webview, so returning TRUE consumes the
 	 * key (normal-mode commands); FALSE lets the page handle it. */
@@ -150,8 +167,12 @@ gsurf_gtk3_window_set_active_view(GsurfWindow *window, GsurfView *view)
 	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
 	GtkWidget *widget = gsurf_view_get_native_widget(view);
 
-	if (widget != NULL)
-		gtk_stack_set_visible_child(GTK_STACK(self->stack), widget);
+	if (widget == NULL)
+		return;
+	gtk_stack_set_visible_child(GTK_STACK(self->stack), widget);
+	/* The shown page takes keyboard focus, so a tab switch never leaves
+	 * it on the address bar or a hidden view. */
+	gsurf_view_focus(view);
 }
 
 static void
@@ -159,7 +180,14 @@ gsurf_gtk3_window_present(GsurfWindow *window)
 {
 	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
 
+	GsurfView *view = gsurf_window_get_active_view(window);
+
 	gtk_widget_show_all(self->window);
+	/* Start on the page, not on the first focusable chrome widget GTK
+	 * would otherwise pick (the address bar or a tab button), so page
+	 * keys (o, j/k, f, Escape) work from the first keystroke. */
+	if (view != NULL)
+		gsurf_view_focus(view);
 	gtk_window_present(GTK_WINDOW(self->window));
 }
 

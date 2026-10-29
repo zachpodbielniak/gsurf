@@ -95,7 +95,8 @@ keybinds:
   # `?` (GDK keyval name "question") opens the live keybinding overlay.
   "question": show-keybinds
   # Open the address bar.  Under --lrg this drives the libregnum window's
-  # built-in URL editor; on GTK the chromebar/omnibar module handles it.
+  # built-in URL editor; on GTK the chromebar module handles it (Escape
+  # there returns to the page).
   "o": open-prompt
   "Ctrl+l": open-prompt
   # vim line-scroll (handy when the modal module's j/k aren't desired).

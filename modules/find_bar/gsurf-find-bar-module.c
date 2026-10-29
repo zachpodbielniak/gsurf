@@ -32,15 +32,18 @@ struct _GsurfFindBarModule
 	gchar    *key_next;
 	gchar    *key_prev;
 	gboolean  match_case;
+	gboolean  active;   /* a search is in progress: n/N step through it */
 };
 
 static void gsurf_find_bar_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_find_bar_keybind_init(GsurfKeybindProviderInterface *iface);
+static void gsurf_find_bar_action_init(GsurfActionHandlerInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfFindBarModule, gsurf_find_bar_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_find_bar_input_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_find_bar_keybind_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_find_bar_keybind_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_find_bar_action_init))
 
 static GsurfView *
 active_view(void)
@@ -59,6 +62,7 @@ find_bar_search(GsurfFindBarModule *self, gboolean forward)
 	text = gtk_entry_get_text(GTK_ENTRY(self->entry));
 	if (text == NULL)
 		text = "";
+	self->active = *text != '\0';
 	gsurf_view_find(view, text, self->match_case, forward);
 }
 
@@ -69,12 +73,11 @@ find_bar_close(GsurfFindBarModule *self)
 
 	if (self->entry != NULL)
 		gtk_entry_set_text(GTK_ENTRY(self->entry), "");
+	self->active = FALSE;
 	if (view != NULL) {
 		/* Empty search clears the highlight, then return focus to the page. */
 		gsurf_view_find(view, "", self->match_case, TRUE);
-		GtkWidget *w = gsurf_view_get_native_widget(view);
-		if (w != NULL)
-			gtk_widget_grab_focus(w);
+		gsurf_view_focus(view);
 	}
 	if (self->bar != NULL)
 		gtk_widget_hide(self->bar);
@@ -85,7 +88,7 @@ find_bar_open(GsurfFindBarModule *self)
 {
 	if (self->bar == NULL || self->entry == NULL)
 		return;
-	gtk_widget_show_all(self->bar);
+	gtk_widget_show(self->bar);
 	gtk_widget_grab_focus(self->entry);
 	gtk_editable_select_region(GTK_EDITABLE(self->entry), 0, -1);
 }
@@ -99,9 +102,13 @@ on_search_changed(GtkSearchEntry *entry, gpointer user_data)
 static void
 on_entry_activate(GtkEntry *entry, gpointer user_data)
 {
-	/* Enter advances to the next match. */
+	GsurfView *view = active_view();
+
+	/* Enter confirms the search (vim-style): the bar stays up showing the
+	 * query, the page takes focus, and n/N step through the matches. */
 	find_bar_search(GSURF_FIND_BAR_MODULE(user_data), TRUE);
-	gsurf_view_find_next(active_view());
+	if (view != NULL)
+		gsurf_view_focus(view);
 }
 
 static gboolean
@@ -132,7 +139,9 @@ gsurf_find_bar_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		find_bar_open(self);
 		return TRUE;
 	}
-	if (view == NULL)
+	/* n/N only mean "next/previous match" while a search is up; otherwise
+	 * they stay free for the page and other modules. */
+	if (view == NULL || !self->active)
 		return FALSE;
 	if (self->key_next != NULL && gsurf_keys_match(keyval, state, self->key_next)) {
 		gsurf_view_find_next(view);
@@ -149,6 +158,30 @@ static void
 gsurf_find_bar_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_find_bar_handle_key_event;
+}
+
+/* The find keybind (Ctrl+f by default) opens the bar. */
+static gboolean
+gsurf_find_bar_handle_action(GsurfActionHandler *handler, GsurfView *view,
+                             GsurfAction action)
+{
+	GsurfFindBarModule *self = GSURF_FIND_BAR_MODULE(handler);
+
+	switch (action) {
+	case GSURF_ACTION_FIND:
+		if (self->bar == NULL)
+			return FALSE;
+		find_bar_open(self);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
+static void
+gsurf_find_bar_action_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = gsurf_find_bar_handle_action;
 }
 
 static void
@@ -202,7 +235,11 @@ gsurf_find_bar_activate(GsurfModule *module)
 	g_signal_connect(self->entry, "key-press-event", G_CALLBACK(on_entry_key_press), self);
 
 	gsurf_window_add_bottom_widget(window, self->bar);
-	gtk_widget_hide(self->bar);   /* hidden until the open key is pressed */
+	/* Hidden until the open key is pressed; no-show-all keeps the
+	 * window's show_all() at startup from revealing it again. */
+	gtk_widget_show_all(self->bar);
+	gtk_widget_hide(self->bar);
+	gtk_widget_set_no_show_all(self->bar, TRUE);
 	return TRUE;
 }
 
