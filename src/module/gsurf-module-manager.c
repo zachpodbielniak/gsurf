@@ -8,6 +8,7 @@
 #include "module/gsurf-module-manager.h"
 
 #include "interfaces/gsurf-input-handler.h"
+#include "interfaces/gsurf-action-handler.h"
 #include "interfaces/gsurf-uri-handler.h"
 #include "interfaces/gsurf-navigation-hook.h"
 #include "interfaces/gsurf-script-injector.h"
@@ -353,6 +354,10 @@ gsurf_module_manager_activate_all(GsurfModuleManager *self)
 			g_warning("gsurf: failed to activate module '%s'",
 				gsurf_module_get_name(m));
 	}
+	/* activate() may set a module's priority (modal claims the highest
+	 * so its keymap sees keys first); sort again so dispatch honours it
+	 * rather than the directory order the modules loaded in. */
+	g_ptr_array_sort(self->modules, compare_priority);
 }
 
 void
@@ -383,6 +388,24 @@ gsurf_module_manager_dispatch_key_event(GsurfModuleManager *self, GsurfView *vie
 			continue;
 		if (gsurf_input_handler_handle_key_event(GSURF_INPUT_HANDLER(m),
 				view, keyval, keycode, state, mode))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+gboolean
+gsurf_module_manager_dispatch_action(GsurfModuleManager *self, GsurfView *view,
+                                     GsurfAction action)
+{
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), FALSE);
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		if (!gsurf_module_is_active(m) || !GSURF_IS_ACTION_HANDLER(m))
+			continue;
+		if (gsurf_action_handler_handle_action(GSURF_ACTION_HANDLER(m), view, action))
 			return TRUE;
 	}
 	return FALSE;

@@ -6,7 +6,9 @@
  *
  * A GtkEntry address bar packed into the window chrome. Enter loads the
  * (URI-handler-rewritten) input in the active view; the bar tracks the
- * active view's URI. Focus it with the configured key (Ctrl+l). GTK3.
+ * active view's URI. Focus it with the open-prompt keybind (o) or the
+ * configured key (Ctrl+l); Escape restores the URI and returns focus to
+ * the page, as does loading a URI with Enter. GTK3.
  */
 
 #include <gsurf/gsurf.h>
@@ -30,11 +32,13 @@ struct _GsurfChromebarModule
 
 static void gsurf_chromebar_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_chromebar_keybind_init(GsurfKeybindProviderInterface *iface);
+static void gsurf_chromebar_action_init(GsurfActionHandlerInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfChromebarModule, gsurf_chromebar_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_chromebar_input_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_chromebar_keybind_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_chromebar_keybind_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_chromebar_action_init))
 
 static GsurfView *
 active_view(void)
@@ -42,12 +46,32 @@ active_view(void)
 	return gsurf_module_manager_get_active_view(gsurf_module_manager_get_default());
 }
 
+/* Show the tracked view's current URI in the bar. */
+static void
+sync_entry_text(GsurfChromebarModule *self)
+{
+	const gchar *uri = self->tracked != NULL ? gsurf_view_get_uri(self->tracked) : NULL;
+
+	if (self->entry != NULL)
+		gtk_entry_set_text(GTK_ENTRY(self->entry), uri ? uri : "");
+}
+
 static void
 on_view_uri_changed(GsurfView *view, const gchar *uri, gpointer user_data)
 {
 	GsurfChromebarModule *self = user_data;
+
+	/* Don't clobber what the user is typing; Escape restores it. */
 	if (self->entry != NULL && !gtk_widget_has_focus(self->entry))
 		gtk_entry_set_text(GTK_ENTRY(self->entry), uri ? uri : "");
+}
+
+/* Put the cursor in the bar with its text selected, ready to replace. */
+static void
+focus_entry(GsurfChromebarModule *self)
+{
+	gtk_widget_grab_focus(self->entry);
+	gtk_editable_select_region(GTK_EDITABLE(self->entry), 0, -1);
 }
 
 static void
@@ -83,6 +107,24 @@ on_entry_activate(GtkEntry *entry, gpointer user_data)
 	rewritten = gsurf_module_manager_dispatch_rewrite_uri(
 		gsurf_module_manager_get_default(), text);
 	gsurf_view_load_uri(view, rewritten ? rewritten : text);
+	/* Hand the keyboard back to the page so j/k/f work on what loads. */
+	gsurf_view_focus(view);
+}
+
+/* Escape abandons the edit: restore the URI and return to the page. */
+static gboolean
+on_entry_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+{
+	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(user_data);
+	GsurfView *view;
+
+	if (event->keyval != GDK_KEY_Escape)
+		return FALSE;
+	sync_entry_text(self);
+	view = active_view();
+	if (view != NULL)
+		gsurf_view_focus(view);
+	return TRUE;
 }
 
 static void
@@ -102,8 +144,7 @@ gsurf_chromebar_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	if (!gsurf_keys_match(keyval, state, self->key_focus))
 		return FALSE;
 
-	gtk_widget_grab_focus(self->entry);
-	gtk_editable_select_region(GTK_EDITABLE(self->entry), 0, -1);
+	focus_entry(self);
 	return TRUE;
 }
 
@@ -111,6 +152,25 @@ static void
 gsurf_chromebar_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_chromebar_handle_key_event;
+}
+
+/* The open-prompt keybind (o by default) focuses the bar. */
+static gboolean
+gsurf_chromebar_handle_action(GsurfActionHandler *handler, GsurfView *view,
+                              GsurfAction action)
+{
+	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(handler);
+
+	if (action != GSURF_ACTION_OPEN_PROMPT || self->entry == NULL)
+		return FALSE;
+	focus_entry(self);
+	return TRUE;
+}
+
+static void
+gsurf_chromebar_action_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = gsurf_chromebar_handle_action;
 }
 
 static void
@@ -154,6 +214,7 @@ gsurf_chromebar_activate(GsurfModule *module)
 	g_object_ref_sink(self->entry);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Enter URL or search...");
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);
+	g_signal_connect(self->entry, "key-press-event", G_CALLBACK(on_entry_key_press), self);
 	gsurf_window_add_top_widget(window, self->entry);
 
 	self->window = window;

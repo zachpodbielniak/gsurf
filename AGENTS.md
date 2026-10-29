@@ -110,7 +110,11 @@ and `GTlsCertificate` instead.
   one or more hook interfaces from `src/interfaces/`. `GsurfModuleManager` loads
   `.so`s (GModule), reads each module's `enabled:` flag + config from the YAML
   `modules:` map, activates the enabled ones, and dispatches hooks in priority
-  order (first `TRUE`/non-`ALLOW` wins for consumable hooks). The manager never
+  order (first `TRUE`/non-`ALLOW` wins for consumable hooks). Core keybind
+  actions without a built-in implementation (`open-prompt`, `find`, `tab-*`,
+  `follow-hints`) go to `GsurfActionHandler` modules via
+  `gsurf_module_manager_dispatch_action()`, so a module owning the UI performs
+  them. The manager never
   loads modules implicitly: a host sets directories via
   `gsurf_module_manager_add_search_path()` / `_set_search_paths()` and calls
   `_load_modules()` (first-match-by-filename across paths, like `$PATH`). The
@@ -213,19 +217,21 @@ xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 
 Test layout (`tests/test-*.c`, auto-discovered): `test-version`, `test-enums`
 (action<->string, GType registration), `test-keys` (canonicalize/normalize/
-match), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
+match, Shift+letter and `ISO_Left_Tab` canonicalization, `gsurf_keys_to_name`), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
 keybind lookup, module nodes, `ignore_yaml`, the bind setters with
 normalization/NULL/empty, bad-input handling), `test-cconfig` (the crispy
 C-config compile-and-load pipeline, incl. the commented-`CRISPY_PARAMS`
 regression and bad-source handling; skips with no compiler), `test-manager`
-(loading, search paths, enabled gating, priority, input passthrough, default
-verdicts for every hook — including the request-filter/status/context-menu/
+(loading, search paths, enabled gating, priority incl. a priority set in
+`activate()`, input passthrough, action dispatch, default verdicts for every hook — including the request-filter/status/context-menu/
 render-overlay ones — and dispatch through the real module .so files),
 `test-adblock` (uBO/ABP filter compiler: ruleset precedence, cosmetic
 exceptions, redirect/removeparam via the request filter, scriptlet and
 procedural tables for the web-process extension, trusted-list gating, the
 web-process extension registry), `test-adblock-webkit` (`make test-gui`: every
-adblock layer enforced in a real WebKit view),
+adblock layer enforced in a real WebKit view), `test-keynav-webkit` (`make
+test-gui`: page focus at startup, Escape blurring an autofocused field,
+open-prompt focusing the chromebar, Escape returning to the page),
 `test-modules` (search-engines, history, adblock host blocking + whitelist +
 edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
 value types: new/copy/free, getters, setters, deep-copy independence),

@@ -191,6 +191,19 @@ void         gsurf_module_manager_deactivate_all(GsurfModuleManager *self);
 gboolean            gsurf_module_manager_dispatch_key_event(GsurfModuleManager *self, GsurfView *view,
                                                             guint keyval, guint keycode, guint state,
                                                             GsurfModePolicy mode);
+/**
+ * gsurf_module_manager_dispatch_action:
+ * @self: a #GsurfModuleManager
+ * @view: (nullable): the active view
+ * @action: a keybind action the host has no built-in implementation for
+ *
+ * Offers @action to every active #GsurfActionHandler module in priority
+ * order; the first to return %TRUE performs it.
+ *
+ * Returns: %TRUE if a module performed the action, %FALSE otherwise
+ */
+gboolean            gsurf_module_manager_dispatch_action(GsurfModuleManager *self, GsurfView *view,
+                                                         GsurfAction action);
 gboolean            gsurf_module_manager_dispatch_mouse_event(GsurfModuleManager *self, GsurfView *view,
                                                               guint button, guint state);
 gchar              *gsurf_module_manager_dispatch_rewrite_uri(GsurfModuleManager *self, const gchar *input);

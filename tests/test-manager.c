@@ -56,6 +56,84 @@ mgr_with(const char *modname, const char *yaml)
 	return mgr;
 }
 
+/* ---- in-test action-handler module ----
+ *
+ * Records the last action it saw and answers TRUE only for the action it
+ * was built to handle. `claim_highest` sets the highest priority from
+ * activate(), as the modal module does. */
+
+#define TEST_TYPE_ACTION_MODULE (test_action_module_get_type())
+G_DECLARE_FINAL_TYPE(TestActionModule, test_action_module, TEST, ACTION_MODULE, GsurfModule)
+
+struct _TestActionModule
+{
+	GsurfModule parent_instance;
+	const gchar *name;
+	GsurfAction handles;
+	gboolean    claim_highest;
+	guint       calls;
+};
+
+static void test_action_module_iface_init(GsurfActionHandlerInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE(TestActionModule, test_action_module, GSURF_TYPE_MODULE,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, test_action_module_iface_init))
+
+static gboolean
+test_action_module_handle(GsurfActionHandler *handler, GsurfView *view, GsurfAction action)
+{
+	TestActionModule *self = TEST_ACTION_MODULE(handler);
+
+	self->calls++;
+	return action == self->handles;
+}
+
+static void
+test_action_module_iface_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = test_action_module_handle;
+}
+
+static const gchar *
+test_action_module_get_name(GsurfModule *module)
+{
+	return TEST_ACTION_MODULE(module)->name;
+}
+
+static gboolean
+test_action_module_activate(GsurfModule *module)
+{
+	if (TEST_ACTION_MODULE(module)->claim_highest)
+		gsurf_module_set_priority(module, GSURF_PRIORITY_HIGHEST);
+	return TRUE;
+}
+
+static void
+test_action_module_class_init(TestActionModuleClass *klass)
+{
+	GsurfModuleClass *module_class = GSURF_MODULE_CLASS(klass);
+
+	module_class->get_name = test_action_module_get_name;
+	module_class->activate = test_action_module_activate;
+}
+
+static void
+test_action_module_init(TestActionModule *self)
+{
+}
+
+static TestActionModule *
+new_action_module(const gchar *name, GsurfAction handles, gboolean claim_highest)
+{
+	TestActionModule *m = g_object_new(TEST_TYPE_ACTION_MODULE, NULL);
+
+	m->name = name;
+	m->handles = handles;
+	m->claim_highest = claim_highest;
+	gsurf_module_set_enabled(GSURF_MODULE(m), TRUE);
+	return m;
+}
+
 /* ---- manager mechanics ---- */
 
 static void
@@ -73,6 +151,8 @@ test_defaults_no_modules(void)
 	/* These must not crash with no modules / no view. */
 	gsurf_module_manager_dispatch_after_navigate(mgr, NULL, "https://x");
 	gsurf_module_manager_dispatch_inject_scripts(mgr, NULL, NULL);
+	/* No action handler: the host's key falls through to the page. */
+	g_assert_false(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_OPEN_PROMPT));
 
 	g_object_unref(mgr);
 }
@@ -96,6 +176,53 @@ test_new_hook_defaults(void)
 
 	g_ptr_array_unref(items);
 	g_object_unref(mgr);
+}
+
+/* Actions go to the first handler (by priority) that performs them;
+ * handlers that decline pass it on, inactive modules never see it. */
+static void
+test_action_dispatch(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autoptr(TestActionModule) find = new_action_module("t-find", GSURF_ACTION_FIND, FALSE);
+	g_autoptr(TestActionModule) prompt = new_action_module("t-prompt", GSURF_ACTION_OPEN_PROMPT, FALSE);
+	g_autoptr(TestActionModule) off = new_action_module("t-off", GSURF_ACTION_OPEN_PROMPT, FALSE);
+
+	gsurf_module_set_priority(GSURF_MODULE(find), GSURF_PRIORITY_HIGH);
+	gsurf_module_set_enabled(GSURF_MODULE(off), FALSE);
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(off));
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(prompt));
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(find));
+	gsurf_module_manager_activate_all(mgr);
+
+	g_assert_true(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_OPEN_PROMPT));
+	g_assert_cmpuint(find->calls, ==, 1);    /* asked first, declined */
+	g_assert_cmpuint(prompt->calls, ==, 1);  /* performed it */
+	g_assert_cmpuint(off->calls, ==, 0);     /* disabled: never active */
+
+	g_assert_true(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_FIND));
+	g_assert_cmpuint(prompt->calls, ==, 1);  /* find consumed it first */
+
+	g_assert_false(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_TAB_NEW));
+}
+
+/* A priority claimed inside activate() takes effect for dispatch: the
+ * manager sorts again after activating (modal relies on this). */
+static void
+test_priority_set_in_activate(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autoptr(TestActionModule) early = new_action_module("t-early", GSURF_ACTION_FIND, FALSE);
+	g_autoptr(TestActionModule) late = new_action_module("t-late", GSURF_ACTION_FIND, TRUE);
+
+	gsurf_module_set_priority(GSURF_MODULE(early), GSURF_PRIORITY_HIGH);
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(early));
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(late));
+	gsurf_module_manager_activate_all(mgr);
+
+	g_assert_true(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_FIND));
+	g_assert_cmpuint(late->calls, ==, 1);
+	g_assert_cmpuint(early->calls, ==, 0);
 }
 
 static void
@@ -447,6 +574,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/defaults-no-modules", test_defaults_no_modules);
 	g_test_add_func("/gsurf/manager/new-hook-defaults", test_new_hook_defaults);
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
+	g_test_add_func("/gsurf/manager/action-dispatch", test_action_dispatch);
+	g_test_add_func("/gsurf/manager/priority-set-in-activate", test_priority_set_in_activate);
 	g_test_add_func("/gsurf/manager/load-bad-path", test_load_bad_path);
 	g_test_add_func("/gsurf/manager/search-paths", test_search_paths);
 	g_test_add_func("/gsurf/manager/load-modules-from-path", test_load_modules_from_path);

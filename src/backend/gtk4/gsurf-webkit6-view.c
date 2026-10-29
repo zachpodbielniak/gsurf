@@ -230,6 +230,9 @@ gsurf_webkit6_view_run_js_finish(GsurfView *v, GAsyncResult *res, GError **error
 static gpointer gsurf_webkit6_view_get_native_widget(GsurfView *v)
 { return GSURF_WEBKIT6_VIEW(v)->webview; }
 
+static void gsurf_webkit6_view_focus(GsurfView *v)
+{ gtk_widget_grab_focus(GTK_WIDGET(GSURF_WEBKIT6_VIEW(v)->webview)); }
+
 static void gsurf_webkit6_view_show_inspector(GsurfView *v)
 {
 	WebKitWebView *wv = GSURF_WEBKIT6_VIEW(v)->webview;
@@ -466,6 +469,7 @@ gsurf_webkit6_view_class_init(GsurfWebkit6ViewClass *klass)
 	vc->run_javascript_async = gsurf_webkit6_view_run_js_async;
 	vc->run_javascript_finish = gsurf_webkit6_view_run_js_finish;
 	vc->get_native_widget = gsurf_webkit6_view_get_native_widget;
+	vc->focus = gsurf_webkit6_view_focus;
 	vc->show_inspector = gsurf_webkit6_view_show_inspector;
 	vc->add_user_script = gsurf_webkit6_view_add_user_script;
 	vc->add_user_style = gsurf_webkit6_view_add_user_style;

@@ -6,6 +6,7 @@
  */
 
 #include "config/gsurf-config.h"
+#include "util/gsurf-keys.h"
 
 #include <yaml-glib.h>
 #include <stdio.h>
@@ -24,59 +25,6 @@ expand_config_path(const gchar *path)
 	if (path[0] == '~' && path[1] == '/')
 		return g_build_filename(g_get_home_dir(), path + 2, NULL);
 	return g_strdup(path);
-}
-
-/* Reassemble "ctrl+SHIFT+r" into the canonical "Ctrl+Shift+r" so config
- * and dispatch agree regardless of order/case. The key token keeps its
- * original spelling (a GDK keyval name such as "r", "slash", "Return"). */
-static gchar *
-normalize_keystring(const gchar *s)
-{
-	gchar **parts;
-	gboolean ctrl = FALSE, alt = FALSE, shift = FALSE, super = FALSE;
-	const gchar *key = NULL;
-	GString *out;
-	guint i;
-
-	if (s == NULL || *s == '\0')
-		return NULL;
-
-	parts = g_strsplit(s, "+", -1);
-	for (i = 0; parts[i] != NULL; i++) {
-		gchar *tok = g_strstrip(parts[i]);
-
-		if (*tok == '\0')
-			continue;
-		if (g_ascii_strcasecmp(tok, "ctrl") == 0 ||
-		    g_ascii_strcasecmp(tok, "control") == 0)
-			ctrl = TRUE;
-		else if (g_ascii_strcasecmp(tok, "alt") == 0 ||
-		         g_ascii_strcasecmp(tok, "mod1") == 0)
-			alt = TRUE;
-		else if (g_ascii_strcasecmp(tok, "shift") == 0)
-			shift = TRUE;
-		else if (g_ascii_strcasecmp(tok, "super") == 0 ||
-		         g_ascii_strcasecmp(tok, "logo") == 0 ||
-		         g_ascii_strcasecmp(tok, "mod4") == 0)
-			super = TRUE;
-		else
-			key = tok;
-	}
-
-	/* "?" is the user-facing name for GDK's "question" keyval. */
-	if (key != NULL && g_strcmp0(key, "?") == 0)
-		key = "question";
-
-	out = g_string_new(NULL);
-	if (ctrl)  g_string_append(out, "Ctrl+");
-	if (alt)   g_string_append(out, "Alt+");
-	if (shift) g_string_append(out, "Shift+");
-	if (super) g_string_append(out, "Super+");
-	if (key != NULL)
-		g_string_append(out, key);
-
-	g_strfreev(parts);
-	return g_string_free(out, FALSE);
 }
 
 static void
@@ -141,7 +89,7 @@ parse_keybinds(GsurfConfig *self, YamlMapping *kb)
 		if (action == GSURF_ACTION_NONE)
 			continue;
 
-		norm = normalize_keystring(keystr);
+		norm = gsurf_keys_normalize(keystr);
 		if (norm != NULL)
 			g_hash_table_replace(self->keybinds, norm,
 				GUINT_TO_POINTER(action));
@@ -165,7 +113,7 @@ parse_mousebinds(GsurfConfig *self, YamlMapping *mb)
 		action = gsurf_action_from_string(action_str);
 		if (action == GSURF_ACTION_NONE)
 			continue;
-		norm = normalize_keystring(keystr);
+		norm = gsurf_keys_normalize(keystr);
 		if (norm != NULL)
 			g_hash_table_replace(self->mousebinds, norm, GUINT_TO_POINTER(action));
 	}
@@ -391,7 +339,7 @@ gsurf_config_get_keybind_action(GsurfConfig *self, const gchar *keystring)
 	if (keystring == NULL)
 		return GSURF_ACTION_NONE;
 
-	norm = normalize_keystring(keystring);
+	norm = gsurf_keys_normalize(keystring);
 	if (norm == NULL)
 		return GSURF_ACTION_NONE;
 
@@ -420,7 +368,7 @@ gsurf_config_set_keybind(GsurfConfig *self, const gchar *keystring, GsurfAction 
 	if (keystring == NULL)
 		return;
 
-	norm = normalize_keystring(keystring);
+	norm = gsurf_keys_normalize(keystring);
 	if (norm == NULL)
 		return;
 
@@ -441,7 +389,7 @@ gsurf_config_set_mousebind(GsurfConfig *self, const gchar *binding, GsurfAction 
 	if (binding == NULL)
 		return;
 
-	norm = normalize_keystring(binding);
+	norm = gsurf_keys_normalize(binding);
 	if (norm == NULL)
 		return;
 

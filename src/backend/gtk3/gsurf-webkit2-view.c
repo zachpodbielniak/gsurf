@@ -441,6 +441,16 @@ gsurf_webkit2_view_get_native_widget(GsurfView *view)
 	return self->webview;
 }
 
+/* Move GTK keyboard focus onto the WebKitWebView (off the chrome). */
+static void
+gsurf_webkit2_view_focus(GsurfView *view)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+
+	if (self->webview != NULL)
+		gtk_widget_grab_focus(GTK_WIDGET(self->webview));
+}
+
 static void
 gsurf_webkit2_view_show_inspector(GsurfView *view)
 {
@@ -825,6 +835,7 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->run_javascript_async = gsurf_webkit2_view_run_javascript_async;
 	view_class->run_javascript_finish = gsurf_webkit2_view_run_javascript_finish;
 	view_class->get_native_widget = gsurf_webkit2_view_get_native_widget;
+	view_class->focus = gsurf_webkit2_view_focus;
 	view_class->get_snapshot_async = gsurf_webkit2_view_get_snapshot_async;
 	view_class->get_snapshot_finish = gsurf_webkit2_view_get_snapshot_finish;
 	view_class->show_inspector = gsurf_webkit2_view_show_inspector;

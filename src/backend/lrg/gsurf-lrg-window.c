@@ -75,6 +75,7 @@ struct _GsurfLrgWindow
 	/* LRG-native address bar (open-prompt under --lrg, since the GTK
 	   chromebar/omnibar modules cannot render here) */
 	gboolean   url_editing;
+	gboolean   url_fresh;   /* pre-filled URI not yet edited: "selected" */
 	GString   *url_input;
 
 	/* Chrome UI font (same family as the GTK client; raylib's default font
@@ -236,7 +237,22 @@ lrg_window_url_commit(GsurfLrgWindow *self)
 	self->url_editing = FALSE;
 }
 
-/* Delete the last UTF-8 character from the address field. */
+/* Type a character into the address field. The pre-filled URI acts as
+ * selected text (as in a GTK entry): the first keystroke replaces it. */
+static void
+lrg_url_type(GsurfLrgWindow *self, gint ch)
+{
+	if (ch < 0x20)
+		return;
+	if (self->url_fresh) {
+		g_string_truncate(self->url_input, 0);
+		self->url_fresh = FALSE;
+	}
+	g_string_append_unichar(self->url_input, (gunichar)ch);
+}
+
+/* Delete the last UTF-8 character from the address field (all of it while
+ * the pre-filled URI is still "selected"). */
 static void
 lrg_url_backspace(GsurfLrgWindow *self)
 {
@@ -244,6 +260,11 @@ lrg_url_backspace(GsurfLrgWindow *self)
 
 	if (self->url_input == NULL || self->url_input->len == 0)
 		return;
+	if (self->url_fresh) {
+		g_string_truncate(self->url_input, 0);
+		self->url_fresh = FALSE;
+		return;
+	}
 	n = g_utf8_strlen(self->url_input->str, -1);
 	if (n > 0) {
 		gchar *p = g_utf8_offset_to_pointer(self->url_input->str, n - 1);
@@ -323,8 +344,7 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view)
 	/* --- LRG address bar: while editing, all keys go to the URL field --- */
 	if (self->url_editing) {
 		while ((ch = grl_input_get_char_pressed()) != 0)
-			if (ch >= 0x20)
-				g_string_append_unichar(self->url_input, (gunichar)ch);
+			lrg_url_type(self, ch);
 		while ((key = grl_input_get_key_pressed()) != 0) {
 			if (key == GRL_KEY_ENTER || key == GRL_KEY_KP_ENTER)
 				lrg_window_url_commit(self);
@@ -395,7 +415,15 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view)
 	 * (main.c on_key_press) returns FALSE while the page is editing so bare
 	 * keys then reach the focused form field. */
 	while ((ch = grl_input_get_char_pressed()) != 0) {
-		gboolean consumed = gsurf_window_emit_key_press(win, (guint)ch, 0, mods);
+		gboolean consumed;
+
+		/* A key earlier in this frame (`o`) opened the address bar: the
+		 * rest of the frame's typing belongs to it, not to the page. */
+		if (self->url_editing) {
+			lrg_url_type(self, ch);
+			continue;
+		}
+		consumed = gsurf_window_emit_key_press(win, (guint)ch, 0, mods);
 		if (lrg_dbg())
 			g_printerr("[lrg-input] CHAR %d ('%c') module/keybind_consumed=%d "
 			           "-> %s\n", ch, (ch >= 32 && ch < 127) ? ch : '?',
@@ -406,6 +434,10 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view)
 			gsurf_lrg_view_send_key(view, keysym, 0, mods, FALSE);
 		}
 	}
+
+	/* The address bar just opened: its own branch handles keys next tick. */
+	if (self->url_editing)
+		return;
 
 	/* Non-text keys + Ctrl/Alt-modified keys (no char from GLFW for those). */
 	while ((key = grl_input_get_key_pressed()) != 0)
@@ -504,6 +536,15 @@ lrg_window_tick(gpointer user_data)
 					                self->url_input ? self->url_input->str : "");
 				grl_draw_rectangle(0, 0, ww, LRG_CHROME_H, ebar);
 				grl_draw_rectangle(0, LRG_CHROME_H - 2, ww, 2, accent);
+				/* Highlight the pre-filled URI while typing would replace it. */
+				if (self->url_fresh) {
+					g_autoptr(GrlColor) sel = grl_color_new(52, 78, 128, 255);
+					int px0 = 8 + lrg_window_text_width(self, "Open: ", LRG_CHROME_FONT);
+					int sw = lrg_window_text_width(self, self->url_input->str,
+					                               LRG_CHROME_FONT);
+
+					grl_draw_rectangle(px0, ty - 2, sw, LRG_CHROME_FONT + 4, sel);
+				}
 				lrg_window_text(self, line, 8, ty, LRG_CHROME_FONT, fg);
 			} else {
 				g_autoptr(GrlColor) bar = grl_color_new(40, 42, 48, 255);
@@ -726,6 +767,7 @@ gsurf_lrg_window_begin_url_edit(GsurfLrgWindow *self)
 	/* Pre-fill with the current URI so the user can edit it. */
 	if (self->chrome_url != NULL)
 		g_string_assign(self->url_input, self->chrome_url);
+	self->url_fresh = self->url_input->len > 0;
 	self->url_editing = TRUE;
 }
 

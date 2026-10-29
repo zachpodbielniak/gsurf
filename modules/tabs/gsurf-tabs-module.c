@@ -41,11 +41,13 @@ struct _GsurfTabsModule
 
 static void gsurf_tabs_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_tabs_keybind_init(GsurfKeybindProviderInterface *iface);
+static void gsurf_tabs_action_init(GsurfActionHandlerInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfTabsModule, gsurf_tabs_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_tabs_input_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_tabs_keybind_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_tabs_keybind_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_tabs_action_init))
 
 static void rebuild_strip(GsurfTabsModule *self);
 
@@ -199,17 +201,21 @@ rebuild_strip(GsurfTabsModule *self)
 
 		btn = gtk_button_new_with_label(label);
 		gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);
+		/* Clicking a tab must not park keyboard focus on the strip. */
+		gtk_widget_set_focus_on_click(btn, FALSE);
 		g_object_set_data(G_OBJECT(btn), "gsurf-view", view);
 		g_signal_connect(btn, "clicked", G_CALLBACK(on_tab_clicked), self);
 
 		close = gtk_button_new_with_label("×");
 		gtk_button_set_relief(GTK_BUTTON(close), GTK_RELIEF_NONE);
+		gtk_widget_set_focus_on_click(close, FALSE);
 		g_object_set_data(G_OBJECT(close), "gsurf-view", view);
 		g_signal_connect(close, "clicked", G_CALLBACK(on_tab_close_clicked), self);
 
 		gtk_box_pack_start(GTK_BOX(tab), btn, FALSE, FALSE, 0);
 		gtk_box_pack_start(GTK_BOX(tab), close, FALSE, FALSE, 0);
 		gtk_box_pack_start(GTK_BOX(self->bar), tab, FALSE, FALSE, 0);
+		gtk_widget_show_all(tab);
 
 		/* Refresh the strip when a view's title changes (connect once). */
 		if (g_object_get_data(G_OBJECT(view), "gsurf-tabstrip-wired") == NULL) {
@@ -219,7 +225,6 @@ rebuild_strip(GsurfTabsModule *self)
 		}
 	}
 
-	gtk_widget_show_all(self->bar);
 	update_visibility(self);
 }
 
@@ -249,6 +254,40 @@ install_css(GsurfTabsModule *self)
 
 /* --- Key handling --- */
 
+/* Perform a tab action; shared by the module's own keys and the core
+ * tab-* keybind actions. */
+static gboolean
+tabs_perform(GsurfTabsModule *self, GsurfWindow *window, GsurfAction action)
+{
+	/* Kiosk keeps the module loaded but never opens extra views. */
+	if (gsurf_kiosk_is_enabled() &&
+	    (action == GSURF_ACTION_TAB_NEW || action == GSURF_ACTION_TAB_REOPEN))
+		return TRUE;
+
+	switch (action) {
+	case GSURF_ACTION_TAB_NEW:
+		open_tab_uri(window, NULL);
+		return TRUE;
+	case GSURF_ACTION_TAB_CLOSE:
+		close_active_tab(self, window);
+		return TRUE;
+	case GSURF_ACTION_TAB_REOPEN:
+		if (!g_queue_is_empty(self->closed_uris)) {
+			g_autofree gchar *uri = g_queue_pop_head(self->closed_uris);
+			open_tab_uri(window, uri);
+		}
+		return TRUE;
+	case GSURF_ACTION_TAB_NEXT:
+		switch_tab(window, +1);
+		return TRUE;
+	case GSURF_ACTION_TAB_PREV:
+		switch_tab(window, -1);
+		return TRUE;
+	default:
+		return FALSE;
+	}
+}
+
 static gboolean
 gsurf_tabs_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
                             guint keyval, guint keycode, guint state,
@@ -257,40 +296,41 @@ gsurf_tabs_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	GsurfTabsModule *self = GSURF_TABS_MODULE(handler);
 	GsurfWindow *window = gsurf_module_manager_get_active_window(
 		gsurf_module_manager_get_default());
+	GsurfAction action = GSURF_ACTION_NONE;
 
 	if (window == NULL)
 		return FALSE;
 
-	/* Kiosk keeps the module loaded but never opens extra views. */
-	if (gsurf_kiosk_is_enabled() &&
-	    ((self->key_new && gsurf_keys_match(keyval, state, self->key_new)) ||
-	     (self->key_reopen && gsurf_keys_match(keyval, state, self->key_reopen))))
-		return TRUE;
+	if (self->key_new && gsurf_keys_match(keyval, state, self->key_new))
+		action = GSURF_ACTION_TAB_NEW;
+	else if (self->key_close && gsurf_keys_match(keyval, state, self->key_close))
+		action = GSURF_ACTION_TAB_CLOSE;
+	else if (self->key_reopen && gsurf_keys_match(keyval, state, self->key_reopen))
+		action = GSURF_ACTION_TAB_REOPEN;
+	else if (self->key_next && gsurf_keys_match(keyval, state, self->key_next))
+		action = GSURF_ACTION_TAB_NEXT;
+	else if (self->key_prev && gsurf_keys_match(keyval, state, self->key_prev))
+		action = GSURF_ACTION_TAB_PREV;
 
-	if (self->key_new && gsurf_keys_match(keyval, state, self->key_new)) {
-		open_tab_uri(window, NULL);
-		return TRUE;
-	}
-	if (self->key_close && gsurf_keys_match(keyval, state, self->key_close)) {
-		close_active_tab(self, window);
-		return TRUE;
-	}
-	if (self->key_reopen && gsurf_keys_match(keyval, state, self->key_reopen)) {
-		if (!g_queue_is_empty(self->closed_uris)) {
-			g_autofree gchar *uri = g_queue_pop_head(self->closed_uris);
-			open_tab_uri(window, uri);
-		}
-		return TRUE;
-	}
-	if (self->key_next && gsurf_keys_match(keyval, state, self->key_next)) {
-		switch_tab(window, +1);
-		return TRUE;
-	}
-	if (self->key_prev && gsurf_keys_match(keyval, state, self->key_prev)) {
-		switch_tab(window, -1);
-		return TRUE;
-	}
-	return FALSE;
+	return tabs_perform(self, window, action);
+}
+
+static gboolean
+gsurf_tabs_handle_action(GsurfActionHandler *handler, GsurfView *view,
+                         GsurfAction action)
+{
+	GsurfWindow *window = gsurf_module_manager_get_active_window(
+		gsurf_module_manager_get_default());
+
+	if (window == NULL)
+		return FALSE;
+	return tabs_perform(GSURF_TABS_MODULE(handler), window, action);
+}
+
+static void
+gsurf_tabs_action_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = gsurf_tabs_handle_action;
 }
 
 static void
@@ -349,6 +389,9 @@ gsurf_tabs_activate(GsurfModule *module)
 
 	self->bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
 	gtk_style_context_add_class(gtk_widget_get_style_context(self->bar), "gsurf-tabbar");
+	/* Visibility is ours (update_visibility): keep the window's
+	 * show_all() at startup from revealing a single-tab strip. */
+	gtk_widget_set_no_show_all(self->bar, TRUE);
 
 	if (self->position_top)
 		gsurf_window_add_top_widget(window, self->bar);
