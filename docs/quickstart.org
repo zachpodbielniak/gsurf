@@ -31,6 +31,23 @@ make DEBUG=1 clean all -j
 
 When =clean= or =clean-all= is combined with other goals, cleaning finishes first and a fresh make invocation runs the remaining goals with the same options and parallelism. Goal order does not matter; =make all clean -j= also cleans first. This coordinates goals within one invocation, not separate make processes sharing a checkout.
 
+* FreeBSD
+
+gsurf builds and runs on FreeBSD 15.1 (verified on Immutablue's =freebsd-be= image, GTK3 / WebKitGTK 4.1). =make install-deps= does not know =pkg=; the packages that build it are the =build_deps= Immutablue resolves for FreeBSD — among them =gmake=, =gcc=, =pkgconf=, =gtk3=, =webkit2-gtk_41=, =libsoup3=, =json-glib=, =libyaml=, =png=, and for the vendored raylib =mesa-libs=, =libglvnd=, =libX11=, =libXrandr=, =libXinerama=, =libXcursor=, =libXi= and =alsa-lib=.
+
+#+begin_src sh
+export CC=gcc                                   # cc is clang; gsurf is gnu89 C built with gcc
+export PKG_CONFIG_PATH=/usr/local/lib/pkgconfig # where the GLib-ecosystem deps install
+gmake -C deps/libregnum/deps/graylib lib CUSTOM_CFLAGS="-O2 -fPIC"
+gmake LRG_BACKEND=1 src/gsurf-version.h deps/crispy/src/crispy-version.h
+gmake LRG_BACKEND=1 MCP=1 PREFIX=/usr/local BUILD_MODULES=1
+#+end_src
+
+- *GNU make.* The Makefiles are GNU make throughout; FreeBSD's =make= is BSD make, so use =gmake=.
+- *=-fPIC= for the vendored raylib.* Fedora's gcc builds position-independent code by default and FreeBSD's does not, and raylib's archive is linked into shared objects. The graylib pinned here predates graylib's own fix (=06fa52b=), so the flag is passed by hand.
+- *Loader hints.* =make install= runs =ldconfig -m $(LIBDIR)= on FreeBSD (=rules.mk=): a bare =ldconfig= there replaces the run-time linker hints with only the directories given instead of adding to them.
+- *GIO's local VFS.* At run time gsurf sets =GIO_USE_VFS=local= for itself on FreeBSD: with GIO's GVfs module active, the FreeBSD packages of gvfs 1.58, WebKitGTK 4.1 2.46 and GLib 2.88 corrupt GTK's type data in any process showing a web view (blank window and GTK criticals, a crash with the AT-SPI bridge loaded). =GSURF_GVFS=1= keeps GVfs; see the [[file:cli.org][CLI reference]].
+
 * First config
 
 #+begin_src sh
