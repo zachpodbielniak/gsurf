@@ -651,6 +651,33 @@ gsurf_view_set_editing(GsurfView *self, gboolean editing)
 	priv->editing = editing;
 }
 
+void
+gsurf_view_blur_editable(GsurfView *self)
+{
+	g_return_if_fail(GSURF_IS_VIEW(self));
+
+	/* Blurring an <iframe> element in the top document also drops focus
+	 * out of the frame, so the top-level activeElement is enough. */
+	gsurf_view_run_javascript_async(self,
+		"document.activeElement&&document.activeElement.blur&&document.activeElement.blur()",
+		NULL, NULL, NULL);
+	gsurf_view_set_editing(self, FALSE);
+}
+
+/* --- Keyboard focus --- */
+
+void
+gsurf_view_focus(GsurfView *self)
+{
+	GsurfViewClass *klass;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->focus != NULL)
+		klass->focus(self);
+}
+
 /* --- Extended API --- */
 
 #define GSURF_VIEW_VOID_VFUNC(name) \

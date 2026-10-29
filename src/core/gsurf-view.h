@@ -51,6 +51,7 @@ G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
  * @get_snapshot_async: capture a snapshot asynchronously
  * @get_snapshot_finish: finish a snapshot (returns PNG #GBytes)
  * @get_native_widget: the underlying native widget (as gpointer)
+ * @focus: give keyboard focus to the page (see gsurf_view_focus())
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
@@ -102,7 +103,10 @@ struct _GsurfViewClass
 	void         (*add_content_filter)          (GsurfView *self, const gchar *identifier,
 	                                             const gchar *json_rules);
 
-	gpointer padding[8];
+	/* Keyboard focus: move toolkit focus onto the page. */
+	void         (*focus)                       (GsurfView *self);
+
+	gpointer padding[7];
 };
 
 /* --- Navigation --- */
@@ -187,6 +191,30 @@ gboolean gsurf_view_get_editing(GsurfView *self);
  * directly.
  */
 void gsurf_view_set_editing(GsurfView *self, gboolean editing);
+
+/**
+ * gsurf_view_blur_editable:
+ * @self: a #GsurfView
+ *
+ * Leaves the focused editable element in the page: blurs
+ * `document.activeElement` and clears the editing state at once, so the
+ * next key is treated as a command rather than typing (the page's own
+ * focusout report arrives asynchronously and would otherwise lag one key
+ * behind). Bound to Escape while a page field has focus.
+ */
+void gsurf_view_blur_editable(GsurfView *self);
+
+/* --- Keyboard focus --- */
+
+/**
+ * gsurf_view_focus:
+ * @self: a #GsurfView
+ *
+ * Moves keyboard focus onto the page itself, away from window chrome such
+ * as the address bar or the find bar. Backends without toolkit focus (the
+ * libregnum backend) treat this as a no-op.
+ */
+void gsurf_view_focus(GsurfView *self);
 
 /* --- Embedding --- */
 /**
