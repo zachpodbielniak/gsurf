@@ -43,7 +43,7 @@ jobs:
 
       - name: Update latest release
         env:
-          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           VERSION=$(grep '^VERSION_MAJOR\|^VERSION_MINOR\|^VERSION_MICRO' config.mk \
             | sed 's/.*:= //' | paste -sd '.' -)
@@ -53,23 +53,23 @@ jobs:
           # delete existing latest release if present
           LATEST_ID=$(curl -s \
             "${API}/releases/tags/latest" \
-            -H "Authorization: token ${FORGEJO_TOKEN}" | jq -r '.id // empty')
+            -H "Authorization: token ${RELEASE_TOKEN}" | jq -r '.id // empty')
 
           if [ -n "${LATEST_ID}" ]; then
             curl -sf -X DELETE \
               "${API}/releases/${LATEST_ID}" \
-              -H "Authorization: token ${FORGEJO_TOKEN}"
+              -H "Authorization: token ${RELEASE_TOKEN}"
           fi
 
           # delete existing latest tag if present
           curl -s -X DELETE \
             "${API}/tags/latest" \
-            -H "Authorization: token ${FORGEJO_TOKEN}" || true
+            -H "Authorization: token ${RELEASE_TOKEN}" || true
 
           # create new latest release
           RELEASE_ID=$(curl -sf -X POST \
             "${API}/releases" \
-            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Authorization: token ${RELEASE_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "{
               \"tag_name\": \"latest\",
@@ -83,5 +83,5 @@ jobs:
           # upload AppImage
           curl -sf -X POST \
             "${API}/releases/${RELEASE_ID}/assets?name=gsurf-latest-x86_64.AppImage" \
-            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Authorization: token ${RELEASE_TOKEN}" \
             -F "attachment=@${APPIMAGE}"
