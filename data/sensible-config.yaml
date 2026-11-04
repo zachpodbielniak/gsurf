@@ -60,7 +60,7 @@ network:
   proxy:
     mode: default              # default | none | custom
     uri: ""
-  do_not_track: true
+  do_not_track: false          # DNT: 1 header; sent only while the hardening module is enabled
 
 # ===== Window =====
 window:

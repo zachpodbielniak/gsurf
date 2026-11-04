@@ -66,6 +66,8 @@ An empty =user_agent= (or =NULL= in C settings) restores the engine's default us
 
 Native settings regressions run with =make test-gui= under Xvfb. On an existing display, run =GSURF_TEST_GUI=1 ./build/release/test-backend-settings= after =make test=; ordinary headless tests skip these display-dependent checks.
 
+=network.do_not_track= (default =false=) asks for a =DNT: 1= header. WebKit has no Do Not Track switch, so the header is sent by the =hardening= module's web-process extension and only while that module is enabled; its own =dnt:= key overrides this one. See [[file:hardening.org][hardening.org]], which also covers https-only, tracking-parameter stripping, Referer trimming, Global Privacy Control, third-party cookies and per-site exemptions.
+
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).
 

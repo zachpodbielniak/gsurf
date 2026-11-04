@@ -62,7 +62,7 @@ network:
   proxy:
     mode: default                  # default (system), none, custom
     uri: ""                        # e.g. socks5://127.0.0.1:9050
-  do_not_track: true
+  do_not_track: false              # DNT: 1 header; sent only while the hardening module is enabled
 
 # ===== Window (core) =====
 window:

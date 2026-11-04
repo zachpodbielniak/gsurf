@@ -75,7 +75,7 @@ gsurf_web_process_extension_register("adblock", "/path/to/adblock-webext/gsurf-a
 	init_data);   /* any GVariant; delivered under the "adblock" key */
 #+end_src
 
-The WebKit backends hand every registered extension, and an =a{sv}= of each one's data, to each web process they launch. The registry itself (=src/core/gsurf-web-process.h=) is backend-agnostic. =modules/adblock/webext/= is the reference.
+The WebKit backends hand every registered extension, and an =a{sv}= of each one's data, to each web process they launch. The registry itself (=src/core/gsurf-web-process.h=) is backend-agnostic. =modules/adblock/webext/= is the reference; =modules/hardening/webext/= is a smaller one whose decision logic is a GLib-only file shared with the module and its unit test.
 
 A module that owns a UI a core action refers to should implement =GsurfActionHandler::handle_action= and answer that =GsurfAction=. The host's keymap only knows the action (=o= → =open-prompt=); it calls =gsurf_module_manager_dispatch_action()= when it has no built-in implementation, and the first active module in priority order that returns =TRUE= performs it. That keeps the binding in the user's =keybinds:= table while the module stays free to own its widget.
 
