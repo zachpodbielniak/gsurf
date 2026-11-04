@@ -492,6 +492,10 @@ gsurf_tabs_ui_install(GsurfTabsModule *self)
 	gtk_widget_set_name(self->sidebar_box, GSURF_TABS_SIDEBAR_NAME);
 	gsurf_chrome_widget_add_class(self->sidebar_box, "gsurf-tab-sidebar");
 	gtk_widget_set_size_request(self->sidebar_box, self->sidebar_width, -1);
+	/* Fixed width on any window implementation: on GTK4 the expanding
+	 * title labels in the rows would otherwise make the sidebar expand
+	 * too and take half the window. */
+	gtk_widget_set_hexpand(self->sidebar_box, FALSE);
 	gsurf_chrome_box_pack(self->sidebar_box, scrolled, TRUE, 0);
 	gsurf_window_add_side_widget(self->window, self->sidebar_box,
 		self->sidebar_right ? GSURF_CHROME_EDGE_RIGHT : GSURF_CHROME_EDGE_LEFT);

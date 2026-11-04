@@ -200,6 +200,12 @@ gsurf_gtk4_window_add_side_widget(GsurfWindow *window, gpointer widget, GsurfChr
 
 	if (w == NULL || self->hbox == NULL)
 		return;
+	/* A side panel keeps its own width, like GTK3's pack with expand
+	 * FALSE. GTK4 computes a widget's expand flag from its children
+	 * unless it is set explicitly, so a label that expands deep inside
+	 * the panel would make the hbox split its space between the panel
+	 * and the page. Setting it explicitly stops that propagation. */
+	gtk_widget_set_hexpand(w, FALSE);
 	if (edge == GSURF_CHROME_EDGE_LEFT)
 		gtk_box_prepend(GTK_BOX(self->hbox), w);
 	else

@@ -181,7 +181,8 @@ void        gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget);
  * @edge: which side of the view area
  *
  * Packs a side panel beside the view area, between the top and bottom
- * chrome. No-op while kiosk mode is enabled, and on backends without
+ * chrome. The panel never takes extra width: it gets its own size
+ * request and the page gets the rest of the window. No-op while kiosk mode is enabled, and on backends without
  * native chrome (libregnum).
  */
 void        gsurf_window_add_side_widget(GsurfWindow *self, gpointer widget,
