@@ -170,6 +170,52 @@ on_view_focus_enter(GtkEventControllerFocus *ctrl, gpointer user_data)
 		gsurf_window_set_active_view(window, view);
 }
 
+static void
+free_weak_ref(gpointer data)
+{
+	g_weak_ref_clear(data);
+	g_free(data);
+}
+
+/* Whether @widget already carries this window's controllers. The mark is
+ * a weak reference, so a view that outlives its window is wired again by
+ * the next window even if that one reuses the old address. */
+static gboolean
+is_wired(GsurfGtk4Window *self, GtkWidget *widget)
+{
+	GWeakRef *ref = g_object_get_data(G_OBJECT(widget), "gsurf-gtk4-wired");
+	g_autoptr(GObject) owner = NULL;
+
+	if (ref == NULL)
+		return FALSE;
+	owner = g_weak_ref_get(ref);
+	return owner == G_OBJECT(self);
+}
+
+/* Remove the click and focus controllers a window added to @widget. */
+static void
+remove_view_controllers(GtkWidget *widget)
+{
+	g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(widget);
+	g_autoptr(GPtrArray) ours = g_ptr_array_new_with_free_func(g_object_unref);
+	guint i;
+
+	/* Collect first: removing while walking the live list model would
+	 * shift it under us. */
+	for (i = 0; i < g_list_model_get_n_items(controllers); i++) {
+		GtkEventController *c = g_list_model_get_item(controllers, i);
+		const gchar *name = gtk_event_controller_get_name(c);
+
+		if (g_strcmp0(name, "gsurf-view-click") == 0 ||
+		    g_strcmp0(name, "gsurf-view-focus") == 0)
+			g_ptr_array_add(ours, c);
+		else
+			g_object_unref(c);
+	}
+	for (i = 0; i < ours->len; i++)
+		gtk_widget_remove_controller(widget, g_ptr_array_index(ours, i));
+}
+
 /* Per-view event routing, done once per (widget, window): a view widget
  * keeps its controllers when it moves between the stack and a layout
  * (gsurf_window_set_layout()), so wiring it again would emit every press
@@ -179,10 +225,16 @@ gsurf_gtk4_window_wire_view(GsurfGtk4Window *self, GtkWidget *widget)
 {
 	GtkGesture *click;
 	GtkEventController *focus;
+	GWeakRef *ref;
 
-	if (g_object_get_data(G_OBJECT(widget), "gsurf-gtk4-wired") == self)
+	if (is_wired(self, widget))
 		return;
-	g_object_set_data(G_OBJECT(widget), "gsurf-gtk4-wired", self);
+	/* Another window wired it before (the view moved, or that window is
+	 * gone): its controllers go, the widget now reports to this one. */
+	remove_view_controllers(widget);
+	ref = g_new0(GWeakRef, 1);
+	g_weak_ref_init(ref, self);
+	g_object_set_data_full(G_OBJECT(widget), "gsurf-gtk4-wired", ref, free_weak_ref);
 
 	/* Any button (0), so side buttons (8/9) reach the mousebinds too. */
 	click = gtk_gesture_click_new();

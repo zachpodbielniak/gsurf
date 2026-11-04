@@ -342,6 +342,23 @@ test_button_routing(void)
 #ifdef GSURF_BACKEND_GTK3
 	g_assert_cmpuint(log.button, ==, 9);
 #endif
+
+	/* The view outlives its window and joins a new one: the new window
+	 * hears its presses (the old window's wiring died with it). */
+	g_object_ref(view);
+	g_signal_handlers_disconnect_by_data(window, &log);
+	gsurf_window_remove_view(window, view);
+	g_clear_object(&window);
+	window = gsurf_window_new();
+	gsurf_window_add_view(window, view);
+	g_object_unref(view);
+	g_signal_connect(window, "button-press", G_CALLBACK(on_button_press), &log);
+	gsurf_window_remove_view(window, view);
+	g_object_ref(view);
+	gsurf_window_add_view(window, view);
+	g_object_unref(view);
+	press_button(widget, 2);
+	g_assert_cmpuint(log.count, ==, 3);
 }
 
 /* Two real webviews side by side through a layout; focus follows click;
