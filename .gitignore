@@ -1,6 +1,8 @@
 # Build output (objects, libs, binary, modules, GIR, AppImage, generated
 # embedded-config header all live under build/)
 /build/
+# Alternate build trees, e.g. `make GTK_BACKEND=gtk4 BUILDDIR=build-gtk4`
+/build-*/
 
 # Generated version header (produced from src/gsurf-version.h.in)
 /src/gsurf-version.h

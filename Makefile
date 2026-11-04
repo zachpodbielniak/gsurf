@@ -142,8 +142,11 @@ endif
 
 # Build vendored dependencies (yaml-glib objects + crispy static archive)
 .PHONY: crispy-lib
+# BUILDDIR is pinned for the sub-make: a command-line BUILDDIR (e.g. a
+# separate GTK4 tree, `make GTK_BACKEND=gtk4 BUILDDIR=build-gtk4`) would
+# otherwise propagate and move crispy's archive away from $(CRISPY_LIB).
 crispy-lib:
-	$(MAKE) -C $(CRISPY_DIR) lib
+	$(MAKE) -C $(CRISPY_DIR) BUILDDIR=build lib
 
 $(CRISPY_LIB): crispy-lib
 

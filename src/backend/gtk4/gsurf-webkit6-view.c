@@ -366,11 +366,12 @@ static const gchar *FOCUS_TRACKER_JS =
 	"document.addEventListener('focusin',snd,true);"
 	"document.addEventListener('focusout',function(){setTimeout(snd,0);},true);snd();})()";
 
+/* WebKitGTK 6.0 hands script-message handlers the JSCValue directly
+ * (4.1 wrapped it in a WebKitJavascriptResult). */
 static void
-on_focus_message(WebKitUserContentManager *ucm, WebKitJavascriptResult *result, gpointer user_data)
+on_focus_message(WebKitUserContentManager *ucm, JSCValue *value, gpointer user_data)
 {
 	GsurfWebkit6View *self = user_data;
-	JSCValue *value = webkit_javascript_result_get_js_value(result);
 	gsurf_view_set_editing(GSURF_VIEW(self), jsc_value_to_boolean(value));
 }
 
