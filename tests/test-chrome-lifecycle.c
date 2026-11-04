@@ -16,8 +16,9 @@
  * (Ctrl+Shift+.) and by action, rows and indentation following the tree,
  * collapse and expansion on activation, moving subtrees, row clicks,
  * promote and close_children, title/favicon updates, container stripes
- * following the registry, strip hiding, kiosk, and the same lifetime
- * rules as the other chrome modules.
+ * following the registry, strip hiding, kiosk, the tab context menu
+ * (right click on a row or a strip tab) without containers, and the same
+ * lifetime rules as the other chrome modules.
  *
  * Needs a display, so every case skips unless GSURF_TEST_GUI=1 (make
  * test-gui runs it under Xvfb). No web process or network is used.
@@ -1341,6 +1342,136 @@ test_tabs_close_children(void)
 	chrome_teardown(&c);
 }
 
+/* Every label of @model in order, "|"-terminated; a submenu's labels
+ * are bracketed after its own. */
+static void
+append_menu_labels(GMenuModel *model, GString *out)
+{
+	gint i;
+
+	for (i = 0; i < g_menu_model_get_n_items(model); i++) {
+		g_autofree gchar *label = NULL;
+		g_autoptr(GMenuModel) section = NULL;
+		g_autoptr(GMenuModel) submenu = NULL;
+
+		if (g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_LABEL, "s", &label))
+			g_string_append_printf(out, "%s|", label);
+		section = g_menu_model_get_item_link(model, i, G_MENU_LINK_SECTION);
+		if (section != NULL)
+			append_menu_labels(section, out);
+		submenu = g_menu_model_get_item_link(model, i, G_MENU_LINK_SUBMENU);
+		if (submenu != NULL) {
+			g_string_append_c(out, '[');
+			append_menu_labels(submenu, out);
+			g_string_append_c(out, ']');
+		}
+	}
+}
+
+/* The labels of the tab menu @module opened last. */
+static gchar *
+tab_menu_labels(GsurfModule *module)
+{
+	GMenuModel *model = g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-model");
+	GString *out = g_string_new(NULL);
+
+	g_assert_nonnull(model);
+	append_menu_labels(model, out);
+	return g_string_free(out, FALSE);
+}
+
+/* The tab context menu without containers (no placement policy): no
+ * container entries; tree entries only on a tab with children; its
+ * actions act on the tab that was right-clicked; a strip tab opens the
+ * same menu; off screen no menu widget is made; deactivation drops the
+ * actions; reactivation brings them back. */
+static void
+test_tabs_menu(void)
+{
+	Chrome c;
+	GsurfModule *module;
+	GActionGroup *actions;
+	GsurfView *k1;
+	GsurfView *k2;
+	GtkWidget *strip;
+	GtkWidget *tab = NULL;
+	GtkWidget *button = NULL;
+	gchar *labels;
+
+	if (!chrome_setup(&c, "tabs", &module))
+		return;
+	configure_tabs(module, "modules:\n  tabs:\n    enabled: true\n");
+	g_assert_true(gsurf_module_activate(module));
+	actions = g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-actions");
+	g_assert_nonnull(actions);
+	k1 = tab_view(c.first, NULL, "k1");
+	k2 = tab_view(c.first, NULL, "k2");
+	gsurf_window_add_view(c.window, k1);
+	gsurf_window_add_view(c.window, k2);
+
+	/* 1. A parent: tree entries, no containers, no on-screen menu. */
+	click_row(row_of(c.window, c.first), 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==,
+		"Reload Tab|Duplicate Tab|Collapse Tree|Close Children|Close Tab|");
+	g_free(labels);
+	g_assert_null(g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-widget"));
+	g_assert_true(g_action_group_get_action_enabled(actions, "close"));
+
+	/* 2. Its tree actions act on it: collapse (the menu then offers
+	 *    Expand), expand. */
+	g_action_group_activate_action(actions, "toggle-collapse", NULL);
+	g_assert_cmpstr(twisty_of(c.window, c.first), ==, "▸");
+	click_row(row_of(c.window, c.first), 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==,
+		"Reload Tab|Duplicate Tab|Expand Tree|Close Children|Close Tab|");
+	g_free(labels);
+	g_action_group_activate_action(actions, "toggle-collapse", NULL);
+	g_assert_cmpstr(twisty_of(c.window, c.first), ==, "▾");
+
+	/* 3. A leaf: no tree entries. Close closes that tab, not the
+	 *    active one. */
+	click_row(row_of(c.window, k2), 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==, "Reload Tab|Duplicate Tab|Close Tab|");
+	g_free(labels);
+	gsurf_window_set_active_view(c.window, c.second);
+	g_action_group_activate_action(actions, "close", NULL);
+	g_assert_cmpint(gsurf_window_get_view_index(c.window, k2), <, 0);
+	g_assert_true(gsurf_window_get_active_view(c.window) == c.second);
+
+	/* 4. Close Children on the parent keeps the parent. */
+	click_row(row_of(c.window, c.first), 3);
+	g_action_group_activate_action(actions, "close-children", NULL);
+	g_assert_cmpint(gsurf_window_get_view_index(c.window, k1), <, 0);
+	g_assert_cmpint(gsurf_window_get_view_index(c.window, c.first), >=, 0);
+	g_assert_cmpuint(gsurf_window_get_n_views(c.window), ==, 2);
+
+	/* 5. A strip tab opens the same menu for its tab. */
+	strip = only_child(c.window);
+	g_assert_cmpuint(box_children(strip, &tab, NULL), ==, 2);
+	box_children(tab, &button, NULL);
+	g_assert_true(GTK_IS_BUTTON(button));
+	click_row(button, 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==, "Reload Tab|Duplicate Tab|Close Tab|");
+	g_free(labels);
+
+	/* 6. Deactivation drops the actions and the model; reactivation
+	 *    makes new ones. */
+	gsurf_module_deactivate(module);
+	g_assert_null(g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-actions"));
+	g_assert_null(g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-model"));
+	g_assert_true(gsurf_module_activate(module));
+	g_assert_nonnull(g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-actions"));
+
+	gsurf_module_deactivate(module);
+	g_object_unref(k1);
+	g_object_unref(k2);
+	chrome_teardown(&c);
+}
+
 /* Container stripes follow the registry: colour, name, added, removed. */
 static void
 test_tabs_containers(void)
@@ -1453,6 +1584,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/chrome/tabs", test_tabs_lifetime);
 	g_test_add_func("/gsurf/chrome/tabs-sidebar", test_tabs_sidebar_tree);
 	g_test_add_func("/gsurf/chrome/tabs-close-children", test_tabs_close_children);
+	g_test_add_func("/gsurf/chrome/tabs-menu", test_tabs_menu);
 	g_test_add_func("/gsurf/chrome/tabs-containers", test_tabs_containers);
 	g_test_add_func("/gsurf/chrome/tabs-kiosk", test_tabs_kiosk);
 #endif

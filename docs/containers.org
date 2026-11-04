@@ -122,9 +122,11 @@ A temporary container is created for each tab placed by =new_tab: temporary= and
 | Action                  | Default key  | What it does |
 |-------------------------+--------------+--------------|
 | =container-new-temp=    | =Ctrl+Alt+t= | Opens a new active tab, last in the window, in a fresh temporary container, loading =new_view_uri=. |
-| =container-reopen-next= | =Ctrl+Alt+c= | Reopens the current page in the next container of the cycle /default → each persistent container in config order → a new temporary container → default/, in the same place with the same opener, and closes the old tab. The new tab keeps its first load in that container even if a host rule would assign the page elsewhere. |
+| =container-reopen-next= | =Ctrl+Alt+c= | Reopens the current page in the next container of the cycle /default → each persistent container in config order → a new temporary container → default/, in the same place with the same opener, and closes the old tab (=gsurf_window_reopen_view()=). The new tab keeps its first load in that container even if a host rule would assign the page elsewhere. With the =tabs= module its children stay its children. |
 
 The keys are read by the module (=key_new_temp=, =key_reopen_next=); the action names can also be bound in the core =keybinds:= table, e.g. ="Ctrl+Alt+t": container-new-temp=. Both appear in the =?= overlay. Kiosk mode refuses both.
+
+To pick a specific container for a tab instead of cycling, right-click the tab in the =tabs= sidebar or strip: "Reopen in Container" lists =Default=, every persistent container and a new temporary one (see [[file:tabs.org][tabs.org]], "Context menu"). The menu offers containers only while this module is enabled.
 
 * Data locations
 
@@ -150,4 +152,4 @@ The =session= module saves each tab's container: the id of a persistent containe
 
 * Tests
 
-=tests/test-containers.c= (headless, the real =containers.so=) covers configuration parsing, id derivation and validation, every placement branch, reconfiguring (removed and in-use containers, back to defaults, disabling, deactivate/activate), bad input and the host-assignment decisions (top-level vs. iframe, popups, the loop guard, kiosk). =tests/test-containers-module-webkit.c= (=make test-gui=, both backends) loads a loopback server as two hosts, =127.0.0.1= and =localhost= (assigned to "Media"), and checks that a typed address is reopened in Media in place with the cookie in Media's jar, that a script navigation of the main frame moves while the old tab stays as the opener, that an iframe of the assigned host does not move, and both actions.
+=tests/test-containers.c= (headless, the real =containers.so=) covers configuration parsing, id derivation and validation, every placement branch, reconfiguring (removed and in-use containers, back to defaults, disabling, deactivate/activate), bad input and the host-assignment decisions (top-level vs. iframe, popups, the loop guard, kiosk). =tests/test-containers-module-webkit.c= (=make test-gui=, both backends) loads a loopback server as two hosts, =127.0.0.1= and =localhost= (assigned to "Media"), and checks that a typed address is reopened in Media in place with the cookie in Media's jar, that a script navigation of the main frame moves while the old tab stays as the opener, that an iframe of the assigned host does not move, both actions, and the =tabs= context menu (reopen in a chosen container in place with the children kept, also through =container-reopen-next=). =tests/test-containers-webkit.c= checks =gsurf_window_reopen_view()= itself: index, opener, activation, the =view-added= / =view-replaced= / =view-removed= order, the new container's jar, =NULL= meaning the default container, and a view that is not in the window being refused.

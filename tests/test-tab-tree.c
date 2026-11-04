@@ -6,7 +6,8 @@
  * straight into the test and checks the rules in docs/tabs.org: placement
  * after the opener's last descendant, nesting, promote vs close_children,
  * collapse and expansion on activation, moving subtrees, max_depth,
- * orphaned openers, rebuilding from the window order alone, and a
+ * orphaned openers, rebuilding from the window order alone, handing a
+ * tab's place to its replacement (reopen in another container), and a
  * randomized stress run against the structural invariants.
  *
  * Part 2 loads the real tabs.so (no window, no display) and checks its
@@ -212,6 +213,55 @@ test_close_promote(void)
 	/* Unknown ids are ignored. */
 	gsurf_tab_tree_remove(tree, 42, GSURF_TAB_TREE_CLOSE_PROMOTE, NULL);
 	assert_order(tree, "3 4 5 6");
+	assert_invariants(tree);
+}
+
+/* gsurf_tab_tree_replace(): the replacement takes the old tab's place,
+ * parent, children and collapse state, wherever it was added. */
+static void
+test_replace(void)
+{
+	g_autoptr(GsurfTabTree) tree = sample_tree();
+
+	/* 1. Replace the middle parent 2 with 7, added as a root at the end
+	 *    (where the window first puts a reopened view's tree node when
+	 *    its opener is not 2's parent). */
+	gsurf_tab_tree_set_collapsed(tree, 2, TRUE);
+	gsurf_tab_tree_add(tree, 7, 0, 6);
+	assert_order(tree, "1 2 3 4 5 6 7");
+	g_assert_true(gsurf_tab_tree_replace(tree, 2, 7));
+	assert_order(tree, "1 7 3 4 5 6");
+	g_assert_false(gsurf_tab_tree_contains(tree, 2));
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 7), ==, 1);
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 3), ==, 7);
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 4), ==, 7);
+	g_assert_cmpuint(gsurf_tab_tree_get_n_children(tree, 7), ==, 2);
+	g_assert_true(gsurf_tab_tree_get_collapsed(tree, 7));
+	g_assert_false(gsurf_tab_tree_is_visible(tree, 3));
+	assert_invariants(tree);
+
+	/* 2. A replacement not in the tree yet just takes the place. */
+	g_assert_true(gsurf_tab_tree_replace(tree, 1, 8));
+	assert_order(tree, "8 7 3 4 5 6");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 7), ==, 8);
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 5), ==, 8);
+	assert_invariants(tree);
+
+	/* 3. A replacement already placed as a child of the old tab (it
+	 *    was opened from it) leaves that spot. */
+	gsurf_tab_tree_add(tree, 9, 5, 0);
+	assert_order(tree, "8 7 3 4 5 9 6");
+	g_assert_true(gsurf_tab_tree_replace(tree, 5, 9));
+	assert_order(tree, "8 7 3 4 9 6");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 9), ==, 8);
+	assert_invariants(tree);
+
+	/* 4. Refusals change nothing. */
+	g_assert_false(gsurf_tab_tree_replace(tree, 42, 10));
+	g_assert_false(gsurf_tab_tree_replace(tree, 9, 9));
+	g_assert_false(gsurf_tab_tree_replace(tree, 0, 10));
+	g_assert_false(gsurf_tab_tree_replace(tree, 9, 0));
+	assert_order(tree, "8 7 3 4 9 6");
 	assert_invariants(tree);
 }
 
@@ -632,6 +682,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/tab-tree/nested", test_nested_children);
 	g_test_add_func("/gsurf/tab-tree/close-promote", test_close_promote);
 	g_test_add_func("/gsurf/tab-tree/close-children", test_close_children);
+	g_test_add_func("/gsurf/tab-tree/replace", test_replace);
 	g_test_add_func("/gsurf/tab-tree/collapse", test_collapse_expand);
 	g_test_add_func("/gsurf/tab-tree/move", test_move_subtrees);
 	g_test_add_func("/gsurf/tab-tree/max-depth", test_max_depth);

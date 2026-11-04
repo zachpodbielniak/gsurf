@@ -53,6 +53,16 @@ G_DECLARE_FINAL_TYPE(GsurfTabsModule, gsurf_tabs_module, GSURF, TABS_MODULE, Gsu
  * while the UI is installed, so tests can read the stylesheet. */
 #define GSURF_TABS_CSS_DATA "gsurf-tabs-css-provider"
 
+/* Tab context menu. The action group is inserted as "tab" on the strip
+ * and the sidebar; the module carries it (borrowed), the model of the
+ * last menu opened (owned) and the open menu widget (borrowed, NULL when
+ * none is shown) as object data for the tests. */
+#define GSURF_TABS_MENU_PREFIX       "tab"
+#define GSURF_TABS_MENU_ACTIONS_DATA "gsurf-tabs-menu-actions"
+#define GSURF_TABS_MENU_MODEL_DATA   "gsurf-tabs-menu-model"
+#define GSURF_TABS_MENU_WIDGET_DATA  "gsurf-tabs-menu-widget"
+#define GSURF_TABS_MENU_NAME         "gsurf-tab-menu"
+
 /* One sidebar row. The core never touches it; it lives in the UI. */
 typedef struct _GsurfTabsRow GsurfTabsRow;
 
@@ -99,6 +109,9 @@ struct _GsurfTabsModule
 	GtkWidget      *sidebar_list; /* vertical box of rows */
 	GHashTable     *rows;         /* view id (guint64*) -> GsurfTabsRow* */
 	GPtrArray      *row_order;    /* GsurfTabsRow* in the list's child order */
+	GSimpleActionGroup *menu_actions; /* "tab.*" context menu actions */
+	GtkWidget      *menu;         /* open context menu, or NULL */
+	guint64         menu_tab;     /* the tab the context menu acts on */
 };
 
 /* --- Core, used by the UI (gsurf-tabs-module.c) --- */
@@ -111,6 +124,15 @@ G_GNUC_INTERNAL guint64   gsurf_tabs_get_widget_id(GtkWidget *widget);
 G_GNUC_INTERNAL void      gsurf_tabs_activate_tab(GsurfTabsModule *self, guint64 id);
 G_GNUC_INTERNAL void      gsurf_tabs_close_tab(GsurfTabsModule *self, guint64 id);
 G_GNUC_INTERNAL void      gsurf_tabs_toggle_collapse(GsurfTabsModule *self, guint64 id);
+
+/* Context menu operations on the tab with @id (no-ops for a tab that is
+ * gone). Reopening goes through gsurf_window_reopen_view(): @container
+ * is a container id, "default" or "temporary". */
+G_GNUC_INTERNAL void      gsurf_tabs_reload_tab(GsurfTabsModule *self, guint64 id);
+G_GNUC_INTERNAL void      gsurf_tabs_duplicate_tab(GsurfTabsModule *self, guint64 id);
+G_GNUC_INTERNAL void      gsurf_tabs_close_children(GsurfTabsModule *self, guint64 id);
+G_GNUC_INTERNAL void      gsurf_tabs_reopen_tab(GsurfTabsModule *self, guint64 id,
+                                                const gchar *container);
 
 /* --- UI, used by the core (gsurf-tabs-ui.c) --- */
 

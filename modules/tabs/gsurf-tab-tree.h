@@ -89,6 +89,20 @@ G_GNUC_INTERNAL void     gsurf_tab_tree_remove(GsurfTabTree *tree, guint64 id,
                                                GArray *closed);
 
 /*
+ * gsurf_tab_tree_replace:
+ * @old_id: a tab in the tree
+ * @new_id: its replacement (in the tree or not)
+ *
+ * Hands @old_id's place to @new_id: @new_id leaves its own position (if
+ * it was in the tree) and takes @old_id's position, parent, children and
+ * collapse state; @old_id leaves the tree. Used when a tab is reopened
+ * (another container). Returns %FALSE, changing nothing, when @old_id is
+ * unknown or the ids are equal or zero.
+ */
+G_GNUC_INTERNAL gboolean gsurf_tab_tree_replace(GsurfTabTree *tree, guint64 old_id,
+                                                guint64 new_id);
+
+/*
  * gsurf_tab_tree_sync:
  * @ids: (array length=n): the window's view ids in order
  * @opener_ids: (array length=n): each view's opener id (0 = none)
