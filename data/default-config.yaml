@@ -221,6 +221,7 @@ modules:
   tabs:
     enabled: true
     position: top                  # strip: top or bottom
+    strip: true                    # false: no strip, tabs only in the sidebar
     show_single: false             # hide the strip when only one view
     key_new: "Ctrl+t"
     key_close: "Ctrl+w"

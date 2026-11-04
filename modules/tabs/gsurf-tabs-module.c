@@ -816,6 +816,7 @@ reset_config(GsurfTabsModule *self)
 	set_string(&self->active_color, GSURF_TABS_DEFAULT_ACTIVE_COLOR);
 	set_string(&self->fg_color, GSURF_TABS_DEFAULT_FG_COLOR);
 	self->position_top = TRUE;
+	self->strip = TRUE;
 	self->show_single = FALSE;
 	self->sidebar = FALSE;
 	self->sidebar_right = FALSE;
@@ -858,6 +859,7 @@ gsurf_tabs_configure(GsurfModule *module, gpointer config_ptr)
 	bottom = !self->position_top;
 	read_choice(m, "position", "top", "bottom", &bottom);
 	self->position_top = !bottom;
+	read_bool(m, "strip", &self->strip);
 	read_bool(m, "show_single", &self->show_single);
 	read_color(m, "bg_color", &self->bg_color);
 	read_color(m, "active_color", &self->active_color);

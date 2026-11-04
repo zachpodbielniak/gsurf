@@ -71,6 +71,7 @@ struct _GsurfTabsModule
 	gchar   *key_move_up;
 	gchar   *key_move_down;
 	gboolean position_top;        /* strip above (TRUE) or below the page */
+	gboolean strip;               /* FALSE: never show the strip */
 	gboolean show_single;         /* show the strip with one tab */
 	gchar   *bg_color;            /* validated CSS colours */
 	gchar   *active_color;
