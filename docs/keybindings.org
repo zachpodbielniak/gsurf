@@ -54,6 +54,8 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =o= / =Ctrl+l= | open-prompt       |
 | =Ctrl+e= / =Ctrl+y= | scroll down/up |
 
+Module default keys outside the core table include =Ctrl+Alt+f= (=form_autofill=, off by default): fill the focused form from the one autofill profile, or open the profile picker when there are several. It must carry =Ctrl=, =Alt= or =Super= because bare keys reach the page while a field is focused; see [[file:form-autofill.org][form-autofill.org]].
+
 Some actions are performed by the module that owns their UI, through =GsurfActionHandler=: =open-prompt= by =chromebar= (the =--lrg= window draws its own address bar), =find= by =find_bar=, =tab-*= by =tabs=, and =follow-hints= / =enter-*-mode= by =modal=. With that module disabled the key does nothing and goes to the page.
 
 Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is

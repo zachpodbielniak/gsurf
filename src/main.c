@@ -112,6 +112,7 @@ static const GsurfBuiltinModule builtin_modules[] = {
 	{ "downloads",      "Download manager list UI with progress and notifications" },
 	{ "externalpipe",   "Pipe page HTML/text/selection to external commands" },
 	{ "find_bar",       "Find-in-page UI over the engine find controller" },
+	{ "form_autofill",  "Fill forms from YAML identity/address/card profiles" },
 	{ "geolocation",    "Fine-grained geolocation permission policy per-site" },
 	{ "history",        "Log visited URIs to a history file (dmenu integration)" },
 	{ "homepage",       "Startup/new-view page and go-home keybind" },

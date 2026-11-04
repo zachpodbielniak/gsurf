@@ -237,6 +237,7 @@ The module also has read-only GObject properties for tests and debugging. None o
 
 - =tests/test-form-autofill.c= (headless, loads the real =form_autofill.so=):
   - defaults, every option, unknown keys, and reconfigure, including back to the defaults;
+  - the shipped =data/default-config.yaml= and =data/sensible-config.yaml= configure the module without any warning, and =Ctrl+Alt+f= is not a core binding there;
   - the default and explicit file paths, and a missing file;
   - the merge rule and duplicate labels;
   - every validator, =cc_csc= and unknown keys;

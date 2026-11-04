@@ -40,12 +40,12 @@ Working today:
   config via crispy).
 - Module system: =GsurfModule= base, =GsurfModuleManager= (GModule loading,
   interface auto-detection, priority hook dispatch), 8 hook interfaces.
-- *29 modules* covering the common surf patches + an MCP server — search engines,
+- *30 modules* covering the common surf patches + an MCP server — search engines,
   history, homepage, vim modal navigation, tabs, an address bar, adblock,
   cookie policy, toggles, find, downloads, userscripts, site styles, per-URI
   params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,
   playexternal, dark mode, status bar, inspector, geolocation/notification
-  policy, proxy switching, session, spacesearch, and =mcp= (=MCP=1=).
+  policy, proxy switching, session, spacesearch, form autofill, and =mcp= (=MCP=1=).
   See [[file:docs/modules.org][docs/modules.org]].
 - Embedded default config + =--generate-yaml-config= / =--generate-c-config= /
   =--list-modules=.

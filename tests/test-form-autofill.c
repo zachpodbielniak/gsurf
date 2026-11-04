@@ -378,6 +378,29 @@ mgr_with_profiles(const gchar *extra)
 	return mgr_with(yaml);
 }
 
+/* The contents of @relative under the source tree, found by walking up
+ * from the test binary (build/<mode>/ or build-gtk4/<mode>/). */
+static gchar *
+read_source_file(const gchar *relative)
+{
+	g_autofree gchar *exe = g_file_read_link("/proc/self/exe", NULL);
+	g_autofree gchar *dir = g_path_get_dirname(exe);
+	gchar *contents = NULL;
+	guint up;
+
+	for (up = 0; up < 6; up++) {
+		g_autofree gchar *path = g_build_filename(dir, relative, NULL);
+		gchar *parent;
+
+		if (g_file_get_contents(path, &contents, NULL, NULL))
+			return contents;
+		parent = g_path_get_dirname(dir);
+		g_free(dir);
+		dir = parent;
+	}
+	return NULL;
+}
+
 /* ------------------------------------------------------------------ */
 /* configuration                                                       */
 /* ------------------------------------------------------------------ */
@@ -481,6 +504,51 @@ test_bad_key_and_exclude(void)
 	gsurf_module_configure(m, fixed);
 	g_object_get(m, "exclude-broken", &broken, NULL);
 	g_assert_false(broken);
+}
+
+/* The shipped configs configure the module silently (no `file:` set, so
+ * a missing default file is not reported) and the default fill key
+ * collides with no core binding. */
+static void
+test_shipped_configs(void)
+{
+	static const gchar *const files[] = {
+		"data/default-config.yaml", "data/sensible-config.yaml", NULL
+	};
+	g_autofree gchar *so = module_so_path();
+	guint i;
+
+	if (!g_file_test(so, G_FILE_TEST_EXISTS)) {
+		g_test_skip("form_autofill.so not built");
+		return;
+	}
+	for (i = 0; files[i] != NULL; i++) {
+		g_autofree gchar *yaml = read_source_file(files[i]);
+		g_autoptr(GsurfConfig) config = NULL;
+		g_autoptr(GsurfModuleManager) mgr = NULL;
+		g_autoptr(GError) error = NULL;
+		g_autofree gchar *key = NULL;
+		GsurfModule *m;
+
+		if (yaml == NULL) {
+			g_test_skip("shipped configs not found");
+			return;
+		}
+		config = config_from(yaml);
+		capture_reset();
+		mgr = gsurf_module_manager_new();
+		gsurf_module_manager_set_config(mgr, config);
+		g_assert_nonnull(gsurf_module_manager_load_module(mgr, so, &error));
+		g_assert_no_error(error);
+		m = module_of(mgr);
+		g_assert_cmpstr(captured->str, ==, "");
+		g_assert_false(gsurf_module_get_enabled(m));
+		g_object_get(m, "key-fill", &key, NULL);
+		g_assert_cmpstr(key, ==, "Ctrl+Alt+f");
+		g_assert_cmpuint(n_profiles(m), ==, 0);
+		g_assert_cmpint(gsurf_config_get_keybind_action(config, "Ctrl+Alt+f"), ==,
+			GSURF_ACTION_NONE);
+	}
 }
 
 /* ------------------------------------------------------------------ */
@@ -993,27 +1061,11 @@ test_lifetime(void)
 /* the page-side classifier in JavaScriptCore                          */
 /* ------------------------------------------------------------------ */
 
-/* js/form-autofill.js from the source tree (walk up from the binary). */
+/* js/form-autofill.js from the source tree. */
 static gchar *
 read_page_script(void)
 {
-	g_autofree gchar *exe = g_file_read_link("/proc/self/exe", NULL);
-	g_autofree gchar *dir = g_path_get_dirname(exe);
-	gchar *contents = NULL;
-	guint up;
-
-	for (up = 0; up < 6; up++) {
-		g_autofree gchar *path = g_build_filename(dir, "modules", "form_autofill",
-			"js", "form-autofill.js", NULL);
-		gchar *parent;
-
-		if (g_file_get_contents(path, &contents, NULL, NULL))
-			return contents;
-		parent = g_path_get_dirname(dir);
-		g_free(dir);
-		dir = parent;
-	}
-	return NULL;
+	return read_source_file("modules/form_autofill/js/form-autofill.js");
 }
 
 typedef struct {
@@ -1175,6 +1227,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/form-autofill/config/defaults", test_defaults);
 	g_test_add_func("/form-autofill/config/options-reconfigure", test_options_and_reconfigure);
 	g_test_add_func("/form-autofill/config/bad-key-exclude", test_bad_key_and_exclude);
+	g_test_add_func("/form-autofill/config/shipped-configs", test_shipped_configs);
 	g_test_add_func("/form-autofill/file/default-path", test_default_file);
 	g_test_add_func("/form-autofill/file/missing", test_missing_file);
 	g_test_add_func("/form-autofill/file/merge", test_merge);
