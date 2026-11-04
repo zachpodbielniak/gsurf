@@ -47,6 +47,22 @@ gsurf_private_write(const gchar *path, const gchar *contents,
 	if (!gsurf_private_mkdir(dir, error))
 		return FALSE;
 
+	/* GLib keeps the mode of a file it replaces (the @mode below only
+	 * applies to new files), so tighten an existing file first: the new
+	 * contents must never land in a group- or world-readable file. */
+	{
+		GStatBuf st;
+
+		if (g_lstat(path, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0077) != 0 &&
+		    g_chmod(path, 0600) != 0) {
+			gint saved = errno;
+
+			g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(saved),
+				"cannot make '%s' private: %s", path, g_strerror(saved));
+			return FALSE;
+		}
+	}
+
 	/* g_file_set_contents_full writes a temporary file with @mode and
 	 * renames it into place, so readers never see a partial file and the
 	 * data is never briefly world-readable. */
