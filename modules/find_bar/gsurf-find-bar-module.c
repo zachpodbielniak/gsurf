@@ -9,7 +9,13 @@
  * the bar and focuses it; typing searches incrementally; Enter / Shift+Enter
  * step through matches; Escape hides the bar and clears the highlight. The
  * bare next/previous keys (n/N) step matches while the page is focused.
- * Implements #GsurfInputHandler. GTK3.
+ * Implements #GsurfInputHandler. Builds against GTK3 and GTK4 through the
+ * module-private modules/include/gsurf-chrome-compat.h (on GTK4 the
+ * GtkSearchEntry is a GtkEditable, not a GtkEntry).
+ *
+ * The module keeps its own reference to the bar from activation until
+ * deactivate()/dispose(), which detach it from the window chrome and are
+ * idempotent, so a host may destroy the window before the module.
  */
 
 #include <gsurf/gsurf.h>
@@ -17,6 +23,7 @@
 #include <yaml-glib.h>
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
+#include "modules/include/gsurf-chrome-compat.h"
 
 #define GSURF_TYPE_FIND_BAR_MODULE (gsurf_find_bar_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfFindBarModule, gsurf_find_bar_module,
@@ -25,9 +32,9 @@ G_DECLARE_FINAL_TYPE(GsurfFindBarModule, gsurf_find_bar_module,
 struct _GsurfFindBarModule
 {
 	GsurfModule parent_instance;
-	GtkWidget *bar;     /* container packed into the window chrome */
-	GtkWidget *entry;   /* GtkSearchEntry */
-	GtkWidget *label;   /* small status/hint label */
+	GtkWidget *bar;     /* container packed into the window chrome (owned ref) */
+	GtkWidget *entry;   /* GtkSearchEntry, a child of @bar (owned ref) */
+	GtkWidget *label;   /* small status/hint label, a child of @bar (borrowed) */
 	gchar    *key_open;
 	gchar    *key_next;
 	gchar    *key_prev;
@@ -59,9 +66,7 @@ find_bar_search(GsurfFindBarModule *self, gboolean forward)
 
 	if (view == NULL || self->entry == NULL)
 		return;
-	text = gtk_entry_get_text(GTK_ENTRY(self->entry));
-	if (text == NULL)
-		text = "";
+	text = gsurf_chrome_editable_get_text(self->entry);
 	self->active = *text != '\0';
 	gsurf_view_find(view, text, self->match_case, forward);
 }
@@ -72,7 +77,7 @@ find_bar_close(GsurfFindBarModule *self)
 	GsurfView *view = active_view();
 
 	if (self->entry != NULL)
-		gtk_entry_set_text(GTK_ENTRY(self->entry), "");
+		gsurf_chrome_editable_set_text(self->entry, NULL);
 	self->active = FALSE;
 	if (view != NULL) {
 		/* Empty search clears the highlight, then return focus to the page. */
@@ -80,7 +85,7 @@ find_bar_close(GsurfFindBarModule *self)
 		gsurf_view_focus(view);
 	}
 	if (self->bar != NULL)
-		gtk_widget_hide(self->bar);
+		gtk_widget_set_visible(self->bar, FALSE);
 }
 
 static void
@@ -88,7 +93,7 @@ find_bar_open(GsurfFindBarModule *self)
 {
 	if (self->bar == NULL || self->entry == NULL)
 		return;
-	gtk_widget_show(self->bar);
+	gtk_widget_set_visible(self->bar, TRUE);
 	gtk_widget_grab_focus(self->entry);
 	gtk_editable_select_region(GTK_EDITABLE(self->entry), 0, -1);
 }
@@ -100,7 +105,7 @@ on_search_changed(GtkSearchEntry *entry, gpointer user_data)
 }
 
 static void
-on_entry_activate(GtkEntry *entry, gpointer user_data)
+on_entry_activate(GtkWidget *entry, gpointer user_data)
 {
 	GsurfView *view = active_view();
 
@@ -111,19 +116,25 @@ on_entry_activate(GtkEntry *entry, gpointer user_data)
 		gsurf_view_focus(view);
 }
 
+/* Escape closes the bar; Shift+Enter steps backwards through matches.
+ * Runs before the entry's own key handling (see gsurf-chrome-compat.h),
+ * so Shift+Enter never reaches the entry's "activate". */
 static gboolean
-on_entry_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+on_entry_key_press(GtkWidget *widget, guint keyval, GdkModifierType state,
+                   gpointer user_data)
 {
 	GsurfFindBarModule *self = GSURF_FIND_BAR_MODULE(user_data);
+	GsurfView *view;
 
-	if (event->keyval == GDK_KEY_Escape) {
+	if (keyval == GDK_KEY_Escape) {
 		find_bar_close(self);
 		return TRUE;
 	}
-	/* Shift+Enter steps backwards through matches. */
-	if ((event->keyval == GDK_KEY_Return || event->keyval == GDK_KEY_KP_Enter) &&
-	    (event->state & GDK_SHIFT_MASK)) {
-		gsurf_view_find_previous(active_view());
+	if ((keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) &&
+	    (state & GDK_SHIFT_MASK)) {
+		view = active_view();
+		if (view != NULL)
+			gsurf_view_find_previous(view);
 		return TRUE;
 	}
 	return FALSE;
@@ -223,24 +234,59 @@ gsurf_find_bar_activate(GsurfModule *module)
 		return TRUE;
 
 	self->bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	/* Retain the bar even if the host destroys its container first. */
+	g_object_ref_sink(self->bar);
 	self->label = gtk_label_new("Find:");
 	self->entry = gtk_search_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Find in page…");
+	/* A property, not gtk_entry_set_placeholder_text(): on GTK4 the
+	 * search entry is not a GtkEntry. */
+	g_object_set(self->entry, "placeholder-text", "Find in page…", NULL);
 
-	gtk_box_pack_start(GTK_BOX(self->bar), self->label, FALSE, FALSE, 4);
-	gtk_box_pack_start(GTK_BOX(self->bar), self->entry, TRUE, TRUE, 0);
+	gsurf_chrome_box_pack(self->bar, self->label, FALSE, 4);
+	gsurf_chrome_box_pack(self->bar, self->entry, TRUE, 0);
+	/* GTK3 destroys a container's children with it, so a host that
+	 * destroys the chrome first would otherwise leave the entry dangling
+	 * before deactivate() disconnects it; keep our own reference. */
+	g_object_ref(self->entry);
 
 	g_signal_connect(self->entry, "search-changed", G_CALLBACK(on_search_changed), self);
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);
-	g_signal_connect(self->entry, "key-press-event", G_CALLBACK(on_entry_key_press), self);
+	gsurf_chrome_connect_key_press(self->entry, on_entry_key_press, self);
 
 	gsurf_window_add_bottom_widget(window, self->bar);
-	/* Hidden until the open key is pressed; no-show-all keeps the
-	 * window's show_all() at startup from revealing it again. */
-	gtk_widget_show_all(self->bar);
-	gtk_widget_hide(self->bar);
-	gtk_widget_set_no_show_all(self->bar, TRUE);
+	/* Hidden until the open key is pressed, and kept hidden by the
+	 * window's startup show-all on GTK3. */
+	gsurf_chrome_widget_start_hidden(self->bar);
 	return TRUE;
+}
+
+/* Tear down callbacks and chrome; reactivation then packs one new bar.
+ * Idempotent: also run from dispose(). */
+static void
+gsurf_find_bar_deactivate(GsurfModule *module)
+{
+	GsurfFindBarModule *self = GSURF_FIND_BAR_MODULE(module);
+
+	self->active = FALSE;
+	if (self->entry != NULL) {
+		gsurf_chrome_disconnect_key_press(self->entry, self);
+		g_signal_handlers_disconnect_by_data(self->entry, self);
+		g_clear_object(&self->entry);
+	}
+	self->label = NULL;
+	if (self->bar != NULL) {
+		/* The entry and label are children of the bar and go with it. */
+		gsurf_chrome_widget_detach(self->bar);
+		g_clear_object(&self->bar);
+	}
+}
+
+/* Disposal also works when a caller never explicitly deactivated us. */
+static void
+gsurf_find_bar_module_dispose(GObject *object)
+{
+	gsurf_find_bar_deactivate(GSURF_MODULE(object));
+	G_OBJECT_CLASS(gsurf_find_bar_module_parent_class)->dispose(object);
 }
 
 static void
@@ -287,8 +333,10 @@ gsurf_find_bar_module_class_init(GsurfFindBarModuleClass *klass)
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	GsurfModuleClass *module_class = GSURF_MODULE_CLASS(klass);
 
+	object_class->dispose = gsurf_find_bar_module_dispose;
 	object_class->finalize = gsurf_find_bar_module_finalize;
 	module_class->activate = gsurf_find_bar_activate;
+	module_class->deactivate = gsurf_find_bar_deactivate;
 	module_class->get_name = gsurf_find_bar_get_name;
 	module_class->get_description = gsurf_find_bar_get_description;
 	module_class->configure = gsurf_find_bar_configure;

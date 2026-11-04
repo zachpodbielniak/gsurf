@@ -60,7 +60,7 @@ network:
   proxy:
     mode: default              # default | none | custom
     uri: ""
-  do_not_track: true
+  do_not_track: false          # DNT: 1 header; sent only while the hardening module is enabled
 
 # ===== Window =====
 window:
@@ -126,6 +126,8 @@ modules:
     key_close: "Ctrl+w"
     key_next: "Ctrl+Tab"
     key_prev: "Ctrl+Shift+Tab"
+    sidebar: false                 # Ctrl+Shift+. shows the tree sidebar
+    on_close_parent: promote
 
   # History log (used by chromebar/omnibar; plain text for dmenu/grep).
   history:
@@ -201,10 +203,12 @@ modules:
     enabled: true
     key: "Ctrl+Shift+i"
 
-  # Respect the system light/dark preference.
+  # Respect the system light/dark preference (legacy "auto"). For a forced
+  # dark web use native | filter | dynamic and per-site rules (dark-mode.org);
+  # Ctrl+Alt+d toggles everything, Ctrl+Alt+Shift+d the current site.
   dark_mode:
     enabled: true
-    mode: auto                 # auto | light | dark
+    mode: auto                 # off | native | filter | dynamic (legacy: auto | light | dark)
     force_dark_css: false
 
   # Bottom status bar (URI + load progress).
@@ -223,5 +227,7 @@ modules:
 
   # --- Opt-in extras (left disabled here) ---
   # omnibar, externalpipe, userscripts, site_styles, uri_params, useragent,
-  # cert_manager, session, proxy_switch, spacesearch, and the MCP server
+  # cert_manager, containers, session, proxy_switch, spacesearch, form_autofill (profiles
+  # in a chmod 600 ~/.config/gsurf/autofill.yaml), hardening (LibreWolf-style
+  # privacy; see docs/hardening.org), and the MCP server
   # (mcp, requires building with MCP=1) — see data/default-config.yaml.

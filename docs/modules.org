@@ -16,10 +16,11 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =history=        | history              | =GsurfNavigationHook=            | implemented |
 | =homepage=       | homepage             | =GsurfInputHandler=              | implemented |
 | =toggles=        | toggle keybinds      | =GsurfInputHandler=              | implemented |
-| =tabs=           | tabbed(1)            | =GsurfInputHandler= + =GsurfActionHandler= | implemented |
+| =tabs=           | tabbed(1) / tree tabs | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented (strip + tree sidebar; see [[file:tabs.org][tabs.org]]) |
 | =chromebar=      | (address bar)        | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented |
 | =adblock=        | (new; high value)    | =GsurfNavigationHook= + =GsurfScriptInjector= + =GsurfRequestFilter= | implemented (uBO/ABP lists; see [[file:adblock.org][adblock.org]]) |
 | =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |
+| =hardening=      | (new; LibreWolf)     | =GsurfSettingProvider= + web-process extension + session policy | implemented (see [[file:hardening.org][hardening.org]]) |
 | =find_bar=       | WebKit find          | =GsurfInputHandler= + =GsurfActionHandler= | implemented |
 
 * Tier 2 — important
@@ -39,16 +40,18 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =cert_manager=| certs[]             | implemented |
 | =useragent=   | useragent           | implemented |
 | =notifications= | notifications     | implemented |
+| =form_autofill= | (new; autofill)   | implemented (off by default; see [[file:form-autofill.org][form-autofill.org]]) |
 | =mcp=         | (new; AI control)   | implemented (=MCP=1=) |
 
 * Tier 3 — nice-to-have
 
 =spacesearch=, =inspector=, =dark_mode=, =status_bar=, =geolocation=,
-=session=, and =proxy_switch= are implemented. =webgl_toggle= and
+=containers= (=GsurfNavigationHook= + =GsurfInputHandler= + =GsurfActionHandler=; see [[file:containers.org][containers.org]]),
+=session=, and =proxy_switch= are implemented. =dark_mode= has native, filter and Dark Reader (vendored) modes with per-site rules and global/per-site toggles; see [[file:dark-mode.org][Dark mode]]. =webgl_toggle= and
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 29 modules build with =make= (the =mcp= module requires =MCP=1=).
+All 32 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
 
 * AI modules (deferred)
 
@@ -95,8 +98,12 @@ The downloads module treats the suggested name as a filename: it strips director
 
 * Chrome module lifetime
 
-The GTK3 =chromebar= and =status_bar= modules disconnect their window and view signals and destroy their widgets on deactivation. Reactivation creates one new widget. Disposal performs the same idempotent cleanup, including when an embedding host retains a window, view, or native widget after releasing its module manager. Modules retain their native widgets until cleanup so destroying the host container first does not leave dangling widget pointers.
+The =chromebar=, =find_bar=, =status_bar= and =tabs= modules build and behave the same on GTK3 and GTK4. They share the header-only, module-private =modules/include/gsurf-chrome-compat.h=, which maps each GTK call to the GTK3 API or to its non-deprecated GTK4 equivalent (for example =gtk_editable_get_text()= for entry text, since a GTK4 =GtkSearchEntry= is not a =GtkEntry=, and =gtk_widget_set_visible()= instead of show/hide).
+
+On deactivation each module disconnects its window and view signals and its key handler, and detaches its widget from the window chrome: =gtk_widget_destroy()= on GTK3; on GTK4 =gtk_box_remove()= (or =gtk_widget_unparent()= for a non-box parent), and nothing when the host container is already gone. Reactivation creates one new widget. Disposal performs the same idempotent cleanup, including when an embedding host retains a window, view, or native widget after releasing its module manager. Modules retain their native widgets until cleanup (=find_bar= retains both its bar and its search entry, because GTK3 destroys a container's children with it; =tabs= retains its strip, its sidebar, the sidebar's list and every row) so destroying the host container first does not leave dangling widget pointers. =tabs= also releases everything when its window finalizes first (it holds a weak reference on it).
+
+Key handling in the address bar and find bar runs before the entry's own: a =key-press-event= handler on GTK3, a =GtkEventControllerKey= in the capture phase on GTK4 (so it also precedes the entry's inner =GtkText=). Escape in the address bar restores the page URI and returns focus to the page; Enter loads the input. In the find bar, Enter confirms the search and returns focus to the page (where =n= / =N= step), Shift+Enter steps backwards without activating, and Escape clears the query and highlight and hides the bar. On GTK3 the hidden find bar sets no-show-all so the window's startup show-all does not reveal it; GTK4 has no show-all, so it is simply hidden.
 
 Switching tabs refreshes the status bar from the new view's current load progress. Removing the last view clears both the address and status text.
 
-The regression suite =tests/test-chrome-lifecycle.c= loads the real shared modules with model-only views and GTK containers, without launching a web process or making network requests. It is skipped by default; run =GSURF_TEST_GUI=1 ./build/release/test-chrome-lifecycle= with a display after =make test= to check tab state, deactivation, reactivation, retained widgets, and repeated disposal.
+The regression suite =tests/test-chrome-lifecycle.c= loads the real shared modules with model-only views and a GTK box standing in for the window chrome, without launching a web process or making network requests, on both backends. It covers tab state, deactivation (twice), reactivation, retained widgets, repeated disposal, the host container dying first, the address-bar and find-bar keys (delivered as =key-press-event= on GTK3 and through the module's named key controller on GTK4), and the =tabs= strip and tree sidebar (see [[file:tabs.org][tabs.org]]; row clicks are delivered as =button-press-event= on GTK3 and through the row's named =GtkGestureClick= on GTK4). It needs a display and is skipped by =make test= unless =GSURF_TEST_GUI= is set; =make test-gui= runs it under Xvfb, or run =GSURF_TEST_GUI=1 ./build/release/test-chrome-lifecycle= with a display (it presents no window).

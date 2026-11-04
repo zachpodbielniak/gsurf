@@ -24,6 +24,9 @@ gsurf_kiosk_allows_action(GsurfAction action)
 	case GSURF_ACTION_TAB_NEW:
 	case GSURF_ACTION_TAB_REOPEN:
 	case GSURF_ACTION_FOLLOW_HINTS_NEW_VIEW:
+	/* Both open another view, which kiosk mode never allows. */
+	case GSURF_ACTION_CONTAINER_NEW_TEMP:
+	case GSURF_ACTION_CONTAINER_REOPEN_NEXT:
 		return FALSE;
 	default:
 		return TRUE;

@@ -293,6 +293,17 @@ tool_list_views(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 		json_builder_add_string_value(b, gsurf_view_get_title(v) ? gsurf_view_get_title(v) : "");
 		json_builder_set_member_name(b, "active");
 		json_builder_add_boolean_value(b, v == active);
+		/* Stable identity and tab-tree/container data (0 / null when
+		 * the view has no opener or uses the default container). */
+		json_builder_set_member_name(b, "id");
+		json_builder_add_int_value(b, (gint64)gsurf_view_get_id(v));
+		json_builder_set_member_name(b, "opener_id");
+		json_builder_add_int_value(b, (gint64)gsurf_view_get_opener_id(v));
+		json_builder_set_member_name(b, "container");
+		if (gsurf_view_get_container_id(v) != NULL)
+			json_builder_add_string_value(b, gsurf_view_get_container_id(v));
+		else
+			json_builder_add_null_value(b);
 		json_builder_end_object(b);
 	}
 	json_builder_end_array(b);
@@ -385,13 +396,19 @@ tool_open_view(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	GsurfConfig *config = gsurf_config_get_default();
 	const gchar *uri = args && json_object_has_member(args, "uri")
 		? json_object_get_string_member(args, "uri") : NULL;
+	const gchar *container = args && json_object_has_member(args, "container")
+		? json_object_get_string_member(args, "container") : NULL;
 	GsurfView *view;
 	g_autofree gchar *msg = NULL;
 
 	if (window == NULL)
 		return error_result("no active window");
 
-	view = gsurf_view_new();
+	/* "container": a container id or "temporary"; the registry (and the
+	 * containers module's policy, if loaded) has the final say. */
+	view = gsurf_view_new_full(NULL, container, uri, FALSE);
+	if (view == NULL)
+		return error_result("could not create a view");
 	if (config != NULL && config->settings != NULL)
 		gsurf_view_apply_settings(view, config->settings);
 	gsurf_window_add_view(window, view);
@@ -810,7 +827,9 @@ static const ToolDef tool_defs[] = {
 	{ "switch_view", "Switch the active view by index",
 	  {{ "index", "number", "view index", TRUE }}, tool_switch_view },
 	{ "open_view", "Open a new view/tab (returns its index)",
-	  {{ "uri", "string", "the URI to load", FALSE }}, tool_open_view },
+	  {{ "uri", "string", "the URI to load", FALSE },
+	   { "container", "string", "container id, or \"temporary\" for a new temporary container", FALSE }},
+	  tool_open_view },
 	{ "close_view", "Close a view/tab by index",
 	  {{ "index", "number", "view index", TRUE }}, tool_close_view },
 	{ "screenshot", "Capture the visible page as a PNG image", {{0}}, tool_screenshot },

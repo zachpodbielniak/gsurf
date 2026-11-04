@@ -66,8 +66,99 @@ An empty =user_agent= (or =NULL= in C settings) restores the engine's default us
 
 Native settings regressions run with =make test-gui= under Xvfb. On an existing display, run =GSURF_TEST_GUI=1 ./build/release/test-backend-settings= after =make test=; ordinary headless tests skip these display-dependent checks.
 
+=network.do_not_track= (default =false=) asks for a =DNT: 1= header. WebKit has no Do Not Track switch, so the header is sent by the =hardening= module's web-process extension and only while that module is enabled; its own =dnt:= key overrides this one. See [[file:hardening.org][hardening.org]], which also covers https-only, tracking-parameter stripping, Referer trimming, Global Privacy Control, third-party cookies and per-site exemptions.
+
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).
 
+The =tabs= section configures the tab strip and the tree sidebar (=position=, =show_single=, the =bg_color= / =active_color= / =fg_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
+
+* Containers
+
+=modules.containers= turns on per-host and temporary containers (separate cookie jars and storage per tab): =new_tab=, =inherit_opener=, =temp_cleanup_delay=, =temp_color=, the =containers:= list (=name=, =id=, =color=, =hosts=) and =key_new_temp= / =key_reopen_next=. The full reference, placement order and host assignment rules are in [[file:containers.org][containers.org]].
+
+* Session
+
+The =session= module saves the open tabs and restores them at the next start.
+
+#+begin_src yaml
+modules:
+  session:
+    enabled: false
+    auto_restore: false                         # reopen the saved tabs at startup
+    file: "~/.local/share/gsurf/session.yaml"   # the session file (YAML, 0600)
+    key_save: "Ctrl+Shift+s"                    # save now ("" unbinds)
+#+end_src
+
+| Key            | Default                                  | Meaning |
+|----------------+------------------------------------------+---------|
+| =enabled=      | =false=                                  | Turns the module on. |
+| =auto_restore= | =false=                                  | Restore the saved session at startup. A URI on the command line takes precedence: then nothing is restored. |
+| =file=         | =$XDG_DATA_HOME/gsurf/session.yaml=      | The session file; =~/= is expanded. A path ending in =.yaml= or =.yml= is the YAML file, and the same path without the suffix is the old plain-text file to migrate from. Any other path (such as the old default =~/.local/share/gsurf/session=) names the old plain-text file, and the YAML file is that path plus =.yaml=. An empty value is reported and the default is used. |
+| =key_save=     | =Ctrl+Shift+s=                           | Saves the session immediately. =""= or =null= unbinds it. |
+
+Every =configure()= starts from these defaults.
+
+** When it saves
+
+After every committed navigation, on =key_save=, and whenever a tab is closed or moved, so the order and the tab tree stay current. Closing the last tab does not save (the previous session is kept rather than replaced by an empty one). The file lists the URLs of all open tabs, so it is written atomically with mode 0600 in a 0700 directory, and an existing file with looser permissions is made 0600 first.
+
+** Format
+
+#+begin_src yaml
+version: 1
+windows:
+  - active: 1                      # index of the active tab (optional)
+    tabs:
+      - uri: https://example.org/
+      - uri: https://www.youtube.com/watch?v=1
+        container: media           # a persistent container id; absent = default
+        parent: 0                  # index of the tab that opened it (optional)
+      - uri: https://news.example/
+        container: temporary:0     # temporary container group 0
+      - uri: https://news.example/article
+        container: temporary:0     # ... the same temporary container
+        parent: 2
+#+end_src
+
+- Each window of the host is a list of its tabs, in tab order. Tabs showing nothing or =about:blank= are not saved.
+- =container= is absent for the default container, the id for a persistent container, and =temporary:<n>= for a temporary one: tabs that shared a temporary container share a group number, which is all that survives (temporary data is never saved).
+- =parent= is the index of the tab's opener in the same window — its parent in the tab tree. When the opener itself is not saved (a blank tab), the nearest saved ancestor is used; an opener that was closed leaves the tab without a parent.
+
+** Restore
+
+- Tabs are recreated in their saved order, each with its container and with its restored parent as opener (=gsurf_view_new_full()=), so the =tabs= module rebuilds the tree. A parent listed after its child is created first.
+- Every temporary group comes back as one fresh temporary container. A persistent container that is not defined any more falls back to the default container, with a warning.
+- The startup view takes the first saved tab when it is already in that tab's container (the default container, the same persistent container, or — for a temporary group — a temporary container that only it uses, which then becomes the group's container). Otherwise the restored tabs are created next to it and the startup view is closed: a view cannot change its container, and loading the tab into the wrong container would mix cookie jars.
+- gsurf runs one window per process, so the tabs of further saved windows are appended to the same window. The active tab of the first window is activated.
+- A file that is not YAML, not a mapping or has no =windows= list is reported and nothing is restored. Inside, a window without =tabs=, a tab without =uri=, a =parent= that does not name another tab (or a chain of parents that loops) and an =active= index out of range are reported and dropped; everything else is restored.
+- A restored tab keeps its first load in its saved container even if a =containers= host rule would assign the host elsewhere (see [[file:containers.org][containers.org]], "Limits"); the startup view, when it takes the first tab, is the exception, as it was not created for that URL.
+
+** Migration
+
+gsurf 0.2 saved one URI per line in a plain-text file (default =~/.local/share/gsurf/session=). When no YAML session exists but that file does, it is read once (all tabs in the default container, the first one active) and written in the new format; the old file is left in place. After that the YAML file is used.
+
 Sections that map to surf concepts: =search_engines= (searchengines patch),
 =uri_params= (=uriparams[]=), =site_styles= (=styles[]=), =cert_pins= (=certs[]=).
+
+=dark_mode= takes a global =mode= (=off=, =native=, =filter=, =dynamic=; legacy =auto=, =light=, =dark= still work), =brightness=/=contrast=/=sepia=/=grayscale=, =key_toggle=/=key_toggle_site=, and a =sites:= list of per-host rules; runtime per-site toggles are saved in =$XDG_DATA_HOME/gsurf/dark_mode/sites.yaml=. The full reference is in [[file:dark-mode.org][Dark mode]].
+
+* Form autofill (=form_autofill=)
+
+#+begin_src yaml
+modules:
+  form_autofill:
+    enabled: false
+    file: ~/.config/gsurf/autofill.yaml   # optional; this path is the default
+    suggest_on_focus: true
+    key_fill: "Ctrl+Alt+f"
+    exclude: ['(^|\.)paypal\.com$']
+    profiles:
+      - label: home
+        given_name: Zach
+        email: zach@example.org
+        street: ["742 Evergreen Terrace", "Apt 9"]
+        country: US
+#+end_src
+
+Profiles come from =file= (a mapping with a =profiles= list) and from the inline =profiles= list. An inline profile with the label of a file profile overrides that profile field by field; new labels are appended; a label repeated within one source replaces the earlier one with a warning. Card data (=cc_name=, =cc_number=, =cc_exp=) is accepted only from the file, and only when it is private (=chmod 600=, owned by you, not a symlink); otherwise the card data is refused with a warning on stderr and the rest of the file is used. =cc_csc= is never stored. Malformed values (a card number failing the Luhn check, a bad expiry, an e-mail without =@=, a country that is not an ISO alpha-2 code, ...) are dropped field by field with a warning that never contains the value; unknown keys warn. An invalid =exclude= rule disables autofill on every host until fixed. The full schema, classification order, suggestion UI and security model are in [[file:form-autofill.org][form-autofill.org]].

@@ -9,6 +9,19 @@ architecture of the sibling **gst** project (a GObject port of `st`). It is
 **library-first**: nearly all logic lives in `libgsurf.so`; the `gsurf` binary is
 a thin `main.c`. surf "patches" are implemented as runtime-loaded `.so` **modules**.
 
+## Hard rules
+
+- Behaviour changes come with tests and the matching `docs/*.org` update in the **same
+  commit**. A change without both is not done and must not be merged.
+- Zero warnings on every target (`make clean all`, `make test`, `make test-gui`,
+  `make BUILD_GIR=1 gir`) and on **both** `GTK_BACKEND=gtk3` and `GTK_BACKEND=gtk4`.
+  Fix the code, never the flags.
+- New public symbols carry GIR annotations; new modules get a doc in `docs/` and a
+  row in `docs/modules.org`.
+- Work in a worktree under `trees/`; Conventional Commits; versioning and tagging
+  follow the Versioning section below.
+- Fedora build packages: `make check-deps`. Never install host packages without asking.
+
 ## Build
 
 Three-file Makefile system (mirrors gst):
@@ -74,8 +87,11 @@ its `-fPIC` static archive (`libmcp-glib-1.0.a`) is linked into the `mcp` module
 (`MCP=1`). All three are statically embedded, so no built artifact depends on a
 vendored `deps/` shared object at runtime — the pinned versions ship with us.
 
-On this dev machine: `webkit2gtk-4.1` + `gtk+-3.0` are installed; `webkitgtk-6.0`
-(GTK4) is **not** — so `GTK_BACKEND=gtk4` won't build here until it is installed.
+Both backends are expected to build: `webkit2gtk-4.1` + `gtk+-3.0` (GTK3) and
+`webkitgtk-6.0` + `gtk4` (GTK4). Build GTK4 in its own tree so the two don't
+clobber each other: `make GTK_BACKEND=gtk4 BUILDDIR=build-gtk4` (same for `test`,
+`test-gui`). `test-gui` needs `xvfb-run` on `PATH` (any wrapper that runs the
+command on a private display works).
 `libnotify`/`gcr` are absent; notification/cert features use Gio `GNotification`
 and `GTlsCertificate` instead.
 
@@ -203,9 +219,34 @@ bumps once.
   docs/tests may fast-forward and is not tagged.
 - **Working directly on master**: bump `config.mk` in the change's own commit (or, for a run
   of commits, in the last one), then tag that commit and push it with the tag.
+- **Several branches released as one version** (e.g. a minor made of many features): use an
+  integration branch `release/vX.Y.Z` in `trees/release-vX.Y.Z`. Each feature worktree
+  branches from it and merges back with `--no-ff` and **no** version change. Only the final
+  `--no-ff` merge of the integration branch into master bumps, tags and pushes (as above).
+  Delete the integration branch and its worktrees after the tag is pushed.
 - Tag only a commit whose `config.mk` matches the tag, after its build and tests pass with
   zero warnings; never move or delete a pushed tag; a broken release is fixed by the next
   micro.
+
+### Release gate
+
+Before tagging, all of these pass with zero warnings, once with `GTK_BACKEND=gtk3` and
+once with `GTK_BACKEND=gtk4`:
+
+```sh
+make clean all && make test && make test-gui && make BUILD_GIR=1 gir
+```
+
+The long opt-in run, `make ASAN=1 test test-gui`, happens after the tag is pushed; every
+fix it needs lands as its own micro (`v0.3.1`, `v0.3.2`, ...), each tagged and pushed.
+
+### Version touch points
+
+A bump edits, in the same commit: `config.mk` (`VERSION_MAJOR`/`MINOR`/`MICRO`) and the
+`data/gsurf.1` header. Everything else follows automatically: `src/gsurf-version.h`, the
+`libgsurf.so.<VERSION>` file name and, on minor/major bumps, the
+`Gsurf-<MAJOR>.<MINOR>` GIR namespace. Name breaking changes in the merge commit message
+(`feat!:` or a `BREAKING CHANGE:` footer).
 
 ## Tests / running
 
@@ -215,33 +256,26 @@ make test-gui                               # xvfb-gated GUI smoke test (skips i
 xvfb-run -a ./build/release/gsurf about:blank   # manual headless GUI smoke test
 ```
 
-Test layout (`tests/test-*.c`, auto-discovered): `test-version`, `test-enums`
-(action<->string, GType registration), `test-keys` (canonicalize/normalize/
-match, Shift+letter and `ISO_Left_Tab` canonicalization, `gsurf_keys_to_name`), `test-settings` (defaults/copy/setters), `test-config` (YAML parsing,
-keybind lookup, module nodes, `ignore_yaml`, the bind setters with
-normalization/NULL/empty, bad-input handling), `test-cconfig` (the crispy
-C-config compile-and-load pipeline, incl. the commented-`CRISPY_PARAMS`
-regression and bad-source handling; skips with no compiler), `test-manager`
-(loading, search paths, enabled gating, priority incl. a priority set in
-`activate()`, input passthrough, action dispatch, default verdicts for every hook — including the request-filter/status/context-menu/
-render-overlay ones — and dispatch through the real module .so files),
-`test-adblock` (uBO/ABP filter compiler: ruleset precedence, cosmetic
-exceptions, redirect/removeparam via the request filter, scriptlet and
-procedural tables for the web-process extension, trusted-list gating, the
-web-process extension registry), `test-adblock-webkit` (`make test-gui`: every
-adblock layer enforced in a real WebKit view), `test-keynav-webkit` (`make
-test-gui`: page focus at startup, Escape blurring an autofocused field,
-open-prompt focusing the chromebar, Escape returning to the page),
-`test-modules` (search-engines, history, adblock host blocking + whitelist +
-edge URIs + the `content_filters` WebKit-JSON load path), `test-boxed` (boxed
-value types: new/copy/free, getters, setters, deep-copy independence),
-`test-keybind-help` (live `?` overlay collection: core table, enabled
-gating, reconfigured module keys, `?`/`question` alias, overlay `hjkl`/`q`
-routing on the in-page fallback). The
-GTK/WebKit view+window layer (and module UIs like the find bar / tab strip,
-the per-view content-filter *application*, modal key dispatch) needs a display
-and web process, so it is exercised by `make test-gui` / ad-hoc Xvfb harnesses
-rather than `make test`.
+Tests live in `tests/test-*.c` and are auto-discovered by the Makefile.
+
+- **Every new module** gets a headless `tests/test-<module>.c` covering config parsing,
+  defaults, a second `configure()` call (reconfigure replaces state cleanly) and the
+  bad-input/error paths (invalid regex, missing or unreadable file, wrong file mode,
+  unknown names). Load the real `.so` the way `tests/test-manager.c` does (`mgr_with()`).
+- **Anything that touches pages or the network** also gets a
+  `tests/test-<module>-webkit.c` GUI test: a libsoup loopback server like
+  `tests/test-adblock-webkit.c`, gated on `GSURF_TEST_GUI=1`, and added by hand to the
+  `test-gui` target and recipe in the `Makefile`.
+- **New core API** (`src/`) gets unit tests in the matching `tests/test-<area>.c`;
+  lifetime-sensitive objects assert finalization with `g_object_add_weak_pointer`.
+- Tests pass on both `GTK_BACKEND=gtk3` and `gtk4`, and must stay clean under `ASAN=1`.
+
+Where to look: core types and config in `test-config`, `test-settings`, `test-keys`,
+`test-enums`, `test-boxed`, `test-uri`; the module manager and hook dispatch in
+`test-manager` and `test-modules`; per-module suites (`test-adblock`, `test-history`,
+`test-modal`, `test-keybind-help`, `test-list-modules`); lifecycles in
+`test-backend-lifecycle`, `test-window-lifecycle`, `test-chrome-lifecycle`; and the
+WebKit GUI suites `test-*-webkit`, `test-backend-settings` (via `make test-gui`).
 
 Packaging targets: `make appimage` builds a self-contained AppImage (bundles the
 binary, `libgsurf`, all modules, desktop file + 256×256 PNG icon; needs

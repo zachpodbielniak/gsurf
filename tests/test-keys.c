@@ -136,6 +136,44 @@ test_match(void)
 	g_assert_true(gsurf_keys_match(GDK_KEY_question, GSURF_MOD_NONE, "?"));
 }
 
+/* Shift+punctuation: GDK reports the shifted keysym ("greater" for
+ * Shift+period), so unshifted spellings must normalize onto it. This is
+ * what makes the tree sidebar's default Ctrl+Shift+. binding fire. */
+static void
+test_shifted_punctuation(void)
+{
+	g_autofree char *period = gsurf_keys_normalize("Ctrl+Shift+period");
+	g_autofree char *dot = gsurf_keys_normalize("Ctrl+Shift+.");
+	g_autofree char *greater = gsurf_keys_normalize("Ctrl+Shift+greater");
+	g_autofree char *bracket = gsurf_keys_normalize("Ctrl+Shift+bracketleft");
+	g_autofree char *plain = gsurf_keys_normalize("Ctrl+period");
+	g_autofree char *literal = gsurf_keys_normalize("Alt+,");
+	g_autofree char *event = gsurf_keys_to_string(GDK_KEY_greater,
+		GSURF_MOD_CTRL | GSURF_MOD_SHIFT);
+
+	g_assert_cmpstr(period, ==, "Ctrl+Shift+greater");
+	g_assert_cmpstr(dot, ==, "Ctrl+Shift+greater");
+	g_assert_cmpstr(greater, ==, "Ctrl+Shift+greater");
+	g_assert_cmpstr(bracket, ==, "Ctrl+Shift+braceleft");
+	g_assert_cmpstr(event, ==, "Ctrl+Shift+greater");
+	/* No Shift: the unshifted keysym is kept, literal spellings resolve. */
+	g_assert_cmpstr(plain, ==, "Ctrl+period");
+	g_assert_cmpstr(literal, ==, "Alt+comma");
+
+	g_assert_true(gsurf_keys_match(GDK_KEY_greater,
+		GSURF_MOD_CTRL | GSURF_MOD_SHIFT, "Ctrl+Shift+period"));
+	g_assert_true(gsurf_keys_match(GDK_KEY_greater,
+		GSURF_MOD_CTRL | GSURF_MOD_SHIFT, "Ctrl+Shift+."));
+	g_assert_true(gsurf_keys_match(GDK_KEY_braceleft,
+		GSURF_MOD_CTRL | GSURF_MOD_SHIFT, "Ctrl+Shift+bracketleft"));
+	g_assert_true(gsurf_keys_match(GDK_KEY_period, GSURF_MOD_CTRL, "Ctrl+."));
+	/* Shift+period must not fire a Ctrl+period binding, nor vice versa. */
+	g_assert_false(gsurf_keys_match(GDK_KEY_greater,
+		GSURF_MOD_CTRL | GSURF_MOD_SHIFT, "Ctrl+period"));
+	g_assert_false(gsurf_keys_match(GDK_KEY_period, GSURF_MOD_CTRL,
+		"Ctrl+Shift+period"));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -147,5 +185,6 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/keys/shift-letters", test_shift_letters);
 	g_test_add_func("/gsurf/keys/iso-left-tab", test_iso_left_tab);
 	g_test_add_func("/gsurf/keys/to-name", test_to_name);
+	g_test_add_func("/gsurf/keys/shifted-punctuation", test_shifted_punctuation);
 	return g_test_run();
 }

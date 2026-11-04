@@ -45,6 +45,7 @@
 #include "core/gsurf-find-controller.h"
 #include "core/gsurf-permission-request.h"
 #include "core/gsurf-web-process.h"
+#include "core/gsurf-container-registry.h"
 
 /* Window */
 #include "window/gsurf-window.h"
@@ -73,6 +74,8 @@
 #include "util/gsurf-keys.h"
 #include "util/gsurf-kiosk.h"
 #include "util/gsurf-pwa.h"
+#include "util/gsurf-host-rules.h"
+#include "util/gsurf-private-file.h"
 
 #undef GSURF_INSIDE
 

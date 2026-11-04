@@ -1,0 +1,194 @@
+#+TITLE: Tabs: strip and tree sidebar
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+The =tabs= module gives a window two views of its tabs, on GTK3 and GTK4 alike:
+
+- the *strip*: a row of flat tab buttons above (or below) the page, in window order;
+- the *tree sidebar*: a Sidebery-style vertical list beside the page, where each tab sits under the tab it was opened from.
+
+It also owns the keyboard tab commands (new, close, next, previous, reopen) and the tree commands (toggle the sidebar, collapse a subtree, move a subtree up or down). The sidebar starts hidden; =Ctrl+Shift+.= shows it.
+
+The module is three parts built into one =tabs.so=:
+
+| File                              | Role |
+|-----------------------------------+------|
+| =modules/tabs/gsurf-tab-tree.c=   | The toolkit-neutral tree model. It knows view ids and openers, not GTK or =GsurfView=. |
+| =modules/tabs/gsurf-tabs-module.c= | The module core: configuration, keys, actions, window and view signals; keeps the model and the window's view order in step. |
+| =modules/tabs/gsurf-tabs-ui.c=    | The strip and the sidebar. All toolkit calls go through =modules/include/gsurf-chrome-compat.h=, so one file serves both GTK versions. |
+
+* The tree
+
+** Where the tree comes from
+
+The window's view order is the source of truth; the tree is derived from it. Every view records its opener at construction (=gsurf_view_new_full()=, used by =main.c= for links opened in a new view and popups, and by =modal= for =F= link hints). =gsurf_view_get_opener_id()= keeps that id after the opener closes. A view opened by the user (=tab-new=, startup, the MCP =open= tool) has no opener.
+
+Each tab has a /logical parent/, initially its opener. The tree is built by walking the window order with a stack holding the path from a root to the previous tab:
+
+1. If the tab's logical parent is on the stack, pop down to it; the tab becomes its child.
+2. Otherwise the tab is a root, and the stack restarts with it.
+
+So a tab keeps its parent only while the parent comes earlier in the window and the tab directly continues the parent's block of descendants. Every subtree is therefore one contiguous run of tabs, and the sidebar is the window order with indentation. After each change the logical parents are set to the derived ones, so a tab that once lost its parent never silently re-attaches to it later.
+
+** Placement of new tabs
+
+When a view is added to the window:
+
+- if its opener is in the same window, the view is moved (=gsurf_window_move_view()=) to just after the opener's *last descendant*, making it the opener's last child;
+- otherwise (no opener, or an opener in another window or already closed) it stays where the window put it, which is the end for =gsurf_window_add_view()=; it is a root.
+
+Opening three links from tab A in turn gives =A, A1, A2, A3=, and a link opened from =A1= goes between =A1= and =A2=.
+
+=tab-new= and =tab-reopen= create their view with the URL they are about to load as its container placement hint (=gsurf_view_new_full()=), so with the =containers= module a reopened tab for an assigned host comes back directly in that container instead of being moved after its first request.
+
+** Closing a tab
+
+=on_close_parent= decides what happens to the children of a closing tab:
+
+- =promote= (default): each direct child takes the closed tab's place in the tree, moving up one level (to the closed tab's parent, or to the root). The children keep their order and their own subtrees, and stay where they are in the window.
+- =close_children=: the closed tab's descendants close with it (and are remembered for =tab-reopen=, most recent first). The module never closes a window's last view: if the descendants are all that would remain, the last one stays open as a root.
+
+This applies however the tab closes: the close key or button, a middle click, the page calling =window.close()=, or another module.
+
+** Orphans
+
+A tab whose opener is closed, or never was in this window, is a root. Its opener id is kept (=gsurf_view_get_opener_id()= never changes), but the tree does not use it once the opener is gone. A promotion is runtime state: when the module is reactivated, or a session is restored, the tree is rebuilt from the window order and the openers alone, so a promoted tab whose opener is closed comes back as a root. A restored session that recreates its views in order with their openers (=gsurf_view_new_full()=) gets the same tree back.
+
+** Collapse
+
+A tab with children shows a twisty (=▾= expanded, =▸= collapsed). Collapsing it hides its descendants in the sidebar; they stay open and keep loading. Collapse state belongs to the tab and survives reorders.
+
+- Clicking the twisty, or =tab-tree-collapse= on a tab with children, toggles its subtree.
+- =tab-tree-collapse= on a leaf collapses the leaf's parent.
+- Collapsing a subtree that holds the active tab makes the collapsed tab active, so the active tab is always visible.
+- Activating a hidden tab by any means (=tab-next=, the strip, the host) expands all its collapsed ancestors.
+
+** Moving subtrees
+
+=tab-move-up= and =tab-move-down= move the active tab together with its whole subtree past the previous or next *sibling* (and that sibling's subtree). A tab never changes parent this way; at its first or last sibling the command does nothing. The window's view order is updated to match.
+
+When something else reorders the window (=gsurf_window_move_view()= from another module or the MCP interface), the tree is re-derived from the new order. A tab moved out of its parent's block becomes a root.
+
+** Depth cap
+
+=max_depth= caps the indentation: a tab deeper than =max_depth= is drawn at =max_depth= levels but keeps its real parent, so collapsing, closing and moving still follow the real tree. =max_depth: 0= draws a flat list.
+
+* The sidebar
+
+The sidebar is packed beside the page with =gsurf_window_add_side_widget()=, on the left or right (=sidebar_position=), =sidebar_width= pixels wide. It is not resizable by dragging. =tab-sidebar-toggle= (default =Ctrl+Shift+.=, which GDK reports as =Ctrl+Shift+greater=) shows and hides it; =sidebar:= sets the state at startup. While it is shown, =sidebar_hides_strip: true= hides the strip.
+
+Each row shows, left to right:
+
+- a 3px container stripe (see below);
+- the twisty, empty and insensitive when the tab has no children;
+- the favicon (=gsurf_view_get_favicon()=: a =cairo_surface_t= on GTK3, scaled to 16px; a =GdkTexture= on GTK4), updated on =favicon-changed=;
+- the title (or the URI, or "New Tab"), ellipsized, updated on =title-changed=;
+- a close button.
+
+The row is indented by =indent= pixels per level and the active tab is highlighted with =active_color=. Clicking a row activates its tab; a middle click closes it. Clicks on the twisty and close buttons stay with those buttons.
+
+Rows are kept and updated in place: adding, closing or moving a tab creates, removes or reorders one row, and each row only re-applies the properties (indentation, twisty, visibility, highlight) that changed. The strip is simply rebuilt.
+
+** Container stripes
+
+A tab in a container (=gsurf_view_get_container_id()=, see =GsurfContainerRegistry=) gets a coloured stripe, a tooltip naming the container on the stripe, and "Container: <name>" in the row's tooltip. Tabs in the default container show none. The colour is the container's =color= (=fg_color= when it has none). The module follows the registry: =container-added= and =container-removed=, and each container's =notify::color= and =notify::name=, restyle and retitle the rows at once. Container colours pass through =GdkRGBA= before they reach the stylesheet, and only ids made of letters, digits, =-= and =_= become CSS classes (=gsurf-ctr-<id>=).
+
+* The strip
+
+The strip shows one flat button per tab in window order (titles cut to 24 characters) with a close button; the active tab uses =active_color=. Clicking a tab activates it. It is shown when the window has more than one tab, or always with =show_single: true=, unless the sidebar is shown and =sidebar_hides_strip= is set.
+
+* Configuration
+
+Under =modules.tabs= (all optional; =data/default-config.yaml= spells out the defaults):
+
+| Key                   | Default                  | Meaning |
+|-----------------------+--------------------------+---------|
+| =enabled=             | =true=                   | Load the module. |
+| =position=            | =top=                    | Strip position: =top= or =bottom=. |
+| =show_single=         | =false=                  | Show the strip with a single tab. |
+| =bg_color=            | =#181825=                | Strip and sidebar background. |
+| =active_color=        | =#313244=                | Background of the active tab and row. |
+| =fg_color=            | =#cdd6f4=                | Tab text, and the stripe of a colourless container. |
+| =sidebar=             | =false=                  | Show the sidebar at startup. |
+| =sidebar_position=    | =left=                   | =left= or =right= of the page. |
+| =sidebar_width=       | =240=                    | Sidebar width in pixels, 60 to 2000. |
+| =sidebar_hides_strip= | =true=                   | Hide the strip while the sidebar is shown. |
+| =indent=              | =14=                     | Pixels per tree level, 0 to 64. |
+| =max_depth=           | =8=                      | Deepest indentation drawn, 0 to 64. |
+| =on_close_parent=     | =promote=                | =promote= or =close_children=. |
+| =key_new=             | =Ctrl+t=                 | =tab-new= |
+| =key_close=           | =Ctrl+w=                 | =tab-close= |
+| =key_next=            | =Ctrl+Tab=               | =tab-next= |
+| =key_prev=            | =Ctrl+Shift+Tab=         | =tab-prev= |
+| =key_reopen=          | =Ctrl+Shift+t=           | =tab-reopen= |
+| =key_sidebar=         | =Ctrl+Shift+greater=     | =tab-sidebar-toggle= (=Ctrl+Shift+period= and =Ctrl+Shift+.= are the same key) |
+| =key_collapse=        | =Ctrl+Shift+bracketleft= | =tab-tree-collapse= (GDK reports it as =Ctrl+Shift+braceleft=) |
+| =key_move_up=         | =Ctrl+Shift+Page_Up=     | =tab-move-up= |
+| =key_move_down=       | =Ctrl+Shift+Page_Down=   | =tab-move-down= |
+
+Rules:
+
+- Colours are CSS colours as =GdkRGBA= parses them (=#rrggbb=, =rgb()=, names, ...). An invalid colour logs a warning and keeps the default, so nothing malformed reaches the stylesheet.
+- An out-of-range or non-numeric width, indent or depth, or an unknown =position=, =sidebar_position= or =on_close_parent=, logs a warning naming the key and keeps the default. The rest of the block still applies.
+- An empty key (=key_collapse: ""=) unbinds it; the action stays available through the core =keybinds:= table.
+- Each =configure()= starts from the defaults, so a second call replaces the configuration entirely (a key left out returns to its default). Layout options (=position=, =sidebar_*=, colours) take effect at the next activation; the keys and =on_close_parent= apply at once, and =indent= and =max_depth= with the next change to the tabs.
+
+#+begin_src yaml
+modules:
+  tabs:
+    enabled: true
+    sidebar: true
+    sidebar_position: right
+    sidebar_width: 280
+    on_close_parent: close_children
+    key_sidebar: "Ctrl+Shift+period"
+#+end_src
+
+* Keys and actions
+
+The module matches its own keys (=GsurfInputHandler=) and performs the same actions when the core =keybinds:= table forwards them (=GsurfActionHandler=), so =tab-sidebar-toggle= and friends can also be bound there. All its keys are listed in the =?= overlay (=GsurfKeybindProvider=).
+
+| Action               | Default key              | Effect |
+|----------------------+--------------------------+--------|
+| =tab-new=            | =Ctrl+t=                 | Open =new_view_uri= in a new root tab. |
+| =tab-close=          | =Ctrl+w=                 | Close the active tab (never the last one). |
+| =tab-next= / =tab-prev= | =Ctrl+Tab= / =Ctrl+Shift+Tab= | Cycle through the window order, hidden tabs included (activating one expands its ancestors). |
+| =tab-reopen=         | =Ctrl+Shift+t=           | Reopen the most recently closed URI. |
+| =tab-sidebar-toggle= | =Ctrl+Shift+.=           | Show or hide the sidebar. |
+| =tab-tree-collapse=  | =Ctrl+Shift+[=           | Collapse or expand the active tab's subtree (on a leaf: its parent's). |
+| =tab-move-up=        | =Ctrl+Shift+Page_Up=     | Move the active tab and its subtree above its previous sibling. |
+| =tab-move-down=      | =Ctrl+Shift+Page_Down=   | Move the active tab and its subtree below its next sibling. |
+
+*Conflict check.* The four tree keys are not used by the core table or by any other module's defaults in =data/default-config.yaml=, so they were kept as planned. The existing overlap of =key_reopen= (=Ctrl+Shift+t=) with =toggles= =strict_tls= is unchanged: the module that sees the key first (by priority) takes it.
+
+*Kiosk.* In kiosk mode the module shows neither strip nor sidebar; =tab-new= and =tab-reopen= are refused, and the tree actions do nothing visible.
+
+* GTK3 and GTK4
+
+The UI is a single source file built against either toolkit through =modules/include/gsurf-chrome-compat.h=. The tabs module added these helpers there (all static inline, documented in the header):
+
+| Helper | GTK3 | GTK4 |
+|--------+------+------|
+| =gsurf_chrome_widget_show_all()= / =_manage_visibility()= | =gtk_widget_show_all()=, plus no-show-all so the window's show-all leaves hidden rows hidden | visible by default; nothing re-shows widgets |
+| =gsurf_chrome_widget_add_class()= and friends | style context classes | =gtk_widget_add_css_class()= |
+| =gsurf_chrome_button_new_flat()= | relief none | no frame |
+| =gsurf_chrome_scrolled_new()= | =gtk_scrolled_window_new(NULL, NULL)= + add | =gtk_scrolled_window_set_child()= |
+| =gsurf_chrome_box_clear()= / =_box_move_child()= | destroy children / =gtk_box_reorder_child()= | =gtk_box_remove()= / =gtk_box_reorder_child_after()= |
+| =gsurf_chrome_image_set_native()= | =cairo_surface_t=, scaled into a 16x16 surface | =GdkPaintable= with a pixel size |
+| =gsurf_chrome_css_provider_new()= / =_reload()= / =_remove()= | provider on the default screen | provider on the default display |
+| =gsurf_chrome_clickable_new()= / =gsurf_chrome_connect_click()= / =_disconnect_click()= | a =GtkEventBox= and =button-press-event= | the widget itself and one =GtkGestureClick= per button, named =gsurf-chrome-click-<n>= |
+
+Click helpers ignore presses on a =GtkButton= nested in the clickable widget (GTK3: the window under the press belongs to a button; GTK4: =gtk_widget_pick()= finds one), so the twisty and close buttons never also activate the row.
+
+* Lifetime
+
+The module follows the chrome module rules (=docs/modules.org=, "Chrome module lifetime"):
+
+- Deactivation and disposal disconnect every handler (window, views, container registry, containers, rows, strip buttons), detach the strip and sidebar, remove the stylesheet and free the tree. Both are idempotent, and =activate()= after =deactivate()= builds exactly one strip and one sidebar.
+- The strip, the sidebar, its list and every row are retained by the module until cleanup, so the host destroying the window chrome first leaves no dangling pointers. The module holds a weak reference on the window and releases everything when the window finalizes first.
+
+* Tests
+
+- =tests/test-tab-tree.c= (headless, part of =make test=): the model compiled in directly (placement after the last descendant, nesting, promote and close_children, collapse and expansion, moving subtrees, =max_depth=, orphaned openers, rebuilding from the window order, a randomized 4000-step stress run checking the block invariants, a 2000-tab sync), and the real =tabs.so= configuration (defaults, custom and empty keys, a second =configure()= back to defaults, the shipped default config parsing without warnings, and every bad value warning).
+- =tests/test-chrome-lifecycle.c= (=make test-gui=, both backends): strip and sidebar lifetime (deactivate twice, reactivate, repeated disposal, the window dying first), toggling by =Ctrl+Shift+.= and by action, rows and indentation following the tree, =max_depth=, collapse by action, key and twisty, expansion on activation, move up/down by action and key, external reorders, row clicks and middle clicks, the close button, promote and close_children (including the last-view rule), title and favicon updates, container stripes following the registry (colour, name, added, removed, a malformed colour), strip hiding, sidebar position and width, and kiosk.

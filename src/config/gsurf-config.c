@@ -481,7 +481,7 @@ gsurf_config_init(GsurfConfig *self)
 	self->enable_disk_cache = TRUE;
 	self->proxy_mode = g_strdup("default");
 	self->proxy_uri = NULL;
-	self->do_not_track = TRUE;
+	self->do_not_track = FALSE;  /* sent only by the hardening module */
 	self->tls_strict = TRUE;
 	self->ephemeral = FALSE;
 }

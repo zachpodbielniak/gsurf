@@ -134,6 +134,65 @@ new_action_module(const gchar *name, GsurfAction handles, gboolean claim_highest
 	return m;
 }
 
+/* ---- in-test navigation-hook module ----
+ *
+ * Answers the main-frame response hook with a fixed verdict and counts
+ * the calls; `response_hook` FALSE leaves the vfunc unset so the
+ * interface default (USE) is exercised. */
+
+#define TEST_TYPE_NAV_MODULE (test_nav_module_get_type())
+G_DECLARE_FINAL_TYPE(TestNavModule, test_nav_module, TEST, NAV_MODULE, GsurfModule)
+
+struct _TestNavModule
+{
+	GsurfModule         parent_instance;
+	GsurfPolicyDecision verdict;
+	guint               calls;
+	gchar              *last_uri;
+};
+
+static void test_nav_module_iface_init(GsurfNavigationHookInterface *iface);
+
+G_DEFINE_FINAL_TYPE_WITH_CODE(TestNavModule, test_nav_module, GSURF_TYPE_MODULE,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_NAVIGATION_HOOK, test_nav_module_iface_init))
+
+static GsurfPolicyDecision
+test_nav_module_response(GsurfNavigationHook *hook, GsurfView *view, const gchar *uri)
+{
+	TestNavModule *self = TEST_NAV_MODULE(hook);
+
+	(void)view;
+	self->calls++;
+	g_free(self->last_uri);
+	self->last_uri = g_strdup(uri);
+	return self->verdict;
+}
+
+static void
+test_nav_module_iface_init(GsurfNavigationHookInterface *iface)
+{
+	iface->decide_main_response = test_nav_module_response;
+}
+
+static void
+test_nav_module_finalize(GObject *object)
+{
+	g_free(TEST_NAV_MODULE(object)->last_uri);
+	G_OBJECT_CLASS(test_nav_module_parent_class)->finalize(object);
+}
+
+static void
+test_nav_module_class_init(TestNavModuleClass *klass)
+{
+	G_OBJECT_CLASS(klass)->finalize = test_nav_module_finalize;
+}
+
+static void
+test_nav_module_init(TestNavModule *self)
+{
+	(void)self;
+}
+
 /* ---- manager mechanics ---- */
 
 static void
@@ -143,6 +202,7 @@ test_defaults_no_modules(void)
 	gchar *path;
 
 	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, "https://x"), ==, GSURF_POLICY_USE);
+	g_assert_cmpint(gsurf_module_manager_dispatch_main_response(mgr, NULL, "https://x"), ==, GSURF_POLICY_USE);
 	g_assert_cmpint(gsurf_module_manager_dispatch_permission(mgr, NULL, "geolocation", NULL), ==, GSURF_PERMISSION_PROMPT);
 	g_assert_cmpint(gsurf_module_manager_dispatch_verify_cert(mgr, "h", 0), ==, GSURF_TLS_PROMPT);
 	path = gsurf_module_manager_dispatch_decide_destination(mgr, "u", "f");
@@ -176,6 +236,42 @@ test_new_hook_defaults(void)
 
 	g_ptr_array_unref(items);
 	g_object_unref(mgr);
+}
+
+/* The main-frame response hook: first non-USE verdict in priority
+ * order wins; inactive modules and modules without the vfunc say USE. */
+static void
+test_main_response_dispatch(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autoptr(TestNavModule) allow = g_object_new(TEST_TYPE_NAV_MODULE, NULL);
+	g_autoptr(TestNavModule) veto = g_object_new(TEST_TYPE_NAV_MODULE, NULL);
+	g_autoptr(TestNavModule) off = g_object_new(TEST_TYPE_NAV_MODULE, NULL);
+
+	allow->verdict = GSURF_POLICY_USE;
+	veto->verdict = GSURF_POLICY_IGNORE;
+	off->verdict = GSURF_POLICY_IGNORE;
+	gsurf_module_set_enabled(GSURF_MODULE(allow), TRUE);
+	gsurf_module_set_enabled(GSURF_MODULE(veto), TRUE);
+	gsurf_module_set_priority(GSURF_MODULE(allow), GSURF_PRIORITY_HIGH);
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(off));
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(veto));
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(allow));
+	gsurf_module_manager_activate_all(mgr);
+
+	g_assert_cmpint(gsurf_module_manager_dispatch_main_response(mgr, NULL, "https://a/"),
+		==, GSURF_POLICY_IGNORE);
+	g_assert_cmpuint(allow->calls, ==, 1);
+	g_assert_cmpuint(veto->calls, ==, 1);
+	g_assert_cmpuint(off->calls, ==, 0);
+	g_assert_cmpstr(veto->last_uri, ==, "https://a/");
+
+	/* before_navigate is a separate hook: unset here, so USE. */
+	g_assert_cmpint(gsurf_module_manager_dispatch_before_navigate(mgr, NULL, "https://a/"),
+		==, GSURF_POLICY_USE);
+	g_assert_cmpuint(veto->calls, ==, 1);
+
+	gsurf_module_manager_deactivate_all(mgr);
 }
 
 /* Actions go to the first handler (by priority) that performs them;
@@ -575,6 +671,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/new-hook-defaults", test_new_hook_defaults);
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
 	g_test_add_func("/gsurf/manager/action-dispatch", test_action_dispatch);
+	g_test_add_func("/gsurf/manager/main-response-dispatch", test_main_response_dispatch);
 	g_test_add_func("/gsurf/manager/priority-set-in-activate", test_priority_set_in_activate);
 	g_test_add_func("/gsurf/manager/load-bad-path", test_load_bad_path);
 	g_test_add_func("/gsurf/manager/search-paths", test_search_paths);

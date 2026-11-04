@@ -7,6 +7,8 @@
  * Implements #GsurfInputHandler: configurable keys toggle individual
  * #GsurfSettings fields on the active view at runtime (JavaScript,
  * images, WebGL, caret browsing, ...). Ports surf's toggle keybinds.
+ * The "dark_mode" key is forwarded to the dark_mode module as the
+ * dark-mode-toggle action.
  */
 
 #include <gsurf/gsurf.h>
@@ -64,7 +66,7 @@ gsurf_toggles_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	const gchar *name;
 	gint value;
 
-	if (view == NULL || config == NULL)
+	if (view == NULL)
 		return FALSE;
 
 	event = gsurf_keys_to_string(keyval, state);
@@ -75,6 +77,15 @@ gsurf_toggles_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	if (name == NULL)
 		return FALSE;
 
+	/* dark_mode is not a GsurfSettings field: the key is kept for old
+	 * configs and forwarded to the dark_mode module's global toggle
+	 * (unhandled, and so passed on, when that module is disabled). */
+	if (g_strcmp0(name, "dark_mode") == 0)
+		return gsurf_module_manager_dispatch_action(gsurf_module_manager_get_default(),
+			view, GSURF_ACTION_DARK_MODE_TOGGLE);
+
+	if (config == NULL)
+		return FALSE;
 	value = flip_setting(config->settings, name);
 	if (value < 0)
 		return FALSE;

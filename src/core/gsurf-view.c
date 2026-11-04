@@ -7,17 +7,45 @@
 
 #include "util/gsurf-kiosk.h"
 #include "core/gsurf-view.h"
+#include "core/gsurf-container-registry.h"
 
 #include <errno.h>
 #include <pwd.h>
 #include <string.h>
 
 typedef struct {
-	gboolean editing;       /* an editable DOM element is focused in the page */
-	gchar   *hovered_uri;   /* link URI under the pointer, or NULL */
+	gboolean   editing;       /* an editable DOM element is focused in the page */
+	gchar     *hovered_uri;   /* link URI under the pointer, or NULL */
+
+	guint64    id;            /* process-unique, assigned in constructed() */
+	GsurfView *opener;        /* weak pointer (cleared on finalize) */
+	guint64    opener_id;     /* survives the opener */
+	gchar     *requested;     /* construct: requested container id */
+	gchar     *container_id;  /* resolved container, NULL = default */
+	gboolean   related;       /* popup sharing the opener's session */
+	gchar     *initial_uri;   /* construct: placement hint */
+	gpointer   session;       /* native session acquired from the registry */
+	gboolean   acquired;      /* whether release() is owed */
 } GsurfViewPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfView, gsurf_view, G_TYPE_OBJECT)
+
+enum {
+	PROP_0,
+	PROP_ID,
+	PROP_OPENER,
+	PROP_CONTAINER_ID,
+	PROP_RELATED,
+	PROP_INITIAL_URI,
+	N_PROPS
+};
+
+static GParamSpec *props[N_PROPS];
+
+/* id -> GsurfView* (borrowed). Views are main-thread objects, so a plain
+ * table suffices; entries are removed in dispose. */
+static GHashTable *views_by_id = NULL;
+static guint64 next_view_id = 0;
 
 enum {
 	SIG_LOAD_CHANGED,
@@ -28,23 +56,179 @@ enum {
 	SIG_HOVERED_URI_CHANGED,
 	SIG_FAVICON_CHANGED,
 	SIG_CREATE_VIEW,
+	SIG_SCRIPT_MESSAGE,
 	N_SIGNALS
 };
 
 static guint signals[N_SIGNALS];
+
+/* Assign the id, then place the view in a container and acquire that
+ * container's session before the backend subclass (which chains up first
+ * in its own constructed()) creates the native web view. */
+static void
+gsurf_view_constructed(GObject *object)
+{
+	GsurfView *self = GSURF_VIEW(object);
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(self);
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+
+	G_OBJECT_CLASS(gsurf_view_parent_class)->constructed(object);
+
+	priv->id = ++next_view_id;
+	if (views_by_id == NULL)
+		views_by_id = g_hash_table_new(g_int64_hash, g_int64_equal);
+	g_hash_table_insert(views_by_id, &priv->id, self);
+
+	/* A related view without an opener has nothing to relate to. */
+	if (priv->opener == NULL)
+		priv->related = FALSE;
+
+	priv->container_id = gsurf_container_registry_resolve(registry, priv->opener,
+		priv->requested, priv->initial_uri, priv->related);
+	priv->session = gsurf_container_registry_acquire(registry, priv->container_id);
+	priv->acquired = TRUE;
+}
+
+static void
+gsurf_view_dispose(GObject *object)
+{
+	GsurfView *self = GSURF_VIEW(object);
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(self);
+
+	/* Dispose may run more than once; the release must not. The backend
+	 * subclass has already dropped its native view (it disposes before
+	 * chaining up), so the session can go away now. */
+	if (priv->acquired) {
+		priv->acquired = FALSE;
+		gsurf_container_registry_release(gsurf_container_registry_get_default(),
+			priv->container_id);
+		priv->session = NULL;
+	}
+	if (views_by_id != NULL && priv->id != 0)
+		g_hash_table_remove(views_by_id, &priv->id);
+	if (priv->opener != NULL)
+		g_object_remove_weak_pointer(G_OBJECT(priv->opener), (gpointer *)&priv->opener);
+	priv->opener = NULL;
+
+	G_OBJECT_CLASS(gsurf_view_parent_class)->dispose(object);
+}
 
 static void
 gsurf_view_finalize(GObject *object)
 {
 	GsurfViewPrivate *priv = gsurf_view_get_instance_private(GSURF_VIEW(object));
 	g_clear_pointer(&priv->hovered_uri, g_free);
+	g_clear_pointer(&priv->requested, g_free);
+	g_clear_pointer(&priv->container_id, g_free);
+	g_clear_pointer(&priv->initial_uri, g_free);
 	G_OBJECT_CLASS(gsurf_view_parent_class)->finalize(object);
+}
+
+static void
+gsurf_view_set_property(GObject *object, guint prop_id,
+                        const GValue *value, GParamSpec *pspec)
+{
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(GSURF_VIEW(object));
+
+	switch (prop_id) {
+	case PROP_OPENER: {
+		GsurfView *opener = g_value_get_object(value);
+
+		/* Weak: the opener may close long before its children. */
+		priv->opener = opener;
+		if (opener != NULL) {
+			GsurfViewPrivate *opener_priv = gsurf_view_get_instance_private(opener);
+
+			priv->opener_id = opener_priv->id;
+			g_object_add_weak_pointer(G_OBJECT(opener), (gpointer *)&priv->opener);
+		}
+		break;
+	}
+	case PROP_CONTAINER_ID:
+		g_free(priv->requested);
+		priv->requested = g_value_dup_string(value);
+		break;
+	case PROP_RELATED:
+		priv->related = g_value_get_boolean(value);
+		break;
+	case PROP_INITIAL_URI:
+		g_free(priv->initial_uri);
+		priv->initial_uri = g_value_dup_string(value);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
+static void
+gsurf_view_get_property(GObject *object, guint prop_id,
+                        GValue *value, GParamSpec *pspec)
+{
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(GSURF_VIEW(object));
+
+	switch (prop_id) {
+	case PROP_ID:           g_value_set_uint64(value, priv->id); break;
+	case PROP_OPENER:       g_value_set_object(value, priv->opener); break;
+	case PROP_CONTAINER_ID: g_value_set_string(value, priv->container_id); break;
+	case PROP_RELATED:      g_value_set_boolean(value, priv->related); break;
+	case PROP_INITIAL_URI:  g_value_set_string(value, priv->initial_uri); break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
 }
 
 static void
 gsurf_view_class_init(GsurfViewClass *klass)
 {
-	G_OBJECT_CLASS(klass)->finalize = gsurf_view_finalize;
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+	object_class->constructed = gsurf_view_constructed;
+	object_class->dispose = gsurf_view_dispose;
+	object_class->finalize = gsurf_view_finalize;
+	object_class->set_property = gsurf_view_set_property;
+	object_class->get_property = gsurf_view_get_property;
+
+	/**
+	 * GsurfView:id:
+	 *
+	 * Process-unique view id, assigned at construction.
+	 */
+	props[PROP_ID] = g_param_spec_uint64("id", NULL, NULL,
+		0, G_MAXUINT64, 0, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:opener:
+	 *
+	 * The view this one was opened from (weak), or %NULL.
+	 */
+	props[PROP_OPENER] = g_param_spec_object("opener", NULL, NULL,
+		GSURF_TYPE_VIEW,
+		G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:container-id:
+	 *
+	 * On construction, the requested container id (or
+	 * #GSURF_CONTAINER_TEMPORARY); when read, the container actually
+	 * chosen by the registry (%NULL = default).
+	 */
+	props[PROP_CONTAINER_ID] = g_param_spec_string("container-id", NULL, NULL,
+		NULL, G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:related:
+	 *
+	 * Whether the view is a popup that shares its opener's web process
+	 * and session (WebKit's related view). Requires #GsurfView:opener.
+	 */
+	props[PROP_RELATED] = g_param_spec_boolean("related", NULL, NULL,
+		FALSE, G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:initial-uri:
+	 *
+	 * The first URI the creator intends to load, used only as a hint for
+	 * container placement.
+	 */
+	props[PROP_INITIAL_URI] = g_param_spec_string("initial-uri", NULL, NULL,
+		NULL, G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	g_object_class_install_properties(object_class, N_PROPS, props);
 
 	/**
 	 * GsurfView::load-changed:
@@ -132,6 +316,21 @@ gsurf_view_class_init(GsurfViewClass *klass)
 		"create-view", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_first_wins, NULL, NULL,
 		GSURF_TYPE_VIEW, 1, G_TYPE_STRING);
+
+	/**
+	 * GsurfView::script-message:
+	 * @view: the view
+	 * @name: the message handler name (also the signal detail)
+	 * @json: (nullable): the posted value serialized as JSON
+	 *
+	 * Emitted when a page or isolated-world script posts to a handler
+	 * registered with gsurf_view_register_script_message(). Connect to
+	 * `script-message::<name>` to receive one handler's messages.
+	 */
+	signals[SIG_SCRIPT_MESSAGE] = g_signal_new(
+		"script-message", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST | G_SIGNAL_DETAILED, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 2, G_TYPE_STRING, G_TYPE_STRING);
 }
 
 static void
@@ -853,4 +1052,204 @@ gsurf_view_emit_web_process_terminated(GsurfView *self)
 {
 	g_return_if_fail(GSURF_IS_VIEW(self));
 	g_signal_emit(self, signals[SIG_WEB_PROCESS_TERMINATED], 0);
+}
+
+/* --- Identity, opener and container --- */
+
+guint64
+gsurf_view_get_id(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), 0);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->id;
+}
+
+GsurfView *
+gsurf_view_lookup(guint64 id)
+{
+	if (views_by_id == NULL || id == 0)
+		return NULL;
+	return g_hash_table_lookup(views_by_id, &id);
+}
+
+GsurfView *
+gsurf_view_get_opener(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->opener;
+}
+
+guint64
+gsurf_view_get_opener_id(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), 0);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->opener_id;
+}
+
+const gchar *
+gsurf_view_get_container_id(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->container_id;
+}
+
+gboolean
+gsurf_view_get_related(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->related;
+}
+
+gpointer
+gsurf_view_get_session(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->session;
+}
+
+const gchar *
+gsurf_view_get_initial_uri(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	priv = gsurf_view_get_instance_private(self);
+	return priv->initial_uri;
+}
+
+gpointer
+gsurf_view_get_favicon(GsurfView *self)
+{
+	GsurfViewClass *klass;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	klass = GSURF_VIEW_GET_CLASS(self);
+	return klass->get_favicon != NULL ? klass->get_favicon(self) : NULL;
+}
+
+/* --- Script worlds and messages --- */
+
+void
+gsurf_view_register_script_message(GsurfView *self, const gchar *name, const gchar *world)
+{
+	GsurfViewClass *klass;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(name != NULL && *name != '\0');
+
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->register_script_message != NULL)
+		klass->register_script_message(self, name, world);
+}
+
+void
+gsurf_view_add_user_script_in_world(GsurfView *self, const gchar *source,
+                                    gboolean at_end, const gchar *const *allow,
+                                    const gchar *world)
+{
+	GsurfViewClass *klass;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(source != NULL);
+
+	/* The main world is the existing allow-list path. */
+	if (world == NULL) {
+		gsurf_view_add_user_script_for(self, source, at_end, allow);
+		return;
+	}
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->add_user_script_in_world != NULL)
+		klass->add_user_script_in_world(self, source, at_end, allow, world);
+}
+
+/* The backend's evaluation finished: finish it through the backend and
+ * complete the caller's task, whose source object is the GsurfView (the
+ * backend's own result has the native web view as its source). */
+static void
+on_in_world_done(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	GTask *task = user_data;
+	GsurfView *self = g_task_get_source_object(task);
+	GsurfViewClass *klass = GSURF_VIEW_GET_CLASS(self);
+	GError *error = NULL;
+	gchar *value;
+
+	(void)source;
+	value = (klass->run_javascript_in_world_finish != NULL)
+		? klass->run_javascript_in_world_finish(self, result, &error)
+		: klass->run_javascript_finish(self, result, &error);
+	if (error != NULL)
+		g_task_return_error(task, error);
+	else
+		g_task_return_pointer(task, value, g_free);
+	g_object_unref(task);
+}
+
+void
+gsurf_view_run_javascript_in_world_async(GsurfView *self, const gchar *script,
+                                         const gchar *world, GCancellable *cancellable,
+                                         GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfViewClass *klass;
+	GTask *task;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(script != NULL);
+
+	task = g_task_new(self, cancellable, callback, user_data);
+	g_task_set_source_tag(task, gsurf_view_run_javascript_in_world_async);
+
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (world == NULL && klass->run_javascript_async != NULL &&
+	    klass->run_javascript_finish != NULL) {
+		klass->run_javascript_async(self, script, cancellable, on_in_world_done, task);
+		return;
+	}
+	if (world != NULL && klass->run_javascript_in_world_async != NULL &&
+	    (klass->run_javascript_in_world_finish != NULL || klass->run_javascript_finish != NULL)) {
+		klass->run_javascript_in_world_async(self, script, world, cancellable,
+			on_in_world_done, task);
+		return;
+	}
+	/* No support: report it rather than leaving the caller waiting. */
+	g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		world != NULL ? "script worlds are not supported by this backend"
+		              : "JavaScript evaluation not supported by this backend");
+	g_object_unref(task);
+}
+
+gchar *
+gsurf_view_run_javascript_in_world_finish(GsurfView *self, GAsyncResult *result,
+                                          GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	g_return_val_if_fail(g_task_is_valid(result, self), NULL);
+
+	return g_task_propagate_pointer(G_TASK(result), error);
+}
+
+void
+gsurf_view_emit_script_message(GsurfView *self, const gchar *name, const gchar *json)
+{
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(name != NULL);
+
+	g_signal_emit(self, signals[SIG_SCRIPT_MESSAGE], g_quark_from_string(name), name, json);
 }

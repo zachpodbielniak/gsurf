@@ -15,6 +15,24 @@ Order and case are normalized, so =ctrl+shift+g= and =Shift+Ctrl+g= match.
 
 A single letter's case means Shift: =N=, =Shift+n= and =Shift+N= are all the same key (GDK reports Shift+n as the keyval =N= with the Shift modifier, and both spellings meet it). So =Ctrl+Shift+s= matches Ctrl+Shift+s as typed, and a lowercase =o= never fires for Shift+o. Caps Lock produces the uppercase keyval, so with Caps Lock on, =h= arrives as =H=, as in vim. Shift+Tab, which GDK names =ISO_Left_Tab=, matches =Shift+Tab=.
 
+Punctuation follows the same idea. GDK reports a shifted punctuation key as its shifted keysym: Shift+period arrives as =greater=, Shift+bracketleft as =braceleft=. So with =Shift= in the binding, the unshifted name or its literal character is rewritten to that keysym, and =Ctrl+Shift+period=, =Ctrl+Shift+.= and =Ctrl+Shift+greater= are all the same binding (the tree sidebar's default toggle). Without =Shift= the name is kept, so =Ctrl+.= only fires for an unshifted period. The literal characters understood are =. , / ; ' [ ] - = ` \=, mapped on a US layout:
+
+| Unshifted (literal)  | With Shift   |
+|----------------------+--------------|
+| =period= (=.=)       | =greater=    |
+| =comma= (=,=)        | =less=       |
+| =slash= (=/=)        | =question=   |
+| =semicolon= (=;=)    | =colon=      |
+| =apostrophe= (='=)   | =quotedbl=   |
+| =bracketleft= (=[=)  | =braceleft=  |
+| =bracketright= (=]=) | =braceright= |
+| =minus= (=-=)        | =underscore= |
+| =equal= (===)        | =plus=       |
+| =grave= (=`=)        | =asciitilde= |
+| =backslash= (=\=)    | =bar=        |
+
+=+= separates modifiers, so a literal plus cannot be written; use =plus=.
+
 Values are action nicks (see =gsurf --generate-yaml-config=). Both =-= and =_=
 separators are accepted (=reload-nocache= or =reload_nocache=).
 
@@ -36,6 +54,8 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =o= / =Ctrl+l= | open-prompt       |
 | =Ctrl+e= / =Ctrl+y= | scroll down/up |
 
+Module default keys outside the core table include =Ctrl+Alt+f= (=form_autofill=, off by default): fill the focused form from the one autofill profile, or open the profile picker when there are several. It must carry =Ctrl=, =Alt= or =Super= because bare keys reach the page while a field is focused; see [[file:form-autofill.org][form-autofill.org]].
+
 Some actions are performed by the module that owns their UI, through =GsurfActionHandler=: =open-prompt= by =chromebar= (the =--lrg= window draws its own address bar), =find= by =find_bar=, =tab-*= by =tabs=, and =follow-hints= / =enter-*-mode= by =modal=. With that module disabled the key does nothing and goes to the page.
 
 Bare-letter vim navigation (=hjkl=, =gg=, =G=, =H=/=L=, =r=, =d=/=u=) is
@@ -54,7 +74,11 @@ new view, and =Escape= cancels. Configure the keys/colors under
 In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf_config_load_from_data()=, as demonstrated by =data/sensible-config.c=. Supply the complete modules block: this loader replaces the retained modules mapping rather than merging individual options. Restart the browser with the rebuilt modal module to apply the change.
 
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
-(new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
+(new/close/next/prev) and =Ctrl+Shift+t= (reopen), plus the tree sidebar keys: =Ctrl+Shift+.= (=tab-sidebar-toggle=), =Ctrl+Shift+[= (=tab-tree-collapse=) and =Ctrl+Shift+Page_Up= / =Ctrl+Shift+Page_Down= (=tab-move-up= / =tab-move-down=, moving the tab with its subtree). None of the tree keys overlaps a default binding; see [[file:tabs.org][tabs.org]]. =toggles= adds the =Ctrl+Shift+...= setting toggles.
+
+=dark_mode= binds =Ctrl+Alt+d= (=dark-mode-toggle=, everything on/off) and =Ctrl+Alt+Shift+d= (=dark-mode-toggle-site=, the current site, remembered across restarts); set =modules.dark_mode.key_toggle= / =key_toggle_site= to change or unbind them (see [[file:dark-mode.org][Dark mode]]). =Ctrl+Shift+d= belongs to the bookmarks module. The toggles module's legacy =keys.dark_mode= entry forwards to =dark-mode-toggle=.
+
+The =containers= module (disabled by default) adds =Ctrl+Alt+t= (=container-new-temp=: a new tab in a temporary container) and =Ctrl+Alt+c= (=container-reopen-next=: reopen the tab in the next container), configurable as =key_new_temp= / =key_reopen_next=; see [[file:containers.org][containers.org]].
 
 * Focus: the page and the address bar
 
@@ -98,6 +122,8 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 =find=, =find-next=, =find-prev=. Tabs: =tab-{new,close,next,prev,reopen}=.
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
+
+Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=, default keys =Ctrl+Shift+.=, =Ctrl+Shift+[=, =Ctrl+Shift+Page_Up= / =Page_Down=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Kiosk mode refuses =container-new-temp= and =container-reopen-next= like every action that opens a view.
 
 * Modal / vim navigation
 

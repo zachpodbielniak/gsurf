@@ -43,7 +43,8 @@ On activation the module prints the socket path it is listening on.
 | =get_links=           | —                     | JSON array of ={text, href}=                 |
 | =execute_javascript=  | =code=                | Run JS in the page, return the result        |
 | =scroll=              | =direction=           | up / down / top / bottom                     |
-| =list_views=          | —                     | JSON of open views/tabs                      |
+| =list_views=          | —                     | JSON of open views/tabs: =index=, =uri=, =title=, =active=, =id= (stable), =opener_id= (0 = none), =container= (null = default) |
+| =open_view=           | =uri=, =container=    | Open a view; =container= is a container id, =temporary= (a new temporary container) or =default=; without it the =containers= policy places the view (host rules, new-tab policy); returns its index |
 
 Content/scripting tools run JavaScript synchronously via a nested main loop so
 the MCP handler can return the result.

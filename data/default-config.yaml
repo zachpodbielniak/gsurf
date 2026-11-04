@@ -62,7 +62,7 @@ network:
   proxy:
     mode: default                  # default (system), none, custom
     uri: ""                        # e.g. socks5://127.0.0.1:9050
-  do_not_track: true
+  do_not_track: false              # DNT: 1 header; sent only while the hardening module is enabled
 
 # ===== Window (core) =====
 window:
@@ -175,7 +175,8 @@ modules:
       images: "Ctrl+Shift+m"
       caret_browsing: "Ctrl+i"
       strict_tls: "Ctrl+Shift+t"
-      dark_mode: "Ctrl+Shift+d"
+      # dark_mode: "Ctrl+Alt+d"     # forwarded to dark_mode's global toggle;
+      #                             # dark_mode.key_toggle already binds it
       geolocation: "Ctrl+Shift+g"
       webgl: "Ctrl+Shift+w"
 
@@ -216,18 +217,30 @@ modules:
     key_toggle: "Ctrl+Shift+at"
     per_site: {}
 
+  # Tab strip + tree-style tab sidebar (docs/tabs.org).
   tabs:
     enabled: true
-    position: top                  # top or bottom
-    show_single: false             # hide bar when only one view
+    position: top                  # strip: top or bottom
+    show_single: false             # hide the strip when only one view
     key_new: "Ctrl+t"
     key_close: "Ctrl+w"
     key_next: "Ctrl+Tab"
     key_prev: "Ctrl+Shift+Tab"
     key_reopen: "Ctrl+Shift+t"
-    bg_color: "#181825"
-    active_color: "#313244"
-    fg_color: "#cdd6f4"
+    bg_color: "#181825"            # strip/sidebar background (CSS colour)
+    active_color: "#313244"        # active tab background
+    fg_color: "#cdd6f4"            # tab text
+    sidebar: false                 # tree sidebar shown at startup
+    sidebar_position: left         # left or right
+    sidebar_width: 240             # px (60-2000)
+    sidebar_hides_strip: true      # hide the strip while the sidebar shows
+    indent: 14                     # px per tree level (0-64)
+    max_depth: 8                   # deepest drawn indentation (0-64)
+    on_close_parent: promote       # promote | close_children
+    key_sidebar: "Ctrl+Shift+greater"     # == Ctrl+Shift+period (Ctrl+Shift+.)
+    key_collapse: "Ctrl+Shift+bracketleft"
+    key_move_up: "Ctrl+Shift+Page_Up"
+    key_move_down: "Ctrl+Shift+Page_Down"
 
   find_bar:
     enabled: true
@@ -330,6 +343,27 @@ modules:
     timeout: -1
     notify_downloads: true
 
+  # Fill forms from identity/address/card profiles (docs/form-autofill.org).
+  # Card data (cc_name, cc_number, cc_exp) is only read from the private
+  # profile file and only filled on https pages; the CSC is never stored.
+  form_autofill:
+    enabled: false
+    # file: "~/.config/gsurf/autofill.yaml"  # the default; must be chmod 600
+    suggest_on_focus: true          # list profile labels on a known field
+    key_fill: "Ctrl+Alt+f"          # one profile: fill; several: picker
+    exclude: []                     # top-level host regexes, e.g. '(^|\.)paypal\.com$'
+    profiles: []                    # inline profiles (no card data here)
+    # - label: home
+    #   given_name: Zach
+    #   family_name: Example
+    #   email: zach@example.org
+    #   tel: "+1 555 0100"
+    #   street: ["742 Evergreen Terrace", "Apt 9"]
+    #   city: Springfield
+    #   region: IL
+    #   postal_code: "62704"
+    #   country: US
+
   # ---------- MCP (requires the MCP=1 build flag) ----------
 
   mcp:
@@ -382,9 +416,25 @@ modules:
 
   dark_mode:
     enabled: false
-    mode: auto                      # auto, light, dark
-    key_toggle: "Ctrl+Shift+d"
-    force_dark_css: false
+    # off | native (the site's own dark theme) | filter (CSS invert) |
+    # dynamic (Dark Reader). Legacy: auto, light, dark (+ force_dark_css).
+    mode: filter
+    brightness: 100                 # 0-200 (%); 100/100/0/0 leave colours as they are
+    contrast: 100                   # 0-200 (%)
+    sepia: 0                        # 0-100 (%)
+    grayscale: 0                    # 0-100 (%)
+    key_toggle: "Ctrl+Alt+d"        # everything on/off (dark-mode-toggle)
+    key_toggle_site: "Ctrl+Alt+Shift+d"   # this site, saved (dark-mode-toggle-site)
+    # Per-site rules (host regexes, first match wins; unset keys come from
+    # above). Toggled sites are saved in $XDG_DATA_HOME/gsurf/dark_mode/sites.yaml.
+    sites: []
+    #  - match: '(^|\.)github\.com$'
+    #    mode: native
+    #  - match: '(^|\.)example\.org$'
+    #    mode: off
+    #  - match: 'news'
+    #    brightness: 90
+    #    sepia: 10
 
   status_bar:
     enabled: false
@@ -398,10 +448,41 @@ modules:
     default: deny                   # allow, deny, ask
     per_site: {}
 
+  # Containers: separate cookie jars / storage per tab group (like
+  # Firefox Multi-Account and Temporary Containers). See docs/containers.org.
+  containers:
+    enabled: false
+    new_tab: temporary              # temporary | default | <container id>
+    inherit_opener: true            # links opened from a tab stay in its container
+    temp_cleanup_delay: 30          # seconds after a temporary container's last tab
+    temp_color: "#89b4fa"
+    containers: []                  # e.g.
+    #  - name: Media                # id defaults to the lowercased name ("media")
+    #    color: "#f9e2af"
+    #    hosts: ['(^|\.)youtube\.com$', '(^|\.)twitch\.tv$']
+    key_new_temp: "Ctrl+Alt+t"      # container-new-temp
+    key_reopen_next: "Ctrl+Alt+c"   # container-reopen-next
+  # LibreWolf-style privacy hardening; see docs/hardening.org.
+  hardening:
+    enabled: false
+    https_only: true                # upgrade http:// navigations and subresources
+    https_only_local: false         # also upgrade localhost/LAN/private IPs
+    strip_params: [utm_*, fbclid, gclid, dclid, mc_eid, igshid, _hsenc, yclid, msclkid]
+    referer: trim_cross_origin      # off, trim_cross_origin, strip_cross_origin
+    gpc: true                       # Sec-GPC: 1 + navigator.globalPrivacyControl
+    dnt: false                      # DNT: 1 (absent = network.do_not_track)
+    no_prefetch: true               # DNS prefetch off; cancel prefetches and <a ping>
+    third_party_cookies: block      # allow, block, block_all (every container)
+    itp: true                       # WebKit intelligent tracking prevention
+    webrtc: false                   # false forces WebRTC off
+    exempt:                         # by TOP-LEVEL page host; skip: names features
+      - match: '^(localhost|127\.0\.0\.1|.*\.lan)$'
+        skip: [https_only]
+
   session:
     enabled: false
     auto_restore: false
-    file: "~/.local/share/gsurf/session"
+    file: "~/.local/share/gsurf/session.yaml"   # YAML, 0600; see docs/configuration.org
     key_save: "Ctrl+Shift+s"
 
   # --- AI modules (require the AI=1 build flag; deferred / not yet built) ---

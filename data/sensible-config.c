@@ -57,6 +57,8 @@ static const char *SENSIBLE_MODULES_YAML =
 "    key_close: \"Ctrl+w\"\n"
 "    key_next: \"Ctrl+Tab\"\n"
 "    key_prev: \"Ctrl+Shift+Tab\"\n"
+"    sidebar: false\n"
+"    on_close_parent: promote\n"
 "  history:\n"
 "    enabled: true\n"
 "    log_titles: true\n"
@@ -173,7 +175,7 @@ gsurf_config_init(void)
 	config->proxy_mode = g_strdup("default");      /* default | none | custom */
 	g_free(config->proxy_uri);
 	config->proxy_uri = g_strdup("");
-	config->do_not_track = TRUE;
+	config->do_not_track = FALSE;                  /* DNT header, via the hardening module */
 
 	/* ===== Window ===== */
 	g_free(config->window_title);

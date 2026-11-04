@@ -19,6 +19,24 @@ test_defaults(void)
 	g_assert_cmpfloat(c->default_zoom, ==, 1.0);
 	g_assert_nonnull(c->settings);
 	g_assert_nonnull(c->keybinds);
+	/* DNT is opt-in (it is a fingerprinting bit; the hardening module
+	 * sends it). */
+	g_assert_false(c->do_not_track);
+}
+
+/* network.do_not_track parses both ways. */
+static void
+test_do_not_track(void)
+{
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_true(gsurf_config_load_from_data(c, "network:\n  do_not_track: true\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_true(c->do_not_track);
+	g_assert_true(gsurf_config_load_from_data(c, "network:\n  do_not_track: false\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_false(c->do_not_track);
 }
 
 static void
@@ -219,6 +237,7 @@ main(int argc, char *argv[])
 {
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/gsurf/config/defaults", test_defaults);
+	g_test_add_func("/gsurf/config/do-not-track", test_do_not_track);
 	g_test_add_func("/gsurf/config/load-core", test_load_core);
 	g_test_add_func("/gsurf/config/keybinds", test_keybinds);
 	g_test_add_func("/gsurf/config/modules-node", test_modules_node);

@@ -20,11 +20,44 @@ and link =libgsurf= directly.
 | =GsurfConfigCompiler= | final GObject       | Compiles =config.c= via crispy, calls init.       |
 | =GsurfModule=         | abstract derivable  | Base class for loadable modules.                  |
 | =GsurfModuleManager=  | final GObject       | Loads modules, dispatches hooks.                  |
+| =GsurfContainerRegistry= | final GObject (singleton) | Containers: placement policy, native sessions. |
+| =GsurfContainer=      | final GObject       | One container: id, name, colour, temporary, views. |
+| =GsurfHostRules=      | final GObject       | Ordered per-host regex rules with YAML settings.  |
 
 The abstract =GsurfView= exposes =load_uri=, =reload=, =go_back/forward=,
 =get_uri/title=, =run_javascript_async=, =apply_settings=, =get_native_widget=
 (as =gpointer=), etc., plus signals =load-changed=, =uri-changed=,
 =title-changed=, =progress-changed=, =web-process-terminated=.
+
+** View identity, opener and container
+
+Every =GsurfView= gets a process-unique =id= at construction (=gsurf_view_lookup()= finds a live view by it). Construct-only properties record where it came from:
+
+- =opener= — the view it was opened from (link in a new view, link hint, popup), held weakly; =gsurf_view_get_opener_id()= keeps the id after the opener closes. The tabs module builds its tree from this (see [[file:tabs.org][tabs.org]]).
+- =container-id= — the requested container; after construction it reads back the container the registry chose (=NULL= = default).
+- =related= — an engine popup that shares its opener's web process and session. WebKit requires a popup to live in its opener's session, so a related view is always placed in the opener's container.
+- =initial-uri= — the URI the creator is about to load, a placement hint only.
+
+Create views with =gsurf_view_new_full(opener, container_id, initial_uri, related)=; =gsurf_view_new()= passes nothing. =main.c= passes the opener for every view it opens (link in new view, middle/Ctrl-click, popups) and the startup URI as the first view's hint; the =modal= (=F= hints) and =mcp= (=open_view=) modules do the same.
+
+** Containers
+
+A container is a separate browsing identity (cookies, storage, cache). =GsurfContainerRegistry= (=src/core/=) is backend-agnostic:
+
+1. In its =constructed()=, the =GsurfView= base class asks the registry to *resolve* the view's container: a related popup takes its opener's; otherwise a resolver installed by policy (the =containers= module) decides, else the requested id. =temporary= creates a fresh =tmp-N= container; =default= (=GSURF_CONTAINER_DEFAULT=) explicitly asks for the default container, which a =NULL= request does not (it leaves the choice to the resolver); an unknown id falls back to the default container with a warning. =temporary=, =default= and the =tmp-= prefix are reserved and cannot name a persistent container.
+2. It then *acquires* the container's native session (created on first use) before the backend subclass builds its native web view, and *releases* it on dispose.
+3. The backend supplies the sessions through a =GsurfSessionBackend= vtable (=src/backend/webkit/gsurf-webkit-session.c=), installed from the view class's =class_init= so it exists before the first view: a =WebKitWebContext= with its own website data manager on WebKitGTK 4.1, a =WebKitNetworkSession= on 6.0. Persistent containers store data in =$XDG_DATA_HOME/gsurf/containers/<id>= and cache in =$XDG_CACHE_HOME/gsurf/containers/<id>= (both 0700, cookies in =cookies.sqlite=); temporary containers are ephemeral and are destroyed =temp_cleanup_delay= seconds after their last view closes (or if no view ever uses them).
+4. Every session — the default one included — gets the same setup from the config (TLS policy, cache model, cookie storage, proxy), web-process extensions, and a once-per-session download hook. =gsurf_container_registry_set_policy()= applies ITP and a cookie accept policy to all of them, now and as they are created; =session-created= lets modules configure new ones further.
+
+The default container is the engine's default session with the =cookie_jar:= file, exactly as before; without the =containers= module nothing changes. Policy on top of the registry (host rules, temporary tabs, reopening a tab in another container) is the =containers= module: see [[file:containers.org][containers.org]].
+
+** Main-frame responses
+
+WebKit's navigation policy decision (=before_navigate=) is also made for iframe navigations and cannot tell them from top-level ones: WebKitGTK exposes no main-frame flag there. The response policy decision does (=webkit_response_policy_decision_is_main_frame_main_resource()=), so the WebKit backends (GTK3, GTK4 and LRG) report every displayable main-frame response to =GsurfNavigationHook::decide_main_response= through =gsurf_module_manager_dispatch_main_response()=; =GSURF_POLICY_IGNORE= cancels the load and the view keeps its page. Downloads and sub-resources are not reported. The request has already been sent by then, so a hook that must act before any request (privacy) also checks =before_navigate= for the loads it can recognise as top-level.
+
+** Script worlds and messages
+
+Modules can run code in an isolated script world — sharing the page's DOM but not its JavaScript globals — and receive messages from it: =gsurf_view_add_user_script_in_world()=, =gsurf_view_run_javascript_in_world_async()= / =_finish()= (the result's source object is the =GsurfView=), and =gsurf_view_register_script_message(view, name, world)=, whose messages arrive as the detailed signal =script-message::<name>= with the posted value as JSON. Backends without worlds ignore registration and complete evaluations with =G_IO_ERROR_NOT_SUPPORTED=.
 
 * Backend abstraction
 
@@ -38,6 +71,16 @@ backend compiles per build (=GTK_BACKEND=):
 =#ifdef GSURF_BACKEND_*=. It provides the =gsurf_view_new()= /
 =gsurf_window_new()= factories and =gsurf_backend_init()=. GTK/WebKit headers
 appear only under =src/backend/<backend>/=.
+
+Modules are compiled per backend too (the module Makefiles receive =GTK_BACKEND=, and =GSURF_BACKEND_GTK3= or =GSURF_BACKEND_GTK4= is defined). The window-chrome modules =chromebar=, =find_bar=, =status_bar= and =tabs= build on both: their GTK calls go through the header-only, module-private =modules/include/gsurf-chrome-compat.h= (static inline wrappers for entry text, box packing, show/hide, detaching a widget from the chrome, CSS classes and providers, native favicons, clicks, and key-press handling: =key-press-event= on GTK3, a capture-phase =GtkEventControllerKey= on GTK4). It lives outside =src/= on purpose, so it is neither installed nor GIR-scanned. A module that fails to compile fails =make modules=.
+
+** Window order and side chrome
+
+=GsurfWindow= keeps an ordered view list. =gsurf_window_insert_view()= places a view at an index (the tab tree puts a child right after its parent's subtree), =gsurf_window_move_view()= reorders and emits =view-moved (view, from, to)=, and =gsurf_window_get_view_index()= finds a view. The native stack has no visible order, so only the list changes. Besides top and bottom chrome, =gsurf_window_add_side_widget(window, widget, GSURF_CHROME_EDGE_LEFT|RIGHT)= packs a side panel between them (GTK3 and GTK4: a horizontal box around the view stack; no-op on LRG and in kiosk mode).
+
+** Code shared by the WebKit backends
+
+=src/backend/webkit/= holds what GTK3/4.1 and GTK4/6.0 share: content filters and web-process extensions (=gsurf-webkit-content.c=), gopher/gemini (=gsurf-webkit-protocol.c=), per-container sessions (=gsurf-webkit-session.c=), and the module-facing signal handling (=gsurf-webkit-common.c=: context-menu entries, download destinations, TLS exceptions — scoped to the view's own session — permission requests, hovered links, popup creation). Both backends therefore offer the same features: popups, favicons, downloads, TLS exceptions, context-menu entries, snapshots and clipboard on GTK4 as on GTK3.
 
 * Event flow
 

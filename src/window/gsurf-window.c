@@ -27,6 +27,7 @@ enum {
 	SIG_CLOSE_REQUEST,
 	SIG_KEY_PRESS,
 	SIG_BUTTON_PRESS,
+	SIG_VIEW_MOVED,
 	N_SIGNALS
 };
 
@@ -285,6 +286,20 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 		"button-press", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, NULL, NULL,
 		G_TYPE_BOOLEAN, 2, G_TYPE_UINT, G_TYPE_UINT);
+
+	/**
+	 * GsurfWindow::view-moved:
+	 * @window: the window
+	 * @view: the view that moved
+	 * @from: its previous index
+	 * @to: its new index
+	 *
+	 * Emitted after gsurf_window_move_view() reorders the view list.
+	 */
+	signals[SIG_VIEW_MOVED] = g_signal_new(
+		"view-moved", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 3, GSURF_TYPE_VIEW, G_TYPE_UINT, G_TYPE_UINT);
 }
 
 static void
@@ -301,6 +316,12 @@ gsurf_window_init(GsurfWindow *self)
 
 void
 gsurf_window_add_view(GsurfWindow *self, GsurfView *view)
+{
+	gsurf_window_insert_view(self, view, G_MAXUINT);
+}
+
+void
+gsurf_window_insert_view(GsurfWindow *self, GsurfView *view, guint index)
 {
 	GsurfWindowPrivate *priv;
 	GsurfWindowClass *klass;
@@ -319,7 +340,7 @@ gsurf_window_add_view(GsurfWindow *self, GsurfView *view)
 		return;
 	if (!first && gsurf_kiosk_is_enabled())
 		return;
-	g_ptr_array_add(priv->views, g_object_ref(view));
+	g_ptr_array_insert(priv->views, (gint)MIN(index, priv->views->len), g_object_ref(view));
 
 	if (klass->insert_view != NULL)
 		klass->insert_view(self, view);
@@ -367,6 +388,42 @@ gsurf_window_remove_view(GsurfWindow *self, GsurfView *view)
 
 	g_signal_emit(self, signals[SIG_VIEW_REMOVED], 0, view);
 	g_object_unref(view);
+}
+
+void
+gsurf_window_move_view(GsurfWindow *self, GsurfView *view, guint index)
+{
+	GsurfWindowPrivate *priv;
+	guint from;
+	guint to;
+	gpointer item;
+
+	g_return_if_fail(GSURF_IS_WINDOW(self));
+	g_return_if_fail(GSURF_IS_VIEW(view));
+
+	priv = gsurf_window_get_instance_private(self);
+	if (!g_ptr_array_find(priv->views, view, &from))
+		return;
+	to = MIN(index, priv->views->len - 1);
+	if (to == from)
+		return;
+
+	/* Steal without unref, then reinsert: the list keeps its reference. */
+	item = g_ptr_array_steal_index(priv->views, from);
+	g_ptr_array_insert(priv->views, (gint)to, item);
+	g_signal_emit(self, signals[SIG_VIEW_MOVED], 0, view, from, to);
+}
+
+gint
+gsurf_window_get_view_index(GsurfWindow *self, GsurfView *view)
+{
+	GsurfWindowPrivate *priv;
+	guint index;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), -1);
+
+	priv = gsurf_window_get_instance_private(self);
+	return g_ptr_array_find(priv->views, view, &index) ? (gint)index : -1;
 }
 
 void
@@ -541,6 +598,18 @@ gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget)
 	klass = GSURF_WINDOW_GET_CLASS(self);
 	if (!gsurf_kiosk_is_enabled() && klass->add_chrome_widget != NULL)
 		klass->add_chrome_widget(self, widget, FALSE);
+}
+
+void
+gsurf_window_add_side_widget(GsurfWindow *self, gpointer widget, GsurfChromeEdge edge)
+{
+	GsurfWindowClass *klass;
+
+	g_return_if_fail(GSURF_IS_WINDOW(self));
+
+	klass = GSURF_WINDOW_GET_CLASS(self);
+	if (!gsurf_kiosk_is_enabled() && klass->add_side_widget != NULL)
+		klass->add_side_widget(self, widget, edge);
 }
 
 void
