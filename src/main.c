@@ -448,16 +448,47 @@ find_module_dir(void)
 	return NULL;
 }
 
+/* Window title for @title (a page title, possibly empty): "Title — gsurf",
+ * or just "gsurf" for an untitled page. */
 static void
-on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data)
+set_window_title_for(GsurfWindow *window, const gchar *title)
 {
-	GsurfWindow *window = user_data;
 	g_autofree gchar *full = NULL;
 
 	full = g_strdup_printf("%s%sgsurf",
 		(title && *title) ? title : "",
 		(title && *title) ? " — " : "");
 	gsurf_window_set_title(window, full);
+}
+
+/* The title follows the active view only: with panes (a window layout)
+ * several views load at once, and a background tab finishing its load
+ * must not rename the window. */
+static void
+on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data)
+{
+	GsurfWindow *window = user_data;
+
+	if (gsurf_window_get_active_view(window) != view)
+		return;
+	set_window_title_for(window, title);
+}
+
+/* Another view became active (a tab switch, a click into another pane):
+ * show its title. An untitled page that never loaded keeps the title the
+ * window has (the configured window title at startup). */
+static void
+on_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
+{
+	const gchar *title;
+
+	(void)user_data;
+	if (view == NULL)
+		return;
+	title = gsurf_view_get_title(view);
+	if (title == NULL && gsurf_view_get_uri(view) == NULL)
+		return;
+	set_window_title_for(window, title);
 }
 
 /* A WebKit popup / target=_blank / window.open request: create a fresh
@@ -747,6 +778,7 @@ main(int argc, char *argv[])
 	g_signal_connect(window, "key-press", G_CALLBACK(on_key_press), app);
 	g_signal_connect(window, "button-press", G_CALLBACK(on_button_press), app);
 	g_signal_connect(window, "view-added", G_CALLBACK(on_view_added), app);
+	g_signal_connect(window, "active-view-changed", G_CALLBACK(on_active_view_changed), NULL);
 
 	/* The startup URI doubles as the container placement hint, so a
 	 * containers host rule applies to the very first page too. */

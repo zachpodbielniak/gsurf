@@ -137,6 +137,12 @@ mouse press on a view widget → window "button-press"
 
 navigation/load → view signals
   └ dispatch_load_changed / dispatch_after_navigate to navigation-hook modules
+
+title-changed of the ACTIVE view → window title "Title — gsurf"
+  (other views' titles are ignored, so a background tab or another pane
+   finishing a load never renames the window; active-view-changed shows
+   the new active view's title; an untitled view that never loaded keeps
+   the configured window title)
 #+end_example
 
 * Configuration pipeline
