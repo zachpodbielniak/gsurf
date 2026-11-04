@@ -49,6 +49,12 @@ GSURF_DEFINE_ENUM_TYPE(GsurfBackendType, gsurf_backend_type, {
 	END_EV
 })
 
+GSURF_DEFINE_ENUM_TYPE(GsurfChromeEdge, gsurf_chrome_edge, {
+	EV(GSURF_CHROME_EDGE_LEFT, "left"),
+	EV(GSURF_CHROME_EDGE_RIGHT, "right"),
+	END_EV
+})
+
 GSURF_DEFINE_ENUM_TYPE(GsurfLrgRenderMode, gsurf_lrg_render_mode, {
 	EV(GSURF_LRG_RENDER_MODE_2D, "2d"),
 	EV(GSURF_LRG_RENDER_MODE_3D, "3d"),
@@ -197,6 +203,15 @@ GSURF_DEFINE_ENUM_TYPE(GsurfAction, gsurf_action, {
 	EV(GSURF_ACTION_TOGGLE_SETTING, "toggle-setting"),
 	EV(GSURF_ACTION_MODULE, "module"),
 	EV(GSURF_ACTION_SHOW_KEYBINDS, "show-keybinds"),
+	EV(GSURF_ACTION_TAB_SIDEBAR_TOGGLE, "tab-sidebar-toggle"),
+	EV(GSURF_ACTION_TAB_TREE_COLLAPSE, "tab-tree-collapse"),
+	EV(GSURF_ACTION_TAB_MOVE_UP, "tab-move-up"),
+	EV(GSURF_ACTION_TAB_MOVE_DOWN, "tab-move-down"),
+	EV(GSURF_ACTION_CONTAINER_NEW_TEMP, "container-new-temp"),
+	EV(GSURF_ACTION_CONTAINER_REOPEN_NEXT, "container-reopen-next"),
+	EV(GSURF_ACTION_DARK_MODE_TOGGLE, "dark-mode-toggle"),
+	EV(GSURF_ACTION_DARK_MODE_TOGGLE_SITE, "dark-mode-toggle-site"),
+	EV(GSURF_ACTION_FORM_AUTOFILL, "form-autofill"),
 	END_EV
 })
 
@@ -285,6 +300,15 @@ gsurf_action_get_description(GsurfAction action)
 	case GSURF_ACTION_TOGGLE_SETTING:       return "Toggle a web-engine setting";
 	case GSURF_ACTION_MODULE:               return "Module-defined action";
 	case GSURF_ACTION_SHOW_KEYBINDS:        return "Show all keybindings";
+	case GSURF_ACTION_TAB_SIDEBAR_TOGGLE: return "Show or hide the tree-style tab sidebar";
+	case GSURF_ACTION_TAB_TREE_COLLAPSE: return "Collapse or expand the current tab's subtree";
+	case GSURF_ACTION_TAB_MOVE_UP:  return "Move the current tab up";
+	case GSURF_ACTION_TAB_MOVE_DOWN: return "Move the current tab down";
+	case GSURF_ACTION_CONTAINER_NEW_TEMP: return "Open a tab in a new temporary container";
+	case GSURF_ACTION_CONTAINER_REOPEN_NEXT: return "Reopen the current page in the next container";
+	case GSURF_ACTION_DARK_MODE_TOGGLE: return "Toggle dark mode";
+	case GSURF_ACTION_DARK_MODE_TOGGLE_SITE: return "Toggle dark mode for the current site";
+	case GSURF_ACTION_FORM_AUTOFILL: return "Fill the focused form from an autofill profile";
 	case GSURF_ACTION_LAST:
 	default:                                return NULL;
 	}

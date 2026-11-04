@@ -106,7 +106,23 @@ struct _GsurfViewClass
 	/* Keyboard focus: move toolkit focus onto the page. */
 	void         (*focus)                       (GsurfView *self);
 
-	gpointer padding[7];
+	/* Isolated script worlds and page -> host messages (form autofill,
+	 * per-site dark mode). @world %NULL is the page's main world. */
+	void         (*register_script_message)     (GsurfView *self, const gchar *name,
+	                                             const gchar *world);
+	void         (*add_user_script_in_world)    (GsurfView *self, const gchar *source,
+	                                             gboolean at_end, const gchar *const *allow,
+	                                             const gchar *world);
+	void         (*run_javascript_in_world_async) (GsurfView *self, const gchar *script,
+	                                             const gchar *world, GCancellable *cancellable,
+	                                             GAsyncReadyCallback callback, gpointer user_data);
+	gchar       *(*run_javascript_in_world_finish) (GsurfView *self, GAsyncResult *result,
+	                                             GError **error);
+
+	/* The page favicon as the native image type. */
+	gpointer     (*get_favicon)                 (GsurfView *self);
+
+	gpointer padding[2];
 };
 
 /* --- Navigation --- */
@@ -376,6 +392,174 @@ const gchar *gsurf_view_get_hovered_uri(GsurfView *self);
  * Backend setter; emits #GsurfView::hovered-uri-changed.
  */
 void gsurf_view_set_hovered_uri(GsurfView *self, const gchar *uri);
+
+/* --- Identity, opener and container --- */
+
+/**
+ * gsurf_view_get_id:
+ * @self: a #GsurfView
+ *
+ * Returns: a process-unique, never reused id (starting at 1), assigned
+ *   at construction. Stable across tab moves, so the tab tree, sessions
+ *   and the MCP interface can refer to views by it.
+ */
+guint64 gsurf_view_get_id(GsurfView *self);
+
+/**
+ * gsurf_view_lookup:
+ * @id: a view id
+ *
+ * Returns: (transfer none) (nullable): the live view with @id, or %NULL
+ */
+GsurfView *gsurf_view_lookup(guint64 id);
+
+/**
+ * gsurf_view_get_opener:
+ * @self: a #GsurfView
+ *
+ * The view this one was opened from (link in new tab, popup, hint), set
+ * at construction. Held weakly: %NULL once the opener is finalized.
+ *
+ * Returns: (transfer none) (nullable): the opener
+ */
+GsurfView *gsurf_view_get_opener(GsurfView *self);
+
+/**
+ * gsurf_view_get_opener_id:
+ * @self: a #GsurfView
+ *
+ * Returns: the opener's id, kept after the opener closes, or 0 for a
+ *   view opened by the user (new tab, startup)
+ */
+guint64 gsurf_view_get_opener_id(GsurfView *self);
+
+/**
+ * gsurf_view_get_container_id:
+ * @self: a #GsurfView
+ *
+ * Returns: (transfer none) (nullable): the id of the container (see
+ *   #GsurfContainerRegistry) this view browses in, or %NULL for the
+ *   default container. Fixed for the life of the view.
+ */
+const gchar *gsurf_view_get_container_id(GsurfView *self);
+
+/**
+ * gsurf_view_get_related:
+ * @self: a #GsurfView
+ *
+ * Returns: whether this view is a popup created as a related view of its
+ *   opener (sharing its web process and session)
+ */
+gboolean gsurf_view_get_related(GsurfView *self);
+
+/**
+ * gsurf_view_get_session:
+ * @self: a #GsurfView
+ *
+ * For backends: the native session of the view's container, acquired
+ * during construction (a WebKitWebContext on WebKitGTK 4.1, a
+ * WebKitNetworkSession on 6.0).
+ *
+ * Returns: (transfer none) (nullable): the native session, or %NULL for
+ *   the engine default
+ */
+gpointer gsurf_view_get_session(GsurfView *self);
+
+/**
+ * gsurf_view_get_initial_uri:
+ * @self: a #GsurfView
+ *
+ * Returns: (transfer none) (nullable): the URI given at construction as a
+ *   hint for container placement (it is not loaded automatically)
+ */
+const gchar *gsurf_view_get_initial_uri(GsurfView *self);
+
+/**
+ * gsurf_view_get_favicon:
+ * @self: a #GsurfView
+ *
+ * Returns the page favicon in the backend's native image type: a
+ * cairo_surface_t on GTK3/WebKitGTK 4.1, a GdkTexture on GTK4/6.0.
+ * Toolkit-aware callers (the tabs module) cast it.
+ *
+ * Returns: (transfer none) (nullable): the favicon, or %NULL
+ */
+gpointer gsurf_view_get_favicon(GsurfView *self);
+
+/* --- Script worlds and messages --- */
+
+/**
+ * gsurf_view_register_script_message:
+ * @self: a #GsurfView
+ * @name: the handler name scripts post to
+ * @world: (nullable): script world name, %NULL for the page's main world
+ *
+ * Lets scripts in @world call
+ * `window.webkit.messageHandlers.<name>.postMessage(value)`. Each message
+ * is delivered as #GsurfView::script-message with detail @name and the
+ * value serialized as JSON. Registering the same name twice is a no-op.
+ * Backends without script messaging ignore it.
+ */
+void gsurf_view_register_script_message(GsurfView *self, const gchar *name,
+                                        const gchar *world);
+
+/**
+ * gsurf_view_add_user_script_in_world:
+ * @self: a #GsurfView
+ * @source: the JavaScript source
+ * @at_end: inject at document end (%TRUE) or start (%FALSE)
+ * @allow: (nullable) (array zero-terminated=1): URL allow-patterns
+ * @world: (nullable): script world name, %NULL for the main world
+ *
+ * Injects a user script into every frame, in an isolated world when
+ * @world is set: such scripts share the DOM with the page but not its
+ * JavaScript globals, so the page cannot read or tamper with them.
+ */
+void gsurf_view_add_user_script_in_world(GsurfView *self, const gchar *source,
+                                         gboolean at_end, const gchar *const *allow,
+                                         const gchar *world);
+
+/**
+ * gsurf_view_run_javascript_in_world_async:
+ * @self: a #GsurfView
+ * @script: JavaScript to evaluate in the main frame
+ * @world: (nullable): script world name, %NULL for the main world
+ * @cancellable: (nullable): a #GCancellable
+ * @callback: (scope async) (nullable) (closure user_data): completion callback
+ * @user_data: data for @callback
+ *
+ * Like gsurf_view_run_javascript_async() but in script world @world, and
+ * the #GAsyncResult's source object is @self (not the native web view).
+ * Finish with gsurf_view_run_javascript_in_world_finish(). A backend
+ * without script worlds completes with %G_IO_ERROR_NOT_SUPPORTED.
+ */
+void gsurf_view_run_javascript_in_world_async(GsurfView *self, const gchar *script,
+                                              const gchar *world, GCancellable *cancellable,
+                                              GAsyncReadyCallback callback, gpointer user_data);
+
+/**
+ * gsurf_view_run_javascript_in_world_finish:
+ * @self: a #GsurfView
+ * @result: the #GAsyncResult passed to the callback
+ * @error: return location for a #GError
+ *
+ * Finishes gsurf_view_run_javascript_in_world_async().
+ *
+ * Returns: (transfer full) (nullable): the value as a string (strings
+ *   as-is, anything else as JSON), or %NULL on error
+ */
+gchar *gsurf_view_run_javascript_in_world_finish(GsurfView *self, GAsyncResult *result,
+                                                 GError **error);
+
+/**
+ * gsurf_view_emit_script_message:
+ * @self: a #GsurfView
+ * @name: the handler name
+ * @json: (nullable): the posted value as JSON
+ *
+ * Backend helper: emits #GsurfView::script-message.
+ */
+void gsurf_view_emit_script_message(GsurfView *self, const gchar *name, const gchar *json);
 
 /* --- Signal emission helpers (for backend subclasses) --- */
 void gsurf_view_emit_load_changed(GsurfView *self, GsurfLoadEvent event);

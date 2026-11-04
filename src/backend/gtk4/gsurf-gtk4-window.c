@@ -20,6 +20,7 @@ struct _GsurfGtk4Window
 
 	GtkWidget *window;  /* GtkWindow toplevel */
 	GtkWidget *vbox;    /* content box */
+	GtkWidget *hbox;    /* side panels + the view stack */
 	GtkWidget *stack;   /* GtkStack of view widgets */
 };
 
@@ -82,8 +83,13 @@ gsurf_gtk4_window_realize(GsurfWindow *window)
 	self->vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	self->stack = gtk_stack_new();
 
+	/* vbox: [top chrome] hbox [bottom chrome]; hbox: [left] stack [right]. */
+	self->hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	gtk_widget_set_vexpand(self->stack, TRUE);
-	gtk_box_append(GTK_BOX(self->vbox), self->stack);
+	gtk_widget_set_hexpand(self->stack, TRUE);
+	gtk_widget_set_vexpand(self->hbox, TRUE);
+	gtk_box_append(GTK_BOX(self->hbox), self->stack);
+	gtk_box_append(GTK_BOX(self->vbox), self->hbox);
 	gtk_window_set_child(GTK_WINDOW(self->window), self->vbox);
 	gtk_window_set_default_size(GTK_WINDOW(self->window),
 		GSURF_DEFAULT_WIDTH, GSURF_DEFAULT_HEIGHT);
@@ -184,6 +190,20 @@ gsurf_gtk4_window_add_chrome_widget(GsurfWindow *window, gpointer widget, gboole
 	} else {
 		gtk_box_append(GTK_BOX(self->vbox), w);
 	}
+}
+
+static void
+gsurf_gtk4_window_add_side_widget(GsurfWindow *window, gpointer widget, GsurfChromeEdge edge)
+{
+	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
+	GtkWidget *w = widget;
+
+	if (w == NULL || self->hbox == NULL)
+		return;
+	if (edge == GSURF_CHROME_EDGE_LEFT)
+		gtk_box_prepend(GTK_BOX(self->hbox), w);
+	else
+		gtk_box_append(GTK_BOX(self->hbox), w);
 }
 
 static void
@@ -384,6 +404,7 @@ gsurf_gtk4_window_class_init(GsurfGtk4WindowClass *klass)
 	window_class->get_native_widget = gsurf_gtk4_window_get_native_widget;
 	window_class->add_chrome_widget = gsurf_gtk4_window_add_chrome_widget;
 	window_class->show_keybind_help = gsurf_gtk4_window_show_keybind_help;
+	window_class->add_side_widget = gsurf_gtk4_window_add_side_widget;
 }
 
 static void

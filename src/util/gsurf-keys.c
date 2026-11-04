@@ -15,6 +15,53 @@
  * string written "N", "Shift+n" or "Shift+N". GDK reports Shift+Tab as
  * ISO_Left_Tab, which canonicalizes to ("Tab", shift). Writes the token
  * into @buf when it changes and returns it. */
+/* US-layout punctuation: the unshifted GDK keysym name, its single
+ * character spelling, and the keysym GDK reports while Shift is held. */
+typedef struct {
+	const gchar *keysym;
+	const gchar *literal;
+	const gchar *shifted;
+} PunctuationKey;
+
+static const PunctuationKey punctuation_keys[] = {
+	{ "period",       ".",  "greater"      },
+	{ "comma",        ",",  "less"         },
+	{ "slash",        "/",  "question"     },
+	{ "semicolon",    ";",  "colon"        },
+	{ "apostrophe",   "'",  "quotedbl"     },
+	{ "bracketleft",  "[",  "braceleft"    },
+	{ "bracketright", "]",  "braceright"   },
+	{ "minus",        "-",  "underscore"   },
+	{ "equal",        "=",  "plus"         },
+	{ "grave",        "`",  "asciitilde"   },
+	{ "backslash",    "\\", "bar"          },
+};
+
+/* Map a one-character punctuation spelling ("." ",") to its keysym name;
+ * anything else is returned unchanged. */
+static const gchar *
+punctuation_name(const gchar *key)
+{
+	guint i;
+
+	for (i = 0; i < G_N_ELEMENTS(punctuation_keys); i++)
+		if (g_strcmp0(key, punctuation_keys[i].literal) == 0)
+			return punctuation_keys[i].keysym;
+	return key;
+}
+
+/* The keysym GDK reports for @key while Shift is held, or @key itself. */
+static const gchar *
+shifted_keysym(const gchar *key)
+{
+	guint i;
+
+	for (i = 0; i < G_N_ELEMENTS(punctuation_keys); i++)
+		if (g_strcmp0(key, punctuation_keys[i].keysym) == 0)
+			return punctuation_keys[i].shifted;
+	return key;
+}
+
 static const gchar *
 canonical_key(const gchar *key, gboolean *shift, gchar buf[2])
 {
@@ -32,6 +79,13 @@ canonical_key(const gchar *key, gboolean *shift, gchar buf[2])
 	/* "?" is the user-facing name for GDK's "question" keyval. */
 	if (g_strcmp0(key, "?") == 0)
 		return "question";
+	key = punctuation_name(key);
+	/* With Shift held, GDK reports the shifted keysym (Shift+period
+	 * arrives as "greater"), so a binding written against the unshifted
+	 * key ("Ctrl+Shift+period", "Ctrl+Shift+.") must name that keysym to
+	 * ever match. Without Shift the name is left alone. */
+	if (*shift)
+		key = shifted_keysym(key);
 	return key;
 }
 

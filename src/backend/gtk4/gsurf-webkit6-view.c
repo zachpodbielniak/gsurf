@@ -12,6 +12,8 @@
 
 #include "backend/webkit/gsurf-webkit-protocol.h"
 #include "backend/webkit/gsurf-webkit-content.h"
+#include "backend/webkit/gsurf-webkit-session.h"
+#include "backend/webkit/gsurf-webkit-common.h"
 
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk4/gsurf-webkit6-view.h"
@@ -25,20 +27,56 @@ struct _GsurfWebkit6View
 {
 	GsurfView parent_instance;
 	WebKitWebView *webview;
+	GHashTable    *message_handlers; /* "world\x1fname" already registered */
 };
 
 G_DEFINE_FINAL_TYPE(GsurfWebkit6View, gsurf_webkit6_view, GSURF_TYPE_VIEW)
 
-/* Suppress native navigation/inspector menu entries in kiosk sessions. */
+/* Suppress native navigation/inspector menu entries in kiosk sessions;
+ * otherwise let context-menu-provider modules add their entries. */
 static gboolean
 on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu,
                 WebKitHitTestResult *hit, gpointer user_data)
 {
 	(void) wv;
-	(void) menu;
-	(void) hit;
 	(void) user_data;
-	return gsurf_kiosk_is_enabled();
+	if (gsurf_kiosk_is_enabled())
+		return TRUE;
+	gsurf_webkit_common_populate_menu(menu, hit);
+	return FALSE;
+}
+
+static gboolean
+on_load_failed_tls(WebKitWebView *wv, gchar *failing_uri, GTlsCertificate *cert,
+                   GTlsCertificateFlags errors, gpointer user_data)
+{
+	(void) user_data;
+	return gsurf_webkit_common_handle_tls_error(wv, failing_uri, cert, errors);
+}
+
+static void
+on_mouse_target_changed(WebKitWebView *wv, WebKitHitTestResult *hit,
+                        guint modifiers, gpointer user_data)
+{
+	(void) wv;
+	(void) modifiers;
+	gsurf_webkit_common_mouse_target(GSURF_VIEW(user_data), hit);
+}
+
+static void
+on_notify_favicon(WebKitWebView *wv, GParamSpec *pspec, gpointer user_data)
+{
+	(void) wv;
+	(void) pspec;
+	gsurf_view_emit_favicon_changed(GSURF_VIEW(user_data));
+}
+
+/* A popup / target=_blank: the host builds a related view for it. */
+static GtkWidget *
+on_create(WebKitWebView *wv, WebKitNavigationAction *action, gpointer user_data)
+{
+	(void) wv;
+	return gsurf_webkit_common_create(GSURF_VIEW(user_data), action);
 }
 
 /* --- native signal translation --- */
@@ -121,20 +159,8 @@ on_decide_policy(WebKitWebView *wv, WebKitPolicyDecision *decision,
 static gboolean
 on_permission_request(WebKitWebView *wv, WebKitPermissionRequest *req, gpointer user_data)
 {
-	GsurfWebkit6View *self = user_data;
-	const gchar *type = "other";
-	GsurfPermissionVerdict v;
-
-	if (WEBKIT_IS_GEOLOCATION_PERMISSION_REQUEST(req))
-		type = "geolocation";
-	else if (WEBKIT_IS_NOTIFICATION_PERMISSION_REQUEST(req))
-		type = "notification";
-
-	v = gsurf_module_manager_dispatch_permission(gsurf_module_manager_get_default(),
-		GSURF_VIEW(self), type, NULL);
-	if (v == GSURF_PERMISSION_ALLOW) { webkit_permission_request_allow(req); return TRUE; }
-	if (v == GSURF_PERMISSION_DENY) { webkit_permission_request_deny(req); return TRUE; }
-	return FALSE;
+	(void) wv;
+	return gsurf_webkit_common_handle_permission(GSURF_VIEW(user_data), req);
 }
 
 /* --- vfuncs --- */
@@ -353,6 +379,183 @@ gsurf_webkit6_view_set_proxy(GsurfView *v, const gchar *uri)
 	}
 }
 
+/* --- snapshot / clipboard --- */
+
+static void
+gsurf_webkit6_view_get_snapshot_async(GsurfView *v, GCancellable *cancellable,
+                                      GAsyncReadyCallback callback, gpointer user_data)
+{
+	webkit_web_view_get_snapshot(GSURF_WEBKIT6_VIEW(v)->webview,
+		WEBKIT_SNAPSHOT_REGION_VISIBLE, WEBKIT_SNAPSHOT_OPTIONS_NONE,
+		cancellable, callback, user_data);
+}
+
+/* WebKitGTK 6.0 returns a GdkTexture; encode it as PNG like GTK3 does. */
+static GBytes *
+gsurf_webkit6_view_get_snapshot_finish(GsurfView *v, GAsyncResult *result, GError **error)
+{
+	g_autoptr(GdkTexture) texture = webkit_web_view_get_snapshot_finish(
+		GSURF_WEBKIT6_VIEW(v)->webview, result, error);
+
+	if (texture == NULL)
+		return NULL;
+	return gdk_texture_save_to_png_bytes(texture);
+}
+
+static void
+gsurf_webkit6_view_copy_uri(GsurfView *v)
+{
+	GtkWidget *widget = GTK_WIDGET(GSURF_WEBKIT6_VIEW(v)->webview);
+	const gchar *uri = webkit_web_view_get_uri(GSURF_WEBKIT6_VIEW(v)->webview);
+
+	if (uri != NULL)
+		gdk_clipboard_set_text(gtk_widget_get_clipboard(widget), uri);
+}
+
+typedef struct {
+	GMainLoop *loop;
+	gchar     *text;
+} ClipboardRead;
+
+static void
+on_clipboard_text(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	ClipboardRead *read = user_data;
+
+	read->text = gdk_clipboard_read_text_finish(GDK_CLIPBOARD(source), result, NULL);
+	g_main_loop_quit(read->loop);
+}
+
+/* GTK4 clipboard reads are asynchronous only; the GsurfView contract is
+ * synchronous (as gtk_clipboard_wait_for_text() was on GTK3), so wait in
+ * a nested main loop. */
+static gchar *
+gsurf_webkit6_view_read_clipboard_text(GsurfView *v)
+{
+	GtkWidget *widget = GTK_WIDGET(GSURF_WEBKIT6_VIEW(v)->webview);
+	ClipboardRead read = { NULL, NULL };
+
+	read.loop = g_main_loop_new(NULL, FALSE);
+	gdk_clipboard_read_text_async(gtk_widget_get_clipboard(widget), NULL,
+		on_clipboard_text, &read);
+	g_main_loop_run(read.loop);
+	g_main_loop_unref(read.loop);
+	return read.text;
+}
+
+/* --- script worlds and messages --- */
+
+/* One registered module message handler (see the GTK3 backend). */
+typedef struct {
+	GsurfWebkit6View *self;
+	gchar            *name;
+} MessageClosure;
+
+static void
+message_closure_free(gpointer data, GClosure *closure)
+{
+	MessageClosure *mc = data;
+
+	(void) closure;
+	g_free(mc->name);
+	g_free(mc);
+}
+
+static void
+on_module_script_message(WebKitUserContentManager *ucm, JSCValue *value, gpointer user_data)
+{
+	MessageClosure *mc = user_data;
+	g_autofree gchar *json = jsc_value_to_json(value, 0);
+
+	(void) ucm;
+	gsurf_view_emit_script_message(GSURF_VIEW(mc->self), mc->name, json);
+}
+
+static void
+gsurf_webkit6_view_register_script_message(GsurfView *v, const gchar *name,
+                                           const gchar *world)
+{
+	GsurfWebkit6View *self = GSURF_WEBKIT6_VIEW(v);
+	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
+	g_autofree gchar *key = g_strdup_printf("%s\x1f%s", world != NULL ? world : "", name);
+	g_autofree gchar *detailed = g_strconcat("script-message-received::", name, NULL);
+	MessageClosure *mc;
+
+	if (g_hash_table_contains(self->message_handlers, key))
+		return;
+	if (!webkit_user_content_manager_register_script_message_handler(ucm, name, world)) {
+		g_warning("gsurf: script message handler '%s' is already taken", name);
+		return;
+	}
+	g_hash_table_add(self->message_handlers, g_steal_pointer(&key));
+
+	mc = g_new0(MessageClosure, 1);
+	mc->self = self;
+	mc->name = g_strdup(name);
+	g_signal_connect_data(ucm, detailed, G_CALLBACK(on_module_script_message), mc,
+		message_closure_free, 0);
+}
+
+static void
+gsurf_webkit6_view_add_user_script_in_world(GsurfView *v, const gchar *source,
+                                            gboolean at_end, const gchar *const *allow,
+                                            const gchar *world)
+{
+	WebKitUserContentManager *ucm =
+		webkit_web_view_get_user_content_manager(GSURF_WEBKIT6_VIEW(v)->webview);
+	WebKitUserScript *script = webkit_user_script_new_for_world(source,
+		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+		at_end ? WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END
+		       : WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		world, (const gchar * const *)allow, NULL);
+
+	webkit_user_content_manager_add_script(ucm, script);
+	webkit_user_script_unref(script);
+}
+
+static void
+gsurf_webkit6_view_run_js_in_world_async(GsurfView *v, const gchar *script,
+                                         const gchar *world, GCancellable *c,
+                                         GAsyncReadyCallback cb, gpointer ud)
+{
+	webkit_web_view_evaluate_javascript(GSURF_WEBKIT6_VIEW(v)->webview, script, -1,
+		world, NULL, c, cb, ud);
+}
+
+static gpointer
+gsurf_webkit6_view_get_favicon(GsurfView *v)
+{
+	return webkit_web_view_get_favicon(GSURF_WEBKIT6_VIEW(v)->webview);
+}
+
+/* Build the native web view in the view's container: its network
+ * session, or the opener's for a related popup. Popups keep their own
+ * settings and user content (see the GTK3 backend for why). */
+static GtkWidget *
+create_native_view(GsurfWebkit6View *self)
+{
+	GsurfView *view = GSURF_VIEW(self);
+	GsurfView *opener = gsurf_view_get_opener(view);
+	g_autoptr(WebKitUserContentManager) ucm = webkit_user_content_manager_new();
+	g_autoptr(WebKitSettings) settings = webkit_settings_new();
+	gpointer session = gsurf_view_get_session(view);
+
+	if (gsurf_view_get_related(view) && opener != NULL &&
+	    WEBKIT_IS_WEB_VIEW(gsurf_view_get_native_widget(opener))) {
+		return g_object_new(WEBKIT_TYPE_WEB_VIEW,
+			"related-view", gsurf_view_get_native_widget(opener),
+			"user-content-manager", ucm,
+			"settings", settings,
+			NULL);
+	}
+	return g_object_new(WEBKIT_TYPE_WEB_VIEW,
+		"web-context", gsurf_webkit_session_get_context(session),
+		"network-session", session != NULL ? session : webkit_network_session_get_default(),
+		"user-content-manager", ucm,
+		"settings", settings,
+		NULL);
+}
+
 /* --- lifecycle --- */
 
 /* See the GTK3 backend: reports DOM edit-focus to gsurf_view_set_editing. */
@@ -383,10 +586,14 @@ gsurf_webkit6_view_constructed(GObject *object)
 	WebKitUserScript *tracker;
 	GtkWidget *widget;
 
+	/* The base class resolves the container and acquires its session. */
 	G_OBJECT_CLASS(gsurf_webkit6_view_parent_class)->constructed(object);
 
+	/* Web-process extensions are configured on the (shared) web context
+	 * and must be wired before it launches its first web process. */
 	gsurf_webkit_content_attach_context(webkit_web_context_get_default());
-	widget = webkit_web_view_new();
+	gsurf_webkit_session_prepare_default();
+	widget = create_native_view(self);
 	gsurf_webkit_protocol_attach(WEBKIT_WEB_VIEW(widget));
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
 	if (gsurf_kiosk_is_enabled()) {
@@ -423,6 +630,14 @@ gsurf_webkit6_view_constructed(GObject *object)
 	g_signal_connect(self->webview, "decide-policy", G_CALLBACK(on_decide_policy), self);
 	g_signal_connect(self->webview, "permission-request",
 		G_CALLBACK(on_permission_request), self);
+	g_signal_connect(self->webview, "load-failed-with-tls-errors",
+		G_CALLBACK(on_load_failed_tls), self);
+	g_signal_connect(self->webview, "mouse-target-changed",
+		G_CALLBACK(on_mouse_target_changed), self);
+	g_signal_connect(self->webview, "notify::favicon",
+		G_CALLBACK(on_notify_favicon), self);
+	g_signal_connect(self->webview, "create", G_CALLBACK(on_create), self);
+	gsurf_webkit_session_track_downloads(self->webview);
 
 	gsurf_module_manager_dispatch_inject_scripts(
 		gsurf_module_manager_get_default(), GSURF_VIEW(self), NULL);
@@ -438,9 +653,13 @@ gsurf_webkit6_view_dispose(GObject *object)
 		/* The content manager can outlive the library wrapper in embedders. */
 		g_signal_handlers_disconnect_by_data(
 			webkit_web_view_get_user_content_manager(self->webview), self);
+		g_signal_handlers_disconnect_matched(
+			webkit_web_view_get_user_content_manager(self->webview),
+			G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_module_script_message, NULL);
 		g_signal_handlers_disconnect_by_data(self->webview, self);
 		g_clear_object(&self->webview);
 	}
+	g_clear_pointer(&self->message_handlers, g_hash_table_unref);
 	G_OBJECT_CLASS(gsurf_webkit6_view_parent_class)->dispose(object);
 }
 
@@ -449,6 +668,11 @@ gsurf_webkit6_view_class_init(GsurfWebkit6ViewClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	GsurfViewClass *vc = GSURF_VIEW_CLASS(klass);
+
+	/* The base class acquires a view's container session before this
+	 * class's constructed() runs, so the session factory must already be
+	 * installed when the first instance is built. */
+	gsurf_webkit_session_install();
 
 	object_class->constructed = gsurf_webkit6_view_constructed;
 	object_class->dispose = gsurf_webkit6_view_dispose;
@@ -483,11 +707,20 @@ gsurf_webkit6_view_class_init(GsurfWebkit6ViewClass *klass)
 	vc->find_previous = gsurf_webkit6_view_find_previous;
 	vc->set_cookie_accept_policy = gsurf_webkit6_view_set_cookie_policy;
 	vc->set_proxy = gsurf_webkit6_view_set_proxy;
+	vc->get_snapshot_async = gsurf_webkit6_view_get_snapshot_async;
+	vc->get_snapshot_finish = gsurf_webkit6_view_get_snapshot_finish;
+	vc->copy_uri = gsurf_webkit6_view_copy_uri;
+	vc->read_clipboard_text = gsurf_webkit6_view_read_clipboard_text;
+	vc->register_script_message = gsurf_webkit6_view_register_script_message;
+	vc->add_user_script_in_world = gsurf_webkit6_view_add_user_script_in_world;
+	vc->run_javascript_in_world_async = gsurf_webkit6_view_run_js_in_world_async;
+	vc->get_favicon = gsurf_webkit6_view_get_favicon;
 }
 
 static void
 gsurf_webkit6_view_init(GsurfWebkit6View *self)
 {
+	self->message_handlers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 }
 
 GsurfView *

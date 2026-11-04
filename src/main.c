@@ -183,7 +183,10 @@ print_module_list(void)
 /* Forward declarations (definitions appear later in the file). */
 static void       load_uri_rewritten(GsurfView *view, const gchar *input);
 static void       setup_view(GsurfApplication *app, GsurfWindow *window, GsurfView *view);
-static GsurfView *make_tab(GsurfWindow *window, const gchar *uri);
+static GsurfView *make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri,
+                           gboolean related);
+static GsurfView *make_tab_popup(GsurfWindow *window, GsurfView *opener,
+                                 const gchar *hint);
 
 static void
 scroll_js(GsurfView *view, const gchar *js)
@@ -242,9 +245,12 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 	case GSURF_ACTION_OPEN_NEW_VIEW: {
 		GsurfConfig *cfg = gsurf_config_get_default();
 		const gchar *hovered = gsurf_view_get_hovered_uri(view);
-		const gchar *uri = (hovered != NULL && *hovered != '\0')
-			? hovered : (cfg != NULL ? cfg->new_view_uri : NULL);
-		make_tab(window, uri);
+		gboolean link = (hovered != NULL && *hovered != '\0');
+		const gchar *uri = link ? hovered : (cfg != NULL ? cfg->new_view_uri : NULL);
+
+		/* A link opened in a new view is a child of this view in the
+		 * tab tree; a blank new view has no opener. */
+		make_tab(window, link ? view : NULL, uri, FALSE);
 		return TRUE;
 	}
 	case GSURF_ACTION_TOGGLE_FULLSCREEN:
@@ -381,7 +387,7 @@ on_button_press(GsurfWindow *window, guint button, guint state, gpointer user_da
 			return FALSE;
 		if (opt_kiosk)
 			return TRUE;
-		make_tab(window, hovered);
+		make_tab(window, view, hovered, FALSE);
 		return TRUE;
 	}
 
@@ -458,15 +464,15 @@ on_create_view(GsurfView *source, const gchar *uri, gpointer user_data)
 	GsurfApplication *app = user_data;
 	GsurfWindow *window = gsurf_application_get_active_window(app);
 
-	(void) source;
-	(void) uri; /* the engine drives the load into the returned view */
-
 	if (window == NULL || opt_kiosk)
 		return NULL;
 
 	/* make_tab adds + activates the view (wiring its signals via
-	 * "view-added") and returns it still owned by the window. */
-	return make_tab(window, NULL);
+	 * "view-added") and returns it still owned by the window. The popup
+	 * is a related view of @source (same session and web process, so
+	 * window.opener works); the engine drives the load of @uri into it,
+	 * so it is passed only as a placement hint. */
+	return make_tab_popup(window, source, uri);
 }
 
 /* Wire the host-level signals every view needs, regardless of how it was
@@ -490,14 +496,19 @@ on_view_added(GsurfWindow *window, GsurfView *view, gpointer user_data)
 	setup_view(GSURF_APPLICATION(user_data), window, view);
 }
 
-/* Create a new view, apply config settings, add it to the window as a tab
- * and make it active. If @uri is non-NULL, begin loading it (rewritten by
- * URI-handler modules). Returns the view (owned by the window). */
+/* Create a new view opened from @opener (or %NULL), apply config
+ * settings, add it to the window as a tab and make it active. If @uri is
+ * non-NULL, begin loading it (rewritten by URI-handler modules); it is
+ * also the container placement hint. @related marks an engine popup that
+ * shares @opener's session. Returns the view (owned by the window). */
 static GsurfView *
-make_tab(GsurfWindow *window, const gchar *uri)
+make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri, gboolean related)
 {
 	GsurfConfig *cfg = gsurf_config_get_default();
-	GsurfView *view = gsurf_view_new();
+	GsurfView *view = gsurf_view_new_full(opener, NULL, uri, related);
+
+	if (view == NULL)
+		return NULL;
 
 	if (cfg != NULL && cfg->settings != NULL)
 		gsurf_view_apply_settings(view, cfg->settings);
@@ -509,6 +520,18 @@ make_tab(GsurfWindow *window, const gchar *uri)
 		load_uri_rewritten(view, uri);
 
 	g_object_unref(view);                         /* window holds the ref now */
+	return view;
+}
+
+/* An engine popup: a related view of @opener that WebKit loads itself.
+ * @hint (the popup URI) only informs container placement; a related view
+ * always ends up in @opener's container anyway. */
+static GsurfView *
+make_tab_popup(GsurfWindow *window, GsurfView *opener, const gchar *hint)
+{
+	GsurfView *view = make_tab(window, opener, NULL, TRUE);
+
+	(void) hint;
 	return view;
 }
 
@@ -720,7 +743,9 @@ main(int argc, char *argv[])
 	g_signal_connect(window, "button-press", G_CALLBACK(on_button_press), app);
 	g_signal_connect(window, "view-added", G_CALLBACK(on_view_added), app);
 
-	view = gsurf_view_new();
+	/* The startup URI doubles as the container placement hint, so a
+	 * containers host rule applies to the very first page too. */
+	view = gsurf_view_new_full(NULL, NULL, (argc > 1) ? argv[1] : NULL, FALSE);
 	gsurf_view_apply_settings(view, config->settings);
 	gsurf_window_add_view(window, view);          /* fires "view-added" -> setup_view */
 

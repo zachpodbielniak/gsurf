@@ -137,6 +137,25 @@ const gchar *gsurf_backend_get_name(void);
 GsurfView *gsurf_view_new(void);
 
 /**
+ * gsurf_view_new_full:
+ * @opener: (nullable): the view this one is opened from (link, popup, hint)
+ * @container_id: (nullable): requested container id, or
+ *   #GSURF_CONTAINER_TEMPORARY; the container registry has the final say
+ * @initial_uri: (nullable): the URI the caller is about to load; only a
+ *   placement hint, it is not loaded
+ * @related: %TRUE for an engine popup that must share @opener's web
+ *   process and session (the view is then always in @opener's container)
+ *
+ * Creates a view on the default backend, recording its opener (for the
+ * tab tree) and its container. gsurf_view_new() is the same as passing
+ * %NULL, %NULL, %NULL and %FALSE.
+ *
+ * Returns: (transfer full) (nullable): a new #GsurfView
+ */
+GsurfView *gsurf_view_new_full(GsurfView *opener, const gchar *container_id,
+                               const gchar *initial_uri, gboolean related);
+
+/**
  * gsurf_window_new:
  *
  * Creates a new window of the current default backend type.

@@ -152,27 +152,55 @@ gsurf_backend_init_backend(GsurfBackendType type, int *argc, char ***argv,
 	}
 }
 
-GsurfView *
-gsurf_view_new_for_backend(GsurfBackendType type)
+/* The concrete view GType of a backend, or G_TYPE_INVALID. */
+static GType
+view_type_for_backend(GsurfBackendType type)
 {
 	switch (type) {
 #ifdef GSURF_BACKEND_GTK4
 	case GSURF_BACKEND_GTK4_WEBKIT6:
-		return gsurf_webkit6_view_new();
+		return GSURF_TYPE_WEBKIT6_VIEW;
 #endif
 #ifdef GSURF_BACKEND_GTK3
 	case GSURF_BACKEND_GTK3_WEBKIT2:
-		return gsurf_webkit2_view_new();
+		return GSURF_TYPE_WEBKIT2_VIEW;
 #endif
 #ifdef GSURF_HAVE_LRG_BACKEND
 	case GSURF_BACKEND_LRG:
-		return gsurf_lrg_view_new();
+		return GSURF_TYPE_LRG_VIEW;
 #endif
 	default:
+		return G_TYPE_INVALID;
+	}
+}
+
+/* Construct a backend view with the base-class construct properties; the
+ * base constructed() resolves the container before the backend builds
+ * its native web view. */
+static GsurfView *
+view_new_for_backend_full(GsurfBackendType type, GsurfView *opener,
+                          const gchar *container_id, const gchar *initial_uri,
+                          gboolean related)
+{
+	GType gtype = view_type_for_backend(type);
+
+	if (gtype == G_TYPE_INVALID) {
 		g_warning("gsurf: cannot create view for unavailable backend '%s'",
 		          gsurf_backend_type_to_name(type));
 		return NULL;
 	}
+	return g_object_new(gtype,
+		"opener", opener,
+		"container-id", container_id,
+		"initial-uri", initial_uri,
+		"related", related && opener != NULL,
+		NULL);
+}
+
+GsurfView *
+gsurf_view_new_for_backend(GsurfBackendType type)
+{
+	return view_new_for_backend_full(type, NULL, NULL, NULL, FALSE);
 }
 
 GsurfWindow *
@@ -223,6 +251,16 @@ GsurfView *
 gsurf_view_new(void)
 {
 	return gsurf_view_new_for_backend(gsurf_backend_get_default_type());
+}
+
+GsurfView *
+gsurf_view_new_full(GsurfView *opener, const gchar *container_id,
+                    const gchar *initial_uri, gboolean related)
+{
+	g_return_val_if_fail(opener == NULL || GSURF_IS_VIEW(opener), NULL);
+
+	return view_new_for_backend_full(gsurf_backend_get_default_type(), opener,
+		container_id, initial_uri, related);
 }
 
 GsurfWindow *

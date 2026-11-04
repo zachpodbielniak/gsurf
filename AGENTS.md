@@ -87,8 +87,11 @@ its `-fPIC` static archive (`libmcp-glib-1.0.a`) is linked into the `mcp` module
 (`MCP=1`). All three are statically embedded, so no built artifact depends on a
 vendored `deps/` shared object at runtime — the pinned versions ship with us.
 
-On this dev machine: `webkit2gtk-4.1` + `gtk+-3.0` are installed; `webkitgtk-6.0`
-(GTK4) is **not** — so `GTK_BACKEND=gtk4` won't build here until it is installed.
+Both backends are expected to build: `webkit2gtk-4.1` + `gtk+-3.0` (GTK3) and
+`webkitgtk-6.0` + `gtk4` (GTK4). Build GTK4 in its own tree so the two don't
+clobber each other: `make GTK_BACKEND=gtk4 BUILDDIR=build-gtk4` (same for `test`,
+`test-gui`). `test-gui` needs `xvfb-run` on `PATH` (any wrapper that runs the
+command on a private display works).
 `libnotify`/`gcr` are absent; notification/cert features use Gio `GNotification`
 and `GTlsCertificate` instead.
 

@@ -130,8 +130,9 @@ build_show_js(GsurfModalModule *self, gboolean newview)
 		chars_q, bg_q, fg_q, newview ? "true" : "false", self->hint_font_size);
 }
 
+/* Open @uri in a new active view whose tab-tree parent is @opener. */
 static void
-open_in_new_view(const gchar *uri)
+open_in_new_view(GsurfView *opener, const gchar *uri)
 {
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 	GsurfWindow *window = gsurf_module_manager_get_active_window(mgr);
@@ -140,7 +141,9 @@ open_in_new_view(const gchar *uri)
 
 	if (window == NULL)
 		return;
-	view = gsurf_view_new();
+	view = gsurf_view_new_full(opener, NULL, uri, FALSE);
+	if (view == NULL)
+		return;
 	if (config != NULL && config->settings != NULL)
 		gsurf_view_apply_settings(view, config->settings);
 	gsurf_window_add_view(window, view);
@@ -176,7 +179,7 @@ follow_press(GsurfModalModule *self, GsurfView *view, const gchar *name)
 		return;
 	}
 	if (g_str_has_prefix(res, "open:")) {
-		open_in_new_view(res + 5);
+		open_in_new_view(view, res + 5);
 		set_mode(self, GSURF_MODE_NORMAL);
 	} else if (g_strcmp0(res, "more") != 0) {
 		/* "click" or "none": session is over. */

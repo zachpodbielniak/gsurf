@@ -110,6 +110,19 @@ typedef enum {
 } GsurfModePolicy;
 
 /**
+ * GsurfChromeEdge:
+ * @GSURF_CHROME_EDGE_LEFT: beside the view area, on the left
+ * @GSURF_CHROME_EDGE_RIGHT: beside the view area, on the right
+ *
+ * Where gsurf_window_add_side_widget() packs a side panel (e.g. the
+ * tabs module's tree sidebar).
+ */
+typedef enum {
+	GSURF_CHROME_EDGE_LEFT,
+	GSURF_CHROME_EDGE_RIGHT
+} GsurfChromeEdge;
+
+/**
  * GsurfLoadEvent:
  * @GSURF_LOAD_STARTED: navigation started
  * @GSURF_LOAD_REDIRECTED: a redirect occurred
@@ -326,6 +339,19 @@ typedef enum {
 	GSURF_ACTION_MODULE,
 	/* Overlay listing currently active keybindings (core + modules) */
 	GSURF_ACTION_SHOW_KEYBINDS,
+	/* Tree sidebar (tabs module) */
+	GSURF_ACTION_TAB_SIDEBAR_TOGGLE,
+	GSURF_ACTION_TAB_TREE_COLLAPSE,
+	GSURF_ACTION_TAB_MOVE_UP,
+	GSURF_ACTION_TAB_MOVE_DOWN,
+	/* Containers (containers module) */
+	GSURF_ACTION_CONTAINER_NEW_TEMP,
+	GSURF_ACTION_CONTAINER_REOPEN_NEXT,
+	/* Dark mode (dark_mode module) */
+	GSURF_ACTION_DARK_MODE_TOGGLE,
+	GSURF_ACTION_DARK_MODE_TOGGLE_SITE,
+	/* Form autofill (form_autofill module) */
+	GSURF_ACTION_FORM_AUTOFILL,
 	GSURF_ACTION_LAST
 } GsurfAction;
 
@@ -335,6 +361,7 @@ GType gsurf_lrg_render_mode_get_type(void) G_GNUC_CONST;
 GType gsurf_key_mod_get_type(void) G_GNUC_CONST;
 GType gsurf_mode_policy_get_type(void) G_GNUC_CONST;
 GType gsurf_load_event_get_type(void) G_GNUC_CONST;
+GType gsurf_chrome_edge_get_type(void) G_GNUC_CONST;
 GType gsurf_policy_decision_get_type(void) G_GNUC_CONST;
 GType gsurf_filter_verdict_get_type(void) G_GNUC_CONST;
 GType gsurf_tls_decision_get_type(void) G_GNUC_CONST;
@@ -348,6 +375,7 @@ GType gsurf_action_get_type(void) G_GNUC_CONST;
 #define GSURF_TYPE_KEY_MOD            (gsurf_key_mod_get_type())
 #define GSURF_TYPE_MODE_POLICY        (gsurf_mode_policy_get_type())
 #define GSURF_TYPE_LOAD_EVENT         (gsurf_load_event_get_type())
+#define GSURF_TYPE_CHROME_EDGE        (gsurf_chrome_edge_get_type())
 #define GSURF_TYPE_POLICY_DECISION    (gsurf_policy_decision_get_type())
 #define GSURF_TYPE_FILTER_VERDICT     (gsurf_filter_verdict_get_type())
 #define GSURF_TYPE_TLS_DECISION       (gsurf_tls_decision_get_type())
