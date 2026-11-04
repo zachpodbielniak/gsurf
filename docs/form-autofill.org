@@ -1,0 +1,261 @@
+#+title: Form autofill (form_autofill module)
+#+description: Fill web forms from identity, address and card profiles kept in YAML
+#+author: Zach Podbielniak
+
+* Overview
+
+The =form_autofill= module fills web forms (names, e-mail, telephone, organisation, postal address and payment-card details) from profiles you keep in YAML. You fill the focused form with a key (=Ctrl+Alt+f= by default) or the =form-autofill= action. When you focus a field the module recognises, it can also show a small list of your profile *labels* under the field. You pick a label with the mouse or with Up/Down/Enter, and the module fills the form.
+
+The module is off by default. It is not a password manager: it never reads, stores or fills user names, passwords or one-time codes.
+
+The design keeps profile data away from the page:
+
+- The page side runs in an isolated JavaScript world, so page scripts cannot see it, call it or read its suggestion list.
+- The browser sends profile values only after you pick a profile, and only the values for the form you are in.
+- Card data is read only from a private file and filled only on https pages.
+- The module never logs profile values.
+
+* Configuration
+
+#+begin_src yaml
+modules:
+  form_autofill:
+    enabled: false
+    file: ~/.config/gsurf/autofill.yaml   # optional; see "Profile file"
+    suggest_on_focus: true                # list labels when a known field gets focus
+    key_fill: "Ctrl+Alt+f"                # one profile: fill; several: picker
+    exclude: ['(^|\.)paypal\.com$']       # top-level hosts where autofill does nothing
+    profiles:                             # inline profiles (no card data here)
+      - label: home
+        given_name: Zach
+        family_name: Example
+        email: zach@example.org
+        tel: "+1 555 0100"
+        organization: Example Ltd
+        street: ["742 Evergreen Terrace", "Apt 9"]
+        city: Springfield
+        region: IL
+        postal_code: "62704"
+        country: US
+#+end_src
+
+| Key                | Default                               | Meaning                                                                                       |
+|--------------------+---------------------------------------+-----------------------------------------------------------------------------------------------|
+| =enabled=          | =false=                               | Load and activate the module.                                                                 |
+| =file=             | =$XDG_CONFIG_HOME/gsurf/autofill.yaml= | The private profile file. =~= is expanded. An empty string turns the file off.                |
+| =suggest_on_focus= | =true=                                | Show the label list when a recognised field gets focus.                                      |
+| =key_fill=         | =Ctrl+Alt+f=                          | The fill key. It must include =Ctrl=, =Alt= or =Super=. An empty string removes the key.      |
+| =exclude=          | =[]=                                  | Host rules (regular expressions) for top-level hosts where autofill does nothing.             |
+| =profiles=         | =[]=                                  | Inline profiles. Card keys are refused here.                                                 |
+
+The module reports unknown keys with a warning and ignores them. A second =configure()= (a config reload) replaces the whole state: profiles, file, key, rules. A reload without a =form_autofill= section restores every default.
+
+** Fill key
+
+The fill key must include =Ctrl=, =Alt= or =Super=. A key without one of these modifiers cannot work: while a text field has focus, gsurf sends keys without a modifier to the page, and the fill key only has a purpose while a field has focus. The module warns about a key without such a modifier and turns the key off. The =form-autofill= action continues to work: you can bind it in the core =keybinds:= table, for example ="Ctrl+Shift+a": form-autofill=.
+
+The module handles only its own key. Every other key, including all typing, goes to the page. On an excluded host, or on a page that is not http(s), the module does not handle the key, and the key goes to the page.
+
+The default =Ctrl+Alt+f= does not collide with any binding in =data/default-config.yaml=.
+
+* Profiles
+
+A profile is a mapping with a =label= and any of these keys:
+
+| Key            | Value                                              | Validation                                                                              |
+|----------------+----------------------------------------------------+-----------------------------------------------------------------------------------------|
+| =label=        | name shown in the suggestion list (required)       | non-empty                                                                               |
+| =given_name=   | first name                                         | one line of text, at most 256 bytes                                                     |
+| =family_name=  | last name                                          | text                                                                                    |
+| =email=        | e-mail address                                     | one =@=, a dot in the domain, no spaces                                                 |
+| =tel=          | telephone number                                   | digits, spaces, =-=, =(=, =)=, =.=, a leading =+=; 3 to 20 digits                       |
+| =organization= | company                                            | text                                                                                    |
+| =street=       | one string, or a list of one to three lines        | each line is text                                                                       |
+| =city=         | city or town                                       | text                                                                                    |
+| =region=       | state, province or county                          | text                                                                                    |
+| =postal_code=  | postal or ZIP code                                 | 2 to 12 letters, digits, spaces or =-=                                                  |
+| =country=      | ISO 3166-1 alpha-2 code (=US=, =FR=)               | two letters; stored in uppercase                                                        |
+| =cc_name=      | name on the card                                   | text; *file only*                                                                       |
+| =cc_number=    | card number                                        | 12 to 19 digits after the module removes spaces and =-=; must pass the Luhn checksum; *file only* |
+| =cc_exp=       | expiry, =MM/YY= or =MM/YYYY= (=-= also accepted)   | month 1 to 12; *file only*                                                              |
+
+Quote values that YAML could read as another type: ="62704"=, ="+1 555 0100"=, ="12/31"=. Quote the country code of Norway (="NO"=) for the same reason.
+
+When a value is not valid, the module logs a warning and drops that field. The other fields of the profile stay. The warning gives the source, the profile label, the key and the reason, but never the value. A profile without a label is dropped. Unknown keys log a warning and are ignored.
+
+** No card security code
+
+The module does not accept =cc_csc= (CVC, CVV). It logs a warning and drops the key, and it never fills security-code fields. The code proves that the person paying has the physical card. A stored copy removes that proof, and PCI DSS forbids keeping it after authorisation. Firefox and Chromium also never store it. Type the code yourself.
+
+* Profile file
+
+The file holds a mapping with a =profiles= list. The module reports any other top-level key.
+
+#+begin_src yaml
+# ~/.config/gsurf/autofill.yaml  (chmod 600)
+profiles:
+  - label: home
+    cc_name: Zach Example
+    cc_number: "4111 1111 1111 1111"
+    cc_exp: "12/31"
+  - label: work
+    organization: Example Corp
+    email: zach@corp.example
+#+end_src
+
+- If =file= is not in the config, the module reads =$XDG_CONFIG_HOME/gsurf/autofill.yaml= when that file exists and is silent when it does not.
+- If =file= names a path that does not exist, the module logs a warning.
+- =file: ""= turns the file off.
+
+** Permissions
+
+Card data (=cc_name=, =cc_number=, =cc_exp=) is accepted only from a *private* file: a regular file that you own, with no access for group or others (=chmod 600=). A symbolic link does not count, even when it points to a private file. The module makes this check with =gsurf_private_file_is_private()=.
+
+When the file is not private and contains card data, the module refuses *only the card data*. It reads the rest of the file and logs a warning to stderr, such as =card data in profile file '...' refused: '...' has mode 0644; it must not be accessible to group or others (chmod 600 '...')=. The address and identity fields of that file are still used, because they are less sensitive. A file that cannot be read was never protected in the first place. Fix the mode and reload the config to accept the card data.
+
+The module never accepts card data from =config.yaml=. It warns and ignores =cc_*= keys in the inline =profiles:= list. =config.yaml= is often shared or kept in a dotfiles repository, and an embedder can build it from strings that have no file and therefore no permission check.
+
+** Merge rule
+
+1. The module reads the file profiles first, in file order.
+2. It then reads the inline profiles.
+3. An inline profile that has the *same label* as a file profile updates that profile *field by field*: each field set inline replaces the file's field, and fields not set inline keep their file values. The profile stays in its file position. For example, you can keep the =home= address inline and the =home= card in the private file.
+4. An inline profile with a new label is added after the file profiles.
+5. A label that appears twice in *the same source* logs a warning. The later profile replaces the earlier one completely, in the earlier position.
+
+Labels are compared exactly, and are case-sensitive.
+
+* How a fill works
+
+#+begin_example
+ page load  ->  isolated script: post {ready, nonce}
+            ->  host: module active? http(s)? top-level host not excluded?
+            ->  host: arm({nonce, host, labels, card-flags, suggest})     labels only
+ focus / fill key / form-autofill action
+            ->  isolated script: list or pick a label
+            ->  post {pick, nonce, label, kind: address|card}
+            ->  host: values of that profile, only that part, card only on https
+            ->  fill({nonce, host, kind, values})  in the isolated world
+            ->  the values are written into the focused field's form, then dropped
+#+end_example
+
+- *Isolated world.* The script is a user script in the WebKit script world =gsurf-autofill= (=gsurf_view_add_user_script_in_world()=). It shares the DOM with the page but none of its JavaScript globals. Its message handler =gsurfAutofill= exists only in that world (=gsurf_view_register_script_message()=), so page scripts cannot post to it. The host replies only with =gsurf_view_run_javascript_in_world_async()= in the same world.
+- *Labels only until a pick.* Arming sends the profile labels and one has-card flag per profile, nothing else. A pick names a label, not an index, so a reloaded config cannot fill a different profile than the one you saw.
+- *One part per pick.* A pick from an address or identity field receives only the non-card fields. A pick from a card field receives only =cc_name=, =cc_number= and the expiry. The module never fills card fields during an address fill, and never fills address fields during a card fill. This is how Firefox and Chromium also keep the two apart.
+- *Stale replies are ignored.* Each document makes a random 128-bit nonce. The host includes it, and the host name it checked, in every reply. A reply that arrives after a navigation finds a different nonce or host and does nothing.
+- *Values are not kept.* =fill()= writes the values into the fields and keeps no copy. The host overwrites the script string it built for the call once the call is queued, and overwrites profile values in memory when it frees a profile (on reload and shutdown). JSON-GLib's own short-lived copies are freed normally.
+
+* Field classification
+
+The page script classifies each =input=, =select= and =textarea= in this order. The first rule that matches decides.
+
+1. *Never filled:* =input= elements of type =hidden=, =password=, =submit=, =button=, =reset=, =checkbox=, =radio=, =file=, =image=, =range=, =color=, the date and time types, =search= and =url=.
+2. *The =autocomplete= attribute* (HTML autofill tokens), parsed as =[section-*] [shipping|billing] [home|work|mobile|fax|pager] field [webauthn]=.
+   - Supported field names: =name=, =given-name=, =family-name=, =organization=, =street-address=, =address-line1..3=, =address-level2= (city), =address-level1= (region), =postal-code=, =country= (filled with the code), =country-name= (filled with the name), =email=, =tel=, =tel-national=, =cc-name=, =cc-given-name=, =cc-family-name=, =cc-number=, =cc-exp=, =cc-exp-month=, =cc-exp-year=, =cc-csc= (recognised, never filled).
+   - Valid tokens that the module never fills, such as =username=, =current-password=, =new-password=, =one-time-code=, =bday=, =address-level3= and =tel-country-code=, are final: heuristics do not override them.
+   - =on=, =off=, unknown tokens and invalid token orders give no answer, and classification continues with heuristics. Many sites set =autocomplete=off= on every field.
+3. *Heuristics* on the =name= attribute, then the =id=, the label text (=<label for>=, a wrapping =<label>=, =aria-labelledby=), the =placeholder= and the =aria-label=. The first of these sources that matches a rule decides. Each source is normalised first: camelCase is split, punctuation becomes spaces, and letters become lowercase, so =billing_firstName= becomes =billing first name=. A source that matches the negative rule (user name, login, password, captcha, search, coupon, promo, voucher, discount, gift card, referral, OTP) makes the field "not ours". The rule table, in order: card holder name, security code, =MM/YY= expiry, expiry month, expiry year, other expiry, card number, e-mail, telephone, organisation, given name, family name, address line 2, address line 3, address line 1 (a =textarea= that matches becomes the whole street), postal code, city, region, country, full name.
+4. *Input type:* =email= and =tel= inputs that no rule matched.
+
+The classifier is a pure function over a plain descriptor, =__gsurfAutofillCore.classify({tag, type, autocomplete, name, id, label, placeholder, aria})=. The headless suite (=tests/test-form-autofill.c=) loads =modules/form_autofill/js/form-autofill.js= into a bare JavaScriptCore context and checks a table of more than 60 cases against it. There is no copy of the table in C.
+
+** What is filled
+
+- *Scope:* only the form that contains the focused field (=field.form.elements=). For a field outside any form, scope is every field of the document that has no form.
+- *Sections:* when the focused field has a section, or =shipping=/=billing=, from its =autocomplete= attribute, fields of *other* sections are skipped. Fields without a section are still filled. When the focused field has no section, every field of the form is filled.
+- *Visibility:* the module fills only fields that you can see. It skips fields that are disabled, read-only, =display:none=, =visibility= not =visible=, opacity 0 (on the field or an ancestor), smaller than 2×2 pixels, or placed above or to the left of the page. This defends against the known attack where a page hides extra fields and lets autofill fill them.
+- *Values:*
+  - =name= is the given name and family name joined with a space.
+  - When the form has no line-2 field, the line-1 field gets all street lines joined with =", "=. A street =textarea= gets the lines joined with newlines.
+  - Country =select= elements match the option value or text against the code and the country name. =Intl.DisplayNames= gives the name in the page language, in English and in the browser language. Region =select= elements match the option value or text exactly, ignoring case.
+  - Expiry: month and year =select= elements match by number, and the year matches with four or two digits. A combined expiry field gets =MM/YY=, or =MM/YYYY= when its placeholder asks for =YYYY= or its =maxlength= is 7 or more. The separator is =-= when the placeholder uses one.
+- *Events:* the module sets each value with the prototype's own =value= setter, which it takes from the isolated world, so the page cannot replace it. It then sends =input= and =change= events that bubble. React-style controlled inputs replace the instance's =value= property to track changes. Because the module bypasses that property, those frameworks see the change through their event handlers.
+
+* Suggestion list
+
+- The list appears when a recognised field gets focus, if =suggest_on_focus= is true and at least one profile applies. A card field lists only the profiles that have card data.
+- The list shows the profile *labels* only. It is a fixed-position element attached to =<html>= with a *closed* shadow root, created from the isolated world. The page can see that the host element exists, but it cannot reach its contents: =shadowRoot= is =null=, and the labels do not appear in =innerText= or =textContent=. Inline =!important= styles stop page CSS from hiding or moving it.
+- Keyboard: =Down=/=Up= move the highlight, wrapping at the ends. =Enter= picks the highlighted label; with no highlight, =Enter= goes to the page and submits as usual. =Escape= closes the list, which stays closed for that field until focus moves to another field. The module handles only trusted (user) key events. It acts on a key only while the list is open, and then stops the key from reaching the page.
+- Mouse: a click on a label picks it, and only a trusted click counts. Pressing the mouse button on the list keeps focus in the field.
+- Fill key or =form-autofill= action:
+  - With one applicable profile, the module fills at once.
+  - With several, the module opens the same list with the first label highlighted.
+  - With no recognised field focused, the module shows a short notice ("Focus a form field to autofill it").
+- Notices appear in the lower-right corner, also in a closed shadow root, and disappear after 4 seconds. The module shows a notice when:
+  - card data is refused on a page that is not https;
+  - the profile has no card data;
+  - no profiles are configured;
+  - nothing in the form could be filled;
+  - the profile no longer exists.
+
+* Security model
+
+| Threat                                              | Mitigation                                                                                                     |
+|-----------------------------------------------------+----------------------------------------------------------------------------------------------------------------|
+| Page script reads profiles                          | No profile value enters the page before a fill; only the written field values do.                              |
+| Page script calls the module or fakes a pick        | Isolated world; message handler only in that world; only trusted key and mouse events can pick.                |
+| Page reads the suggestion list                      | Closed shadow root; labels only.                                                                               |
+| Hidden or off-screen fields collect extra data      | Only visible, enabled, editable fields in the focused field's form are filled; card and address fills are kept apart. |
+| Card number sent over plain http                    | Card data only on https top-level pages: the host checks the view URI, and the page checks =location.protocol= and =window.isSecureContext=. |
+| Card data in a readable file                        | Card data only from a private (0600, owned, regular) file; never from =config.yaml=.                           |
+| Reply lands on the next page after a navigation     | A nonce per document and the checked host are included in every reply.                                        |
+| Profile values in logs                              | Logs carry labels, keys, hosts and reasons, never values. The headless suite checks every log line.           |
+| Sites where you never want autofill                 | =exclude= host rules. A rule that is not valid turns autofill off everywhere (fail closed) and logs a warning. |
+| Frames hosting third-party content                  | Only the top-level document; frames are ignored.                                                              |
+
+When the module refuses card data on a page that is not https, it shows a notice in the page and logs a message to stderr, such as =form_autofill: refused to fill card details on 127.0.0.1: the page is not https=. =http://127.0.0.1= and =http://localhost= are secure contexts for the web platform, but they are still not https, so the module refuses card data there.
+
+* Frames
+
+Only the *top-level document* takes part. The script returns at once in every frame (=window.top !== window=), so frames get no suggestions, no notices and no data, whatever their origin. As a result, card forms inside third-party payment iframes, such as Stripe Elements or Adyen, are not filled. This is deliberate: the module cannot confirm what an embedded document belongs to, and autofill run by the page itself is outside this module. Same-origin iframes are also skipped, because one rule ("top level only") is simpler to check than a list of exceptions.
+
+* Excluded hosts
+
+=exclude= uses the shared host rules (=GsurfHostRules=). Each rule is a case-insensitive regular expression for the *top-level* host. Rules are not anchored, so =(^|\.)paypal\.com$= matches =paypal.com= and its subdomains but not =notpaypal.com.example=.
+
+=inject()= runs once per view before any page is known (=uri= is =NULL=). For this reason the module decides about each document when the document reports in: on an excluded host, the host never arms the script. On an excluded host, the module:
+
+- does not arm the page or install listeners;
+- does not change the DOM;
+- sends no data;
+- does not handle the fill key or the =form-autofill= action, so the key goes to the page.
+
+Pages that are not http(s), for example =file:=, =about:= and =data:=, are treated the same way.
+
+* Module hooks
+
+| Interface              | Use                                                                                                   |
+|------------------------+-------------------------------------------------------------------------------------------------------|
+| =GsurfScriptInjector=  | Once per view: register =gsurfAutofill= in world =gsurf-autofill=, add the script, connect =script-message::gsurfAutofill=. |
+| =GsurfInputHandler=    | The fill key; every other key returns =FALSE=.                                                        |
+| =GsurfActionHandler=   | =form-autofill= (bind it in the core =keybinds:= table if you like).                                  |
+| =GsurfKeybindProvider= | Lists the fill key in the =?= overlay.                                                                |
+
+The module also has read-only GObject properties for tests and debugging. None of them contains a value: =n-profiles=, =summary= (=label: field ...= per profile), =file=, =suggest-on-focus=, =key-fill=, =n-exclude= and =exclude-broken=.
+
+* Tests
+
+- =tests/test-form-autofill.c= (headless, loads the real =form_autofill.so=):
+  - defaults, every option, unknown keys, and reconfigure, including back to the defaults;
+  - the default and explicit file paths, and a missing file;
+  - the merge rule and duplicate labels;
+  - every validator, =cc_csc= and unknown keys;
+  - card data refused from a file with mode 0644 and from a symlink, then accepted after =chmod 600= and a reload;
+  - card data refused inline;
+  - exclude rules and fail-closed;
+  - the host and page protocol, through a headless view that records the scripts the host runs: arming sends labels only, address and card picks send only their part, http picks are refused, unknown labels and bad messages are handled, excluded hosts, pages that are not http(s) and an inactive module get no reply;
+  - the fill key and the action;
+  - lifetime;
+  - the JavaScript classifier and expiry formatting in JavaScriptCore.
+
+  A log handler records every message the module logs, at every level including debug, and the suite checks that no profile value appears.
+- =tests/test-form-autofill-webkit.c= (=make test-gui=, both backends; it loads pages from a loopback libsoup server):
+  - key fill of a tagged form and the action fill of a heuristic form, with the values and the =input=/=change= events checked;
+  - fields that must stay empty: hidden, off-screen, invisible, other forms, the card field of an address fill;
+  - a React-style instance tracker that the module must not call;
+  - the suggestion list (labels only, keyboard, Escape, picking) and the picker for several profiles;
+  - main-world probes before any fill;
+  - card data refused on =http://127.0.0.1=;
+  - =suggest_on_focus: false=;
+  - an excluded host;
+  - card fill on https, using the TLS fixture in =tests/fixtures/= with =tls_strict= off.
