@@ -277,6 +277,14 @@ test_private_file(void)
 	g_assert_false(gsurf_private_file_is_private(file, &error));
 	g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_PERM);
 	g_clear_error(&error);
+
+	/* Rewriting a loose file makes it private again (GLib would keep the
+	 * old mode of a replaced file). */
+	g_assert_true(gsurf_private_write(file, "secret: 2\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_cmpint(g_stat(file, &st), ==, 0);
+	g_assert_cmpint(st.st_mode & 0777, ==, 0600);
+	g_assert_cmpint(g_chmod(file, 0644), ==, 0);
 	g_assert_false(gsurf_private_file_is_private(dir, &error));
 	g_assert_error(error, G_FILE_ERROR, G_FILE_ERROR_INVAL);
 	g_clear_error(&error);

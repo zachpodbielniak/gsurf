@@ -116,7 +116,7 @@ An ordered list of case-insensitive regular expressions matched against the bare
 ** Private files (=util/gsurf-private-file.h=)
 
 - =gsurf_private_mkdir()= creates directories 0700.
-- =gsurf_private_write()= replaces a file atomically at mode 0600, creating its parent 0700 first.
+- =gsurf_private_write()= replaces a file atomically at mode 0600, creating its parent 0700 first. A file that already exists with looser permissions is tightened to 0600 before it is replaced (GLib would otherwise keep its old mode).
 - =gsurf_private_file_is_private()= checks a file is a regular file owned by the user with no group/other access, before trusting sensitive data in it (for example autofill card data).
 - =gsurf_expand_home()= expands a leading =~/= in configured paths.
 
