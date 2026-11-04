@@ -1,0 +1,667 @@
+#+TITLE: wmux: a tmux-style web multiplexer
+#+OPTIONS: toc:2 num:nil
+
+* Overview and mental model
+
+TODO (Phase 3): the browser window / tmux window / pane mapping, background tabs, and a diagram of a three-pane layout next to the tab tree.
+
+The module is built from a toolkit-neutral core and a GTK front end. The core is four pure-GLib parts in =modules/wmux/=, compiled straight into their unit tests:
+
+| File                                 | Role |
+|--------------------------------------+------|
+| =modules/wmux/gsurf-wmux-layout.c=   | The pane layout model (an n-ary split tree with integer weights), its operations, exact pixel geometry, the layout string, and the window-state string the session module stores. |
+| =modules/wmux/gsurf-wmux-command.c=  | The command language: a tmux subset, tokenized, parsed and validated into a struct; one canonical printer. |
+| =modules/wmux/gsurf-wmux-keys.c=     | Key notation: tmux and gsurf spellings and key events, all mapped to one canonical name. |
+| =modules/wmux/gsurf-wmux-bindings.c= | Binding tables (key to command, repeatable flag), the default prefix and root tables, merging config overrides, validation. |
+
+* Quick start
+
+TODO (Phase 3): enabling the module, the five keys to learn first, and what =o=, =C-h/j/k/l= and the sidebar do with wmux on.
+
+* tmux mapping table
+
+wmux has two binding tables, as tmux does. The *prefix table* holds the keys pressed after the prefix (=C-b= by default). The *root table* holds keys that work without the prefix. Every key is written in canonical notation (see "Key notation") and every command is a line of the command language (see "Command reference"). A *repeatable* key (tmux =bind -r=) can be pressed again without the prefix for =repeat_time= milliseconds after it ran.
+
+** Prefix table
+
+| Key       | Command                              | Repeatable | Notes |
+|-----------+--------------------------------------+------------+-------|
+| =%=       | =split-window -h=                    | no         | New pane to the right, showing a new tab (placed by the containers policy, like =Ctrl+t=). |
+| ="=       | =split-window -v=                    | no         | New pane below, showing a new tab. |
+| =C-%=     | =split-window -h -c=                 | no         | As =%=, but the new pane duplicates the current page in the same container. |
+| =C-"=     | =split-window -v -c=                 | no         | As ="=, duplicating the current page. |
+| =o=       | =select-pane -t +1=                  | no         | Next pane in layout order. |
+| =;=       | =last-pane=                          | no         | The previously active pane. |
+| =x=       | =confirm-before kill-pane=           | no         | Asks, then closes the pane and (by default) its tab. |
+| =z=       | =resize-pane -Z=                     | no         | Zoom the active pane, or unzoom. |
+| =q=       | =display-panes=                      | no         | Show pane numbers; a digit selects that pane. |
+| ={=       | =swap-pane -U=                       | no         | Swap the active pane with the previous one. |
+| =}=       | =swap-pane -D=                       | no         | Swap the active pane with the next one. |
+| =!=       | =break-pane=                         | no         | Move the active pane to a new tmux window. |
+| =C-o=     | =rotate-window=                      | no         | Rotate the panes up (each moves one place earlier). |
+| =M-o=     | =rotate-window -D=                   | no         | Rotate the panes down. |
+| =Up=      | =select-pane -U=                     | yes        | The pane above. |
+| =Down=    | =select-pane -D=                     | yes        | The pane below. |
+| =Left=    | =select-pane -L=                     | yes        | The pane to the left. |
+| =Right=   | =select-pane -R=                     | yes        | The pane to the right. |
+| =C-Up=    | =resize-pane -U 1=                   | yes        | Move a border up by 1% of the window height. |
+| =C-Down=  | =resize-pane -D 1=                   | yes        | Move a border down by 1%. |
+| =C-Left=  | =resize-pane -L 1=                   | yes        | Move a border left by 1% of the window width. |
+| =C-Right= | =resize-pane -R 1=                   | yes        | Move a border right by 1%. |
+| =M-Up=    | =resize-pane -U 5=                   | yes        | As =C-Up=, by 5%. |
+| =M-Down=  | =resize-pane -D 5=                   | yes        | As =C-Down=, by 5%. |
+| =M-Left=  | =resize-pane -L 5=                   | yes        | As =C-Left=, by 5%. |
+| =M-Right= | =resize-pane -R 5=                   | yes        | As =C-Right=, by 5%. |
+| =Space=   | =next-layout=                        | no         | Cycle through the five preset layouts. |
+| =M-1=     | =select-layout even-horizontal=      | no         | All panes side by side. |
+| =M-2=     | =select-layout even-vertical=        | no         | All panes stacked. |
+| =M-3=     | =select-layout main-horizontal=      | no         | First pane on top, the others in a row below. |
+| =M-4=     | =select-layout main-vertical=        | no         | First pane on the left, the others stacked on the right. |
+| =M-5=     | =select-layout tiled=                | no         | A grid. |
+| =E=       | =select-layout -E=                   | no         | Spread the active pane and its siblings evenly. |
+| =c=       | =new-window=                         | no         | New tmux window with a new tab. |
+| =n=       | =next-window=                        | no         | Next tmux window. |
+| =p=       | =previous-window=                    | no         | Previous tmux window. |
+| =l=       | =last-window=                        | no         | The previously current tmux window. |
+| =0=       | =select-window -t 0=                 | no         | tmux window 0. |
+| =1=       | =select-window -t 1=                 | no         | tmux window 1. |
+| =2=       | =select-window -t 2=                 | no         | tmux window 2. |
+| =3=       | =select-window -t 3=                 | no         | tmux window 3. |
+| =4=       | =select-window -t 4=                 | no         | tmux window 4. |
+| =5=       | =select-window -t 5=                 | no         | tmux window 5. |
+| =6=       | =select-window -t 6=                 | no         | tmux window 6. |
+| =7=       | =select-window -t 7=                 | no         | tmux window 7. |
+| =8=       | =select-window -t 8=                 | no         | tmux window 8. |
+| =9=       | =select-window -t 9=                 | no         | tmux window 9. |
+| =w=       | =choose-tree=                        | no         | Pick a window or pane from a list. |
+| =&=       | =confirm-before kill-window=         | no         | Asks, then closes the tmux window. |
+| =,=       | =command-prompt -I #W rename-window= | no         | Rename the window; the prompt starts with its current name. |
+| =:=       | =command-prompt=                     | no         | Type any wmux command. |
+| =?=       | =list-keys=                          | no         | Show the bindings. |
+| =C-b=     | =send-prefix=                        | no         | The next prefix press reaches the page (=C-b= for bold in an editor). |
+
+** Root table
+
+| Key   | Command          | Repeatable | Notes |
+|-------+------------------+------------+-------|
+| =C-h= | =select-pane -L= | no         | Pane to the left. |
+| =C-j= | =select-pane -D= | no         | Pane below. |
+| =C-k= | =select-pane -U= | no         | Pane above. |
+| =C-l= | =select-pane -R= | no         | Pane to the right. While wmux is enabled =C-l= no longer opens the address bar: use =o= (modal) or rebind. |
+
+** What differs from tmux
+
+- There is no copy mode, no detach, no sessions list and no shell: a pane shows a web page.
+- =split-window -c= means "duplicate the current page in the same container", not "start directory".
+- =send-prefix= lets the next prefix press through to the page instead of sending it to a program in the pane.
+- Arrow keys are repeatable by default (tmux makes only the resize keys repeatable).
+- Sizes are percentages of the browser window, not character cells: =resize-pane -L 5= moves a border by 5% of the width, =split-window -p 30= gives the new pane 30% of the old one.
+- A command line holds one command; tmux's =\;= command sequences and ={ }= command blocks are not supported.
+
+* Command reference
+
+** Syntax
+
+A command line is one command: its name, then flags, then arguments.
+
+- *Words.* Whitespace (space, tab, newline) separates words.
+- *Single quotes* take everything literally up to the next single quote: ='a "b" \c'= is the word =a "b" \c=.
+- *Double quotes* allow the escapes =\"=, =\\=, =\n= and =\t=; any other backslash is kept as written: ="a\"b"= is =a"b=.
+- *Backslash* outside quotes makes the next character literal: =a\ b= is one word, =a b=.
+- *Joining.* Quoted and plain parts next to each other form one word: =a"b c"'d'= is =ab cd=. =""= is an empty word.
+- *Control characters* other than the whitespace separators are refused, and the line must be valid UTF-8.
+- *Flags* follow getopt: =-hb= is =-h -b=; a flag that takes a value takes the rest of its word or the next word (=-p30= and =-p 30= are equal); =--= ends the flags; the first argument ends them too, so a nested command keeps its own flags (=confirm-before split-window -h=); a lone =-= is an argument.
+- *Aliases.* tmux's short names work: =splitw=, =selectp=, =lastp=, =killp=, =resizep=, =swapp=, =rotatew=, =selectl=, =nextl=, =breakp=, =displayp=, =neww=, =next=, =prev=, =last=, =selectw=, =killw=, =renamew=, =confirm=, =lsk=.
+- *Placeholders.* =#W= (the current window's name) is kept as written and expanded by the module when the command runs.
+- *Canonical form.* Help and =list-keys= print commands in one spelling: the full name, the boolean flags in synopsis order, the valued flags as =-x value=, =--= before an argument that starts with =-=, numbers normalized (=-t +02= prints as =-t +2=), and words quoted only when they need it.
+
+** Errors
+
+A command that does not parse is never run. The error message starts with the byte position of the problem in the line, counting from 0, then says what is wrong:
+
+#+begin_src text
+position 14: split-window has no flag -x
+position 0: unknown command "spilt-window"
+position 16: unterminated single quote
+position 0: select-pane needs exactly one of -L, -R, -U, -D, -l, -t
+#+end_src
+
+| Error                 | When |
+|-----------------------+------|
+| no command            | the line is empty or blank |
+| syntax                | an unterminated quote, a trailing backslash, a control character, invalid UTF-8 |
+| unknown command       | the first word is not a command or alias (names are case-sensitive) |
+| unknown flag          | the command has no such flag |
+| missing value         | a flag that takes a value ends the line |
+| bad value             | a number out of range or not a number, an unknown layout name, a template that is not a command |
+| missing argument      | a required flag or argument is absent |
+| too many arguments    | more arguments than the command takes; the position is that of the first extra one |
+| conflict              | flags that exclude each other (=-h= with =-v=, two directions) |
+| too deep              | =confirm-before= and =command-prompt= nested more than 4 levels |
+
+In a nested command the position points into the outer line: in =confirm-before 'split-window -x'= the error is at position 30, the =x=.
+
+** split-window
+
+Synopsis: =split-window [-h|-v] [-b] [-d] [-c] [-p pct] [uri]= (alias =splitw=)
+
+Splits the active pane in two; the new pane shows a new tab.
+
+- =-h= puts the new pane to the right (side by side); =-v= (the default) below.
+- =-b= puts the new pane left of or above the active one instead.
+- =-d= keeps the active pane active; without it the new pane becomes active.
+- =-c= duplicates the current page (same URI, same container) instead of opening a new tab.
+- =-p pct= gives the new pane =pct= percent (1 to 99) of the old pane's size; without it the =split_ratio= setting (default 50) applies.
+- =uri= opens that address in the new pane.
+
+A split that would make either pane smaller than =min_pane_pct= of the window is refused.
+
+#+begin_example
+split-window -h
+split-window -v -b
+split-window -h -c
+split-window -h -p 30 https://github.com
+split-window -d -p 25 https://example.org
+splitw -hc
+#+end_example
+
+Errors: =-h= with =-v= (conflict); =-p= without a value, outside 1..99 or not a number; more than one argument.
+
+** select-pane
+
+Synopsis: =select-pane -L|-R|-U|-D|-l|-t N|+N|-N= (alias =selectp=)
+
+Makes another pane active.
+
+- =-L=, =-R=, =-U=, =-D= select the neighbouring pane in that direction. The candidate that shares the longest edge with the active pane wins; when two share equally much, the one used most recently wins. With nothing in that direction, selection wraps to the far side of the window, like tmux.
+- =-l= selects the last (previously active) pane, like =last-pane=.
+- =-t N= selects pane number =N= (0 is the first in layout order: left to right, top to bottom); =-t +N= and =-t -N= move =N= panes forward or back in that order, wrapping.
+
+Exactly one of these is required.
+
+#+begin_example
+select-pane -L
+select-pane -D
+select-pane -l
+select-pane -t +1
+select-pane -t -1
+select-pane -t 2
+#+end_example
+
+Errors: none or several of the flags (missing argument, conflict); =-t= without a value or not of the form =N=, =+N=, =-N=; any argument.
+
+** last-pane
+
+Synopsis: =last-pane= (alias =lastp=)
+
+Selects the previously active pane in the current window.
+
+#+begin_example
+last-pane
+#+end_example
+
+Errors: any flag or argument.
+
+** kill-pane
+
+Synopsis: =kill-pane= (alias =killp=)
+
+Closes the active pane. With =on_pane_kill: close_tab= (the default) its tab closes too. The last pane of the last window is never removed: a new blank tab takes its place.
+
+#+begin_example
+kill-pane
+confirm-before kill-pane
+#+end_example
+
+Errors: any flag or argument.
+
+** resize-pane
+
+Synopsis: =resize-pane -L|-R|-U|-D [n] | -Z= (alias =resizep=)
+
+Moves a border of the active pane, or zooms it.
+
+- =-L=, =-R=, =-U=, =-D= move a border in that direction by =n= percent (1 to 100, default 1) of the window width (=-L=, =-R=) or height (=-U=, =-D=). =-R= and =-D= move the pane's right or bottom border; when the pane is the last one in that direction they move its left or top border instead, so the pane shrinks. =-L= and =-U= mirror this. The move stops where any pane on the shrinking side would get smaller than =min_pane_pct=.
+- =-Z= zooms the active pane to fill the window, or unzooms. Selecting another pane, splitting, closing, swapping, rotating, resizing and changing the layout all unzoom.
+
+#+begin_example
+resize-pane -L
+resize-pane -R 5
+resize-pane -U 10
+resize-pane -Z
+#+end_example
+
+Errors: none or several of the flags; =-Z= with an amount; an amount outside 1..100 or not a number; more than one argument.
+
+** swap-pane
+
+Synopsis: =swap-pane -U|-D= (alias =swapp=)
+
+Swaps the active pane with the previous (=-U=) or next (=-D=) pane in layout order. The tabs move with their panes; the active pane stays active in its new place.
+
+#+begin_example
+swap-pane -U
+swap-pane -D
+#+end_example
+
+Errors: neither or both flags; any argument.
+
+** rotate-window
+
+Synopsis: =rotate-window [-U|-D]= (alias =rotatew=)
+
+Rotates the panes through the places of the layout: with =-U= (the default) every pane moves one place earlier in layout order and the first goes last; =-D= does the reverse. The layout's shape stays; the tabs move.
+
+#+begin_example
+rotate-window
+rotate-window -D
+#+end_example
+
+Errors: both flags; any argument.
+
+** select-layout
+
+Synopsis: =select-layout name | -E= (alias =selectl=)
+
+Rearranges the panes of the current window into a preset layout, keeping their order (the first pane is the main pane), or with =-E= spreads the active pane and its siblings evenly.
+
+| Name              | Shape |
+|-------------------+-------|
+| =even-horizontal= | all panes side by side, equal widths |
+| =even-vertical=   | all panes stacked, equal heights |
+| =main-horizontal= | the first pane across the top (60% of the height), the others side by side below |
+| =main-vertical=   | the first pane on the left (60% of the width), the others stacked on the right |
+| =tiled=           | a grid of =ceil(sqrt(n))= columns; a last row with fewer panes shares its row equally |
+
+#+begin_example
+select-layout even-horizontal
+select-layout main-vertical
+select-layout tiled
+select-layout -E
+#+end_example
+
+Errors: no name and no =-E=; an unknown name; =-E= with a name; more than one name.
+
+** next-layout
+
+Synopsis: =next-layout= (alias =nextl=)
+
+Applies the preset after the last one used, in the order of the table above, starting with =even-horizontal= and wrapping after =tiled=.
+
+#+begin_example
+next-layout
+#+end_example
+
+Errors: any flag or argument.
+
+** break-pane
+
+Synopsis: =break-pane= (alias =breakp=)
+
+Moves the active pane into a new tmux window of its own, where it is the only pane.
+
+#+begin_example
+break-pane
+#+end_example
+
+Errors: any flag or argument.
+
+** display-panes
+
+Synopsis: =display-panes= (alias =displayp=)
+
+Shows each pane's number (its index in layout order) in large type for =display_panes_time= milliseconds. Pressing a digit meanwhile selects that pane.
+
+#+begin_example
+display-panes
+#+end_example
+
+Errors: any flag or argument.
+
+** new-window
+
+Synopsis: =new-window [-n name] [uri]= (alias =neww=)
+
+Creates a tmux window with one pane showing a new tab, and makes it current.
+
+- =-n name= names the window (and turns automatic naming off for it).
+- =uri= opens that address in the new tab.
+
+#+begin_example
+new-window
+new-window -n docs
+new-window -n "my mail" https://mail.example.org
+#+end_example
+
+Errors: =-n= without a value; more than one argument.
+
+** next-window, previous-window, last-window
+
+Synopsis: =next-window= (alias =next=), =previous-window= (alias =prev=), =last-window= (alias =last=)
+
+Switch to the next or previous tmux window (wrapping), or to the window that was current before this one.
+
+#+begin_example
+next-window
+previous-window
+last-window
+#+end_example
+
+Errors: any flag or argument.
+
+** select-window
+
+Synopsis: =select-window -t N|+N|-N= (alias =selectw=)
+
+Switches to tmux window =N= (counted from 0), or moves =N= windows forward or back, wrapping. A window number that does not exist does nothing.
+
+#+begin_example
+select-window -t 0
+select-window -t 3
+select-window -t +1
+#+end_example
+
+Errors: no =-t=; a value not of the form =N=, =+N=, =-N=; any argument.
+
+** kill-window
+
+Synopsis: =kill-window= (alias =killw=)
+
+Closes the current tmux window and its panes (with =on_pane_kill: close_tab=, their tabs too). The last window is replaced by a fresh one with a blank tab.
+
+#+begin_example
+kill-window
+confirm-before kill-window
+#+end_example
+
+Errors: any flag or argument.
+
+** rename-window
+
+Synopsis: =rename-window [name]= (alias =renamew=)
+
+Names the current tmux window and turns its automatic naming off. Without a name (or with an empty one), the window goes back to automatic naming: it follows the active pane's page title.
+
+#+begin_example
+rename-window docs
+rename-window "pull requests"
+rename-window
+#+end_example
+
+Errors: more than one argument.
+
+** choose-tree
+
+Synopsis: =choose-tree=
+
+Opens a list of the tmux windows and their panes (page titles and container colours) to pick from.
+
+#+begin_example
+choose-tree
+#+end_example
+
+Errors: any flag or argument.
+
+** command-prompt
+
+Synopsis: =command-prompt [-p prompt] [-I initial] [template]=
+
+Opens a prompt in the status line. Enter runs, Escape cancels.
+
+- =-p prompt= sets the prompt text (default =:=).
+- =-I initial= fills the entry first; =#W= expands to the window name.
+- Without a template, the typed text runs as a command.
+- With a template, the typed text is substituted for each =%%= or =%1= in it; a template without a placeholder gets the text appended as one quoted argument. Several words after the flags are joined into one template.
+
+The template is checked when the binding is read: with a placeholder filled in (or a word appended) it must be a valid command.
+
+#+begin_example
+command-prompt
+command-prompt -I #W rename-window
+command-prompt -p "New name:" -I #W "rename-window %%"
+command-prompt -p URL: new-window
+command-prompt -p "Open right:" "split-window -h %%"
+#+end_example
+
+Errors: =-p= or =-I= without a value; a template that is not a command (=command-prompt kill-pane=: =kill-pane= takes no argument).
+
+** confirm-before
+
+Synopsis: =confirm-before [-p prompt] command= (alias =confirm=)
+
+Asks =y= or =n= in the status line and runs =command= on =y=. The command may be written inline (=confirm-before split-window -h=) or as one quoted word (=confirm-before 'split-window -h'=).
+
+#+begin_example
+confirm-before kill-pane
+confirm-before -p "Kill this pane?" kill-pane
+confirm-before kill-window
+confirm-before "split-window -h -p 30"
+#+end_example
+
+Errors: no command; =-p= without a value; any error of the nested command, reported at its position in the outer line; nesting deeper than 4.
+
+** send-prefix
+
+Synopsis: =send-prefix=
+
+Lets the next press of the prefix key reach the page instead of starting a wmux command.
+
+#+begin_example
+send-prefix
+#+end_example
+
+Errors: any flag or argument.
+
+** list-keys
+
+Synopsis: =list-keys= (alias =lsk=)
+
+Shows the prefix and root tables with their commands, in canonical notation.
+
+#+begin_example
+list-keys
+#+end_example
+
+Errors: any flag or argument.
+
+* Key notation
+
+Every key in the binding tables, in =prefix:= and in the config's =bindings:= and =root_bindings:= has one canonical name, written in tmux notation. A config key may also be written in gsurf notation (as in the core =keybinds:= table); both normalize to the same name. A key press is mapped to the same name, so a binding is a plain lookup.
+
+** Canonical names
+
+- *Modifiers* are =C-= (Control), =M-= (Meta, which is Alt) and =S-= (Shift), always in that order: =C-M-S-Up=.
+- *Printable characters* stand for themselves, already shifted: Shift+5 is =%=, Shift+apostrophe is ="=, Shift+a is =A=. Shift never appears on a printable: not =S-5= but =%=, not =C-S-5= but =C-%=, not =S-a= but =A=. Letters with Control keep their case: =C-b= and =C-B= are different keys (the second is Ctrl+Shift+b). Any Unicode character works: =é=, =M-ф=.
+- *Named keys* use tmux spellings and keep =S-=: =S-Up=, =C-S-F1=. Shift+Tab is =BTab=.
+- *Super is not supported.* The compositor owns it (gowl binds Super), so a config key that names Super (or Hyper) is an error, and a key press with Super held has no wmux name and passes through to gsurf's other bindings and the page.
+
+| Name                           | Key |
+|--------------------------------+-----|
+| =Space=                        | space bar (also =S-Space=, =C-Space=) |
+| =Enter=                        | Return |
+| =Escape=                       | Escape |
+| =Tab=, =BTab=                  | Tab, Shift+Tab |
+| =BSpace=                       | Backspace |
+| =Up= =Down= =Left= =Right=     | arrows (the keypad arrows map to these) |
+| =Home= =End=                   | Home, End |
+| =PPage= =NPage=                | Page Up, Page Down |
+| =IC= =DC=                      | Insert, Delete |
+| =F1= ... =F12=                 | function keys |
+| =KP0= ... =KP9=, =KPEnter=     | keypad digits (NumLock on) and keypad Enter |
+
+** Accepted spellings
+
+| Written                                       | Canonical |
+|-----------------------------------------------+-----------|
+| =C-b=, =c-b=, =^b=, =Ctrl+b=, =Control+b=     | =C-b= |
+| =M-1=, =Alt+1=, =Meta+1=, =Mod1+1=            | =M-1= |
+| =S-Up=, =s-Up=, =Shift+Up=                    | =S-Up= |
+| =C-M-x=, =M-C-x=, =Ctrl+Alt+x=                | =C-M-x= |
+| =%=, =S-5=, =Shift+5=, =percent=, =Shift+percent= | =%= |
+| =C-%=, =C-S-5=, =Ctrl+percent=, =Ctrl+Shift+percent= | =C-%= |
+| ="=, =S-'=, =Shift+apostrophe=, =quotedbl=    | ="= |
+| ={=, =S-[=, =braceleft=, =Shift+bracketleft=  | ={= |
+| =A=, =S-a=, =Shift+a=                         | =A= |
+| =C-B=, =C-S-b=, =Ctrl+Shift+b=                | =C-B= |
+| =C--=, =Ctrl+minus=                           | =C--= |
+| =C-+=, =Ctrl++=, =Ctrl+plus=                  | =C-+= |
+| =Space=, =space=, =SPC=, a single space       | =Space= |
+| =Enter=, =Return=, =RET=                      | =Enter= |
+| =Escape=, =Esc=                               | =Escape= |
+| =BTab=, =S-Tab=, =Shift+Tab=, =ISO_Left_Tab=  | =BTab= |
+| =BSpace=, =BackSpace=                         | =BSpace= |
+| =PPage=, =PgUp=, =PageUp=, =Page_Up=, =Prior= | =PPage= |
+| =NPage=, =PgDn=, =PageDown=, =Page_Down=, =Next= | =NPage= |
+| =IC=, =Insert=; =DC=, =Delete=                | =IC=; =DC= |
+| =KP5=, =KP_5=; =KPEnter=, =KP_Enter=          | =KP5=; =KPEnter= |
+
+Rules for reading a config key:
+
+- Surrounding whitespace is ignored.
+- tmux modifiers =C-=, =M-=, =S-= may be written in either case (=s-= is Shift, as in tmux, not Emacs' Super). =^x= is =C-x=.
+- gsurf notation is a run of =Word+= modifiers (=Ctrl=, =Control=, =Alt=, =Mod1=, =Meta=, =Shift=; case does not matter) followed by the key. =Super=, =Logo=, =Mod4= and =Hyper= are refused.
+- The key is a single character, a tmux name, or a GDK keysym name: =Return=, =BackSpace=, =Page_Up= and the punctuation names (=percent=, =quotedbl=, =apostrophe=, =braceleft=, =period=, =comma=, =semicolon=, =colon=, =question=, =exclam=, =ampersand=, =minus=, =plus=, ...). Names are matched without regard to case.
+- Shift is applied to a printable the way a US keyboard does: letters uppercase, the digit row and punctuation shift (=1= =!=, =2= =@=, ..., ='= ="=, =[= ={=), anything already shifted stays.
+
+Errors: an empty key; modifiers without a key (=C-=, =Ctrl+=); an unknown modifier (=Foo+b=); an unknown key name (=F13=, =Nope=); a control character or invalid UTF-8; Super.
+
+** Key presses
+
+A key press is named from its GDK keyval and modifiers:
+
+- The keyval GTK delivers is already shifted (Shift+5 arrives as =percent=), so Shift is dropped from printables: Shift+5 is =%=, Ctrl+Shift+5 is =C-%=, Shift+apostrophe is ="=.
+- A press that carries Shift with the unshifted keyval (synthesized input) is shifted as a US keyboard would.
+- A letter's case follows Shift, not the keyval, so Caps Lock never turns =c= into =C=.
+- Shift stays on named keys: Shift+Up is =S-Up=; Shift+Tab is =BTab=.
+- Lock, NumLock, the other Mod bits and the mouse button bits are ignored.
+- A press of a modifier key alone (Shift, Control, Alt, Super, Caps Lock, ISO Level3 Shift), a dead key, a media key, or any press with Super held has no name: wmux ignores it.
+
+* Layout string grammar
+
+A tmux window's layout is stored as a compact string, for the session file and for debugging. The model and its parser are =gsurf_wmux_layout_serialize()= and =gsurf_wmux_layout_parse()=.
+
+** Grammar
+
+#+begin_src text
+layout  := cell
+cell    := pane | split
+pane    := "p" id [ "=" payload ]
+split   := ( "h" | "v" ) "(" child ( "," child )+ ")"
+child   := weight ":" cell
+weight  := digits [ "." digit [ digit ] ]
+id      := digits                ; 0 .. 4294967294
+payload := digits                ; 0 .. 18446744073709551615
+#+end_src
+
+- =h= lays its children out side by side, left to right (what =split-window -h= makes); =v= stacks them top to bottom.
+- A weight is the child's share of its split, as a percentage with at most two decimals. The writer always produces weights that sum to exactly 100 in each split. The reader takes them as relative and scales them, so =h(1:p0,1:p1,2:p2)= reads as =h(25:p0,25:p1,50:p2)=.
+- A pane is =p= and its id. Ids are stable for the pane's life and never reused within a layout; after parsing, the next new pane gets one more than the largest id. The optional payload is an opaque number the module stores per pane: the session module writes the pane's tab index there.
+- Whitespace is allowed between tokens.
+- Layout order is the order the panes appear in the string; the first pane is active after parsing.
+
+#+begin_src text
+p0
+h(50:p0,50:p1)
+v(50:p0,50:h(50:p1,50:p2))
+h(60:p0=0,40:v(33.34:p1=1,33.33:p2=2,33.33:p3=4))
+v(50:h(33.34:p0,33.33:p1,33.33:p2),50:h(50:p3,50:p4))
+#+end_src
+
+The last one is =tiled= with five panes:
+
+#+begin_src text
++--------+--------+--------+
+|   p0   |   p1   |   p2   |
++--------+-----+--+--------+
+|      p3      |     p4    |
++--------------+-----------+
+#+end_src
+
+** Normal form
+
+The model keeps the tree normalized, and the reader normalizes what it reads:
+
+- a split has at least two children (=h(100:p0)= is an error);
+- a split never directly contains a split of the same direction: =h(50:p0,50:h(50:p1,50:p2))= reads as =h(50:p0,25:p1,25:p2)=;
+- internally every weight is an integer number of hundredths of a percent, at least 1, and a split's weights sum to exactly 10000, so sizes never drift.
+
+** Geometry
+
+Pane rectangles are computed for any pixel size and gap: each split takes the gaps between its children off its extent, then places child boundaries at the floor of the cumulative weight times the remaining extent. The sizes therefore add up exactly, the last child takes any rounding remainder, and nothing overlaps. When an area is too small for its gaps, the gaps shrink. A zoomed layout gives the zoomed pane the whole area.
+
+** Errors
+
+The reader is strict. An error names the byte position and the problem:
+
+| Input                        | Error |
+|------------------------------+-------|
+| (empty)                      | =position 0: unexpected end of layout= |
+| =x=                          | =position 0: expected 'p', 'h' or 'v'= |
+| =h(50:p0)=                   | =position 1: a split needs at least two children= |
+| =h(50:p0,50:p0)=             | =position 11: pane p0 appears twice= |
+| =h(0:p0,50:p1)=              | =position 2: a weight must be positive= |
+| =h(1.234:p0,50:p1)=          | =position 6: a weight has at most two decimals= |
+| =h(1:p0,99999:p1)=           | =position 2: weight is too small next to its siblings= |
+| =h(50:p0,50:p1) junk=        | =position 15: unexpected text after the layout= |
+| =p99999999999=               | =position 1: a pane id is too large= |
+
+Splits nested more than 64 deep are refused.
+
+** Window state
+
+The session module stores all tmux windows of a browser window in one line, built by =gsurf_wmux_state_serialize()= and read by =gsurf_wmux_state_parse()=:
+
+#+begin_src text
+state   := ws* "wmux1" ( ws+ header )* ( ws+ window )+ ws*
+header  := "current=" index | "last=" index
+window  := "[" ws* field ( ws+ field )* ws* "]"
+field   := "name=" quoted | "renamed=" ( "0" | "1" )
+         | "active=" id | "last=" id | "zoom=" id
+         | "layout=" layout
+quoted  := '"' ( char | '\"' | '\\' | '\n' | '\t' )* '"'
+#+end_src
+
+#+begin_src text
+wmux1 current=1 last=0 [name="" renamed=0 active=0 layout=p0=0] [name="docs" renamed=1 active=2 last=1 zoom=2 layout=h(50:p1=1,50:p2=2)]
+#+end_src
+
+- =wmux1= is the format version.
+- =current= (default 0) and =last= (default none) are window indexes; they must name windows.
+- In a window, =layout= is required; =name= defaults to empty and =renamed= to 0. =active= (default the first pane), =last= and =zoom= must name panes of that layout, and =last= must differ from =active=. Fields may come in any order, each at most once.
+- The payloads in the layout are the saved tab indexes; a mismatch with the restored tabs is the session module's to handle (it falls back to one pane).
+- At least one window is required.
+
+* Configuration reference
+
+TODO (Phase 3): every =modules.wmux= key with its default, range or choices, and validation behaviour.
+
+* Cookbook
+
+TODO (Phase 3): self-contained YAML blocks for the common setups (screen-style prefix, vim-style splits, =M-h/j/k/l=, resize by 10, splits that open a site, layouts, no confirmation, keeping tabs, status line colours, borders, mouse).
+
+* Integration
+
+TODO (Phase 3/4): tabs, containers, session, modal, chromebar, kiosk and LRG.
+
+* C config
+
+TODO (Phase 3): the same setup through =gsurf_config_load_from_data()= in =config.c=.
+
+* Limits and troubleshooting
+
+TODO (Phase 3): reparenting flashes, sites that grab keys, =C-b= in editors, where warnings go.
+
+* Tests
+
+The model is tested headless, as part of =make test=, by compiling its sources straight into the tests:
+
+| Test                         | Covers |
+|------------------------------+--------|
+| =tests/test-wmux-layout.c=   | every layout operation and its refusals; neighbor overlap and most-recently-used tie-breaks; presets for 1 to 6 panes; exact geometry with and without gaps at awkward sizes; border hit-testing and dragging; layout and state strings: round trips, every malformed form with its position; a 5000-operation randomized run checking every invariant (weights sum, no single-child or same-direction splits, unique never-reused ids, payloads, exact tiling) after each operation; fuzzing both parsers with random, truncated and mutated input |
+| =tests/test-wmux-command.c=  | the tokenizer, every command and flag, aliases, the canonical printer and round trips, every error with its code and position (also inside nested commands), the nesting limit, fuzzing with random, truncated and mutated lines |
+| =tests/test-wmux-keys.c=     | tmux and gsurf notation, every named key, key events (shifted printables, Shift on named keys, bare modifiers, Super), the GDK modifier conversion, every error, fuzzing |
+| =tests/test-wmux-bindings.c= | the default tables against this document's mapping tables, key events reaching their default commands, set/unbind/repeatable, merging overrides, validation errors, the parsed-command cache, a randomized run against the table invariants |
+
+The randomized and fuzz runs use a fixed seed; set =GSURF_WMUX_SEED= to try another, and a failure prints the seed to replay it. Every command in an example block of the "Command reference" above is parsed by =test-wmux-command=, and the mapping tables above are compared with the built-in defaults by =test-wmux-bindings=, so this document cannot drift from the code.
+
+TODO (Phase 3): the module tests (=tests/test-wmux.c=, =tests/test-wmux-webkit.c=, =tests/test-wmux-docs.c=).
