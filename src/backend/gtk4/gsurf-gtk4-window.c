@@ -103,14 +103,64 @@ gsurf_gtk4_window_realize(GsurfWindow *window)
 		G_CALLBACK(on_close_request), self);
 }
 
+/* A mouse button pressed on a view widget (capture phase, so it runs
+ * before WebKit's own gestures). The press goes through the window like
+ * GTK3's button-press-event: a handler that consumes it (a mousebind, an
+ * input module, a side-button history step) claims the sequence so the
+ * page never sees it; otherwise the gesture steps aside. */
+static void
+on_view_pressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                gpointer user_data)
+{
+	GsurfGtk4Window *self = user_data;
+	GtkEventController *ctrl = GTK_EVENT_CONTROLLER(gesture);
+	guint button;
+	guint mods;
+
+	(void)n_press;
+	(void)x;
+	(void)y;
+	button = gtk_gesture_single_get_current_button(GTK_GESTURE_SINGLE(gesture));
+	mods = translate_modifiers(gtk_event_controller_get_current_event_state(ctrl));
+	if (gsurf_window_emit_button_press(GSURF_WINDOW(self), button, mods))
+		gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_CLAIMED);
+	else
+		gtk_gesture_set_state(GTK_GESTURE(gesture), GTK_EVENT_SEQUENCE_DENIED);
+}
+
+/* Per-view event routing, done once per (widget, window): a view widget
+ * keeps its controllers when it moves between the stack and a layout
+ * (gsurf_window_set_layout()), so wiring it again would emit every press
+ * twice. The handlers are tied to the window's lifetime. */
+static void
+gsurf_gtk4_window_wire_view(GsurfGtk4Window *self, GtkWidget *widget)
+{
+	GtkGesture *click;
+
+	if (g_object_get_data(G_OBJECT(widget), "gsurf-gtk4-wired") == self)
+		return;
+	g_object_set_data(G_OBJECT(widget), "gsurf-gtk4-wired", self);
+
+	/* Any button (0), so side buttons (8/9) reach the mousebinds too. */
+	click = gtk_gesture_click_new();
+	gtk_event_controller_set_name(GTK_EVENT_CONTROLLER(click), "gsurf-view-click");
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), 0);
+	gtk_event_controller_set_propagation_phase(GTK_EVENT_CONTROLLER(click),
+		GTK_PHASE_CAPTURE);
+	g_signal_connect_object(click, "pressed", G_CALLBACK(on_view_pressed), self, 0);
+	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
+}
+
 static void
 gsurf_gtk4_window_insert_view(GsurfWindow *window, GsurfView *view)
 {
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
 	GtkWidget *widget = gsurf_view_get_native_widget(view);
 
-	if (widget != NULL)
-		gtk_stack_add_child(GTK_STACK(self->stack), widget);
+	if (widget == NULL)
+		return;
+	gsurf_gtk4_window_wire_view(self, widget);
+	gtk_stack_add_child(GTK_STACK(self->stack), widget);
 }
 
 static void
@@ -119,7 +169,9 @@ gsurf_gtk4_window_remove_view(GsurfWindow *window, GsurfView *view)
 	GsurfGtk4Window *self = GSURF_GTK4_WINDOW(window);
 	GtkWidget *widget = gsurf_view_get_native_widget(view);
 
-	if (widget != NULL)
+	/* Only the stack's own child: a widget elsewhere (or nowhere) is not
+	 * ours to remove, and gtk_stack_remove() would warn. */
+	if (widget != NULL && gtk_widget_get_parent(widget) == self->stack)
 		gtk_stack_remove(GTK_STACK(self->stack), widget);
 }
 

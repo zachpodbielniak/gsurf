@@ -102,6 +102,13 @@ key press → window "key-press"
       modules and pops a help overlay (GTK dialog or in-page fallback);
       overlay keys: hjkl move, q/?/Escape close
 
+mouse press on a view widget → window "button-press"
+  (GTK3: the widget's button-press-event; GTK4: a capture-phase
+   GtkGestureClick for any button, named "gsurf-view-click", that claims
+   the press when a handler consumes it)
+  └ module manager dispatch_mouse_event  [first TRUE wins]
+  └ else core mousebind table (GsurfConfig) -> GsurfAction -> execute
+
 navigation/load → view signals
   └ dispatch_load_changed / dispatch_after_navigate to navigation-hook modules
 #+end_example
