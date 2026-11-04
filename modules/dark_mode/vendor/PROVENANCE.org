@@ -1,0 +1,48 @@
+#+TITLE: Vendored Dark Reader — provenance
+#+OPTIONS: toc:nil num:nil
+
+* What is here
+
+| File                       | Origin                                                       |
+|----------------------------+--------------------------------------------------------------|
+| =darkreader-4.9.133.js=    | =package/darkreader.js= from the npm tarball, byte for byte  |
+| =LICENSE=                  | =package/LICENSE= from the same tarball (MIT)                |
+
+The =dark_mode= module compiles =darkreader-4.9.133.js= into =dark_mode.so= through a GResource (see =modules/dark_mode/Makefile=) and injects it only for the =dynamic= mode. Nothing in this directory is modified; gsurf's own code lives in =modules/dark_mode/js/=.
+
+* Source
+
+- Project: Dark Reader, https://darkreader.org/, https://github.com/darkreader/darkreader
+- Licence: MIT (Copyright (c) 2026 Dark Reader Ltd.), compatible with gsurf's AGPL-3.0-or-later.
+- Package: =darkreader= on npm, version *4.9.133* (published 2026-09-24).
+- Tarball URL: https://registry.npmjs.org/darkreader/-/darkreader-4.9.133.tgz
+- Tarball integrity (npm, sha512): =d3dRGpVgoBnMXl9qfnTuRvrdtO/9e6puFbsDwxfycTwbRNFI+sNX+093h6qnNo4VosyHHUaIXyunDWvbEudTRQ==
+- Tarball sha1 (npm =shasum=): =9cb297f4f49f09456411d5123c94d2942bc8d52e=
+
+* Checksums (sha256)
+
+| File                                  | sha256                                                             |
+|---------------------------------------+--------------------------------------------------------------------|
+| =darkreader-4.9.133.tgz= (the tarball) | =7ce63a583d0961ff719aa97e28554767bd509d7f17508ffcda34570b98b67805= |
+| =darkreader-4.9.133.js=               | =82619e7a0bcabbea15a91488bc74fd0f9ba8f8f2a1cc67527f78166037cce166= |
+| =LICENSE=                             | =f0a5f835174494f8981b2cbb1a34054d4f887a5c865318650d6a17afe1c7850e= |
+
+* How to update
+
+Run these in a fresh, empty scratch directory (never inside the repository), then copy the two files in.
+
+#+begin_src sh
+ver=4.9.NNN
+curl -sS https://registry.npmjs.org/darkreader | yq -p json ".versions[\"$ver\"].dist"   # note integrity + shasum
+curl -sSO "https://registry.npmjs.org/darkreader/-/darkreader-$ver.tgz"
+openssl dgst -sha512 -binary "darkreader-$ver.tgz" | base64 -w0   # must equal dist.integrity
+mkdir x && tar -xzf "darkreader-$ver.tgz" -C x
+sha256sum "darkreader-$ver.tgz" x/package/darkreader.js x/package/LICENSE
+#+end_src
+
+1. Check the licence is still MIT and the bundle is still the UMD build that defines =DarkReader.enable=, =disable=, =isEnabled= and =setFetchMethod=.
+2. =git rm= the old =darkreader-<old>.js=, copy =x/package/darkreader.js= to =darkreader-<ver>.js= and =x/package/LICENSE= to =LICENSE=.
+3. Update =DARKREADER_VERSION= in =modules/dark_mode/Makefile= and the =#define GSURF_DARK_MODE_DARKREADER_VERSION= in =gsurf-dark-mode-module.c=.
+4. Update this file (version, date, URL, integrity, sha256 table) and the version in =docs/dark-mode.org=.
+5. Run =GSURF_TEST_GUI=1 make test-gui= on both backends: =test-dark-mode-webkit= checks that Dark Reader still enables from the isolated world.
+6. Commit the import on its own (=chore(dark_mode): update vendored Dark Reader to <ver>=).
