@@ -184,14 +184,20 @@ static GsurfView *
 open_tab_uri(GsurfWindow *window, const gchar *uri)
 {
 	GsurfConfig *config = gsurf_config_get_default();
-	GsurfView *view = gsurf_view_new();
+	const gchar *target = (uri != NULL && *uri != '\0') ? uri
+		: ((config && config->new_view_uri) ? config->new_view_uri : "about:blank");
+	/* The target doubles as the container placement hint, so a new or
+	 * reopened tab for a host with a containers rule starts in that
+	 * container instead of being reassigned after its first request. */
+	GsurfView *view = gsurf_view_new_full(NULL, NULL, target, FALSE);
 
+	if (view == NULL)
+		return NULL;
 	if (config != NULL && config->settings != NULL)
 		gsurf_view_apply_settings(view, config->settings);
 	gsurf_window_add_view(window, view);
 	gsurf_window_set_active_view(window, view);
-	gsurf_view_load_uri(view, (uri != NULL && *uri != '\0') ? uri
-		: ((config && config->new_view_uri) ? config->new_view_uri : "about:blank"));
+	gsurf_view_load_uri(view, target);
 	g_object_unref(view);
 	return view;
 }

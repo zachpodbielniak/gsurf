@@ -80,7 +80,7 @@ Every problem is reported on stderr as a warning naming the entry, and the modul
 The module installs the registry's resolver, which places every new tab when it is created. In order, the first that applies wins:
 
 1. *An explicit request.* Whoever creates the tab may ask for a container: =temporary= (a fresh temporary container in =temp_color=), =default=, or a container id. =container-new-temp=, =container-reopen-next=, host reassignment, session restore, the MCP =open_view= tool with =container= and embedders use this. An unknown id falls back to the default container with a warning.
-2. *A host rule* matching the host of the first URL the tab will load (the URL of a link opened in a new tab, a typed address, the startup URL).
+2. *A host rule* matching the host of the first URL the tab will load (the URL of a link opened in a new tab, a typed address, the startup URL, and a tab the =tabs= module opens with =tab-new= or reopens with =tab-reopen=).
 3. *The opener's container*, with =inherit_opener: true=, when the tab was opened from another tab.
 4. *The =new_tab= policy*.
 
