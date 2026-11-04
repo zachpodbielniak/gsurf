@@ -50,3 +50,17 @@ gsurf_navigation_hook_load_changed(GsurfNavigationHook *self, GsurfView *view, G
 	if (iface->load_changed != NULL)
 		iface->load_changed(self, view, event);
 }
+
+GsurfPolicyDecision
+gsurf_navigation_hook_decide_main_response(GsurfNavigationHook *self, GsurfView *view,
+                                           const gchar *uri)
+{
+	GsurfNavigationHookInterface *iface;
+
+	g_return_val_if_fail(GSURF_IS_NAVIGATION_HOOK(self), GSURF_POLICY_USE);
+
+	iface = GSURF_NAVIGATION_HOOK_GET_IFACE(self);
+	if (iface->decide_main_response != NULL)
+		return iface->decide_main_response(self, view, uri);
+	return GSURF_POLICY_USE;
+}

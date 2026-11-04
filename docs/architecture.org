@@ -44,12 +44,16 @@ Create views with =gsurf_view_new_full(opener, container_id, initial_uri, relate
 
 A container is a separate browsing identity (cookies, storage, cache). =GsurfContainerRegistry= (=src/core/=) is backend-agnostic:
 
-1. In its =constructed()=, the =GsurfView= base class asks the registry to *resolve* the view's container: a related popup takes its opener's; otherwise a resolver installed by policy (the =containers= module) decides, else the requested id. =temporary= creates a fresh =tmp-N= container; an unknown id falls back to the default container with a warning.
+1. In its =constructed()=, the =GsurfView= base class asks the registry to *resolve* the view's container: a related popup takes its opener's; otherwise a resolver installed by policy (the =containers= module) decides, else the requested id. =temporary= creates a fresh =tmp-N= container; =default= (=GSURF_CONTAINER_DEFAULT=) explicitly asks for the default container, which a =NULL= request does not (it leaves the choice to the resolver); an unknown id falls back to the default container with a warning. =temporary=, =default= and the =tmp-= prefix are reserved and cannot name a persistent container.
 2. It then *acquires* the container's native session (created on first use) before the backend subclass builds its native web view, and *releases* it on dispose.
 3. The backend supplies the sessions through a =GsurfSessionBackend= vtable (=src/backend/webkit/gsurf-webkit-session.c=), installed from the view class's =class_init= so it exists before the first view: a =WebKitWebContext= with its own website data manager on WebKitGTK 4.1, a =WebKitNetworkSession= on 6.0. Persistent containers store data in =$XDG_DATA_HOME/gsurf/containers/<id>= and cache in =$XDG_CACHE_HOME/gsurf/containers/<id>= (both 0700, cookies in =cookies.sqlite=); temporary containers are ephemeral and are destroyed =temp_cleanup_delay= seconds after their last view closes (or if no view ever uses them).
 4. Every session — the default one included — gets the same setup from the config (TLS policy, cache model, cookie storage, proxy), web-process extensions, and a once-per-session download hook. =gsurf_container_registry_set_policy()= applies ITP and a cookie accept policy to all of them, now and as they are created; =session-created= lets modules configure new ones further.
 
-The default container is the engine's default session with the =cookie_jar:= file, exactly as before; without the =containers= module nothing changes.
+The default container is the engine's default session with the =cookie_jar:= file, exactly as before; without the =containers= module nothing changes. Policy on top of the registry (host rules, temporary tabs, reopening a tab in another container) is the =containers= module: see [[file:containers.org][containers.org]].
+
+** Main-frame responses
+
+WebKit's navigation policy decision (=before_navigate=) is also made for iframe navigations and cannot tell them from top-level ones: WebKitGTK exposes no main-frame flag there. The response policy decision does (=webkit_response_policy_decision_is_main_frame_main_resource()=), so the WebKit backends (GTK3, GTK4 and LRG) report every displayable main-frame response to =GsurfNavigationHook::decide_main_response= through =gsurf_module_manager_dispatch_main_response()=; =GSURF_POLICY_IGNORE= cancels the load and the view keeps its page. Downloads and sub-resources are not reported. The request has already been sent by then, so a hook that must act before any request (privacy) also checks =before_navigate= for the loads it can recognise as top-level.
 
 ** Script worlds and messages
 

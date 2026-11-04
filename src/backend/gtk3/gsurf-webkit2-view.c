@@ -126,6 +126,12 @@ on_decide_policy(WebKitWebView *wv, WebKitPolicyDecision *decision,
 		return TRUE;
 	}
 
+	/* A top-level response: modules may still veto it (host
+	 * assignment in the containers module); see
+	 * gsurf_navigation_hook_decide_main_response(). */
+	if (type == WEBKIT_POLICY_DECISION_TYPE_RESPONSE)
+		return gsurf_webkit_common_decide_response(GSURF_VIEW(self), decision);
+
 	if (type != WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION &&
 	    type != WEBKIT_POLICY_DECISION_TYPE_NEW_WINDOW_ACTION)
 		return FALSE;

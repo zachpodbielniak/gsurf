@@ -470,6 +470,26 @@ gsurf_module_manager_dispatch_before_navigate(GsurfModuleManager *self, GsurfVie
 	return GSURF_POLICY_USE;
 }
 
+GsurfPolicyDecision
+gsurf_module_manager_dispatch_main_response(GsurfModuleManager *self, GsurfView *view, const gchar *uri)
+{
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), GSURF_POLICY_USE);
+
+	for (i = 0; i < self->modules->len; i++) {
+		GsurfModule *m = g_ptr_array_index(self->modules, i);
+		GsurfPolicyDecision d;
+
+		if (!gsurf_module_is_active(m) || !GSURF_IS_NAVIGATION_HOOK(m))
+			continue;
+		d = gsurf_navigation_hook_decide_main_response(GSURF_NAVIGATION_HOOK(m), view, uri);
+		if (d != GSURF_POLICY_USE)
+			return d;
+	}
+	return GSURF_POLICY_USE;
+}
+
 void
 gsurf_module_manager_dispatch_after_navigate(GsurfModuleManager *self, GsurfView *view, const gchar *uri)
 {

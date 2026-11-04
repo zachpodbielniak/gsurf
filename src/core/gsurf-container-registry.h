@@ -40,6 +40,17 @@ G_BEGIN_DECLS
  */
 #define GSURF_CONTAINER_TEMPORARY "temporary"
 
+/**
+ * GSURF_CONTAINER_DEFAULT:
+ *
+ * A requested container id meaning "the default container", stated
+ * explicitly. A %NULL request leaves the choice to the resolver (host
+ * rules, the opener, the new-tab policy); this token asks for the
+ * engine's default session itself. gsurf_container_registry_resolve()
+ * turns it into %NULL. Session restore and "reopen in container" use it.
+ */
+#define GSURF_CONTAINER_DEFAULT "default"
+
 #define GSURF_CONTAINER_ERROR (gsurf_container_error_quark())
 
 /**
@@ -168,8 +179,8 @@ GsurfContainerRegistry *gsurf_container_registry_get_default(void);
  * @error: return location for a #GError
  *
  * Ids name directories, so they must be 1-64 characters of
- * `[A-Za-z0-9_-]`, and may not be #GSURF_CONTAINER_TEMPORARY or start
- * with the temporary prefix "tmp-".
+ * `[A-Za-z0-9_-]`, and may not be #GSURF_CONTAINER_TEMPORARY,
+ * #GSURF_CONTAINER_DEFAULT or start with the temporary prefix "tmp-".
  *
  * Returns: whether @id is usable for a persistent container
  */
@@ -267,8 +278,8 @@ void gsurf_container_registry_set_resolver(GsurfContainerRegistry *self,
  * Decides the container of a new view: a related popup always uses its
  * opener's container; otherwise the resolver (if any) decides, else
  * @requested. #GSURF_CONTAINER_TEMPORARY becomes a new temporary
- * container, and an unknown id falls back to the default container with
- * a warning. Called by #GsurfView during construction.
+ * container, #GSURF_CONTAINER_DEFAULT the default container (%NULL), and
+ * an unknown id falls back to the default container with a warning. Called by #GsurfView during construction.
  *
  * Returns: (transfer full) (nullable): the container id, %NULL = default
  */
