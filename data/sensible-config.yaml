@@ -227,5 +227,6 @@ modules:
 
   # --- Opt-in extras (left disabled here) ---
   # omnibar, externalpipe, userscripts, site_styles, uri_params, useragent,
-  # cert_manager, session, proxy_switch, spacesearch, and the MCP server
+  # cert_manager, session, proxy_switch, spacesearch, form_autofill (profiles
+  # in a chmod 600 ~/.config/gsurf/autofill.yaml), and the MCP server
   # (mcp, requires building with MCP=1) — see data/default-config.yaml.

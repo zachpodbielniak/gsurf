@@ -343,6 +343,27 @@ modules:
     timeout: -1
     notify_downloads: true
 
+  # Fill forms from identity/address/card profiles (docs/form-autofill.org).
+  # Card data (cc_name, cc_number, cc_exp) is only read from the private
+  # profile file and only filled on https pages; the CSC is never stored.
+  form_autofill:
+    enabled: false
+    # file: "~/.config/gsurf/autofill.yaml"  # the default; must be chmod 600
+    suggest_on_focus: true          # list profile labels on a known field
+    key_fill: "Ctrl+Alt+f"          # one profile: fill; several: picker
+    exclude: []                     # top-level host regexes, e.g. '(^|\.)paypal\.com$'
+    profiles: []                    # inline profiles (no card data here)
+    # - label: home
+    #   given_name: Zach
+    #   family_name: Example
+    #   email: zach@example.org
+    #   tel: "+1 555 0100"
+    #   street: ["742 Evergreen Terrace", "Apt 9"]
+    #   city: Springfield
+    #   region: IL
+    #   postal_code: "62704"
+    #   country: US
+
   # ---------- MCP (requires the MCP=1 build flag) ----------
 
   mcp:

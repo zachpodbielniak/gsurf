@@ -75,3 +75,23 @@ Sections that map to surf concepts: =search_engines= (searchengines patch),
 =uri_params= (=uriparams[]=), =site_styles= (=styles[]=), =cert_pins= (=certs[]=).
 
 =dark_mode= takes a global =mode= (=off=, =native=, =filter=, =dynamic=; legacy =auto=, =light=, =dark= still work), =brightness=/=contrast=/=sepia=/=grayscale=, =key_toggle=/=key_toggle_site=, and a =sites:= list of per-host rules; runtime per-site toggles are saved in =$XDG_DATA_HOME/gsurf/dark_mode/sites.yaml=. The full reference is in [[file:dark-mode.org][Dark mode]].
+
+* Form autofill (=form_autofill=)
+
+#+begin_src yaml
+modules:
+  form_autofill:
+    enabled: false
+    file: ~/.config/gsurf/autofill.yaml   # optional; this path is the default
+    suggest_on_focus: true
+    key_fill: "Ctrl+Alt+f"
+    exclude: ['(^|\.)paypal\.com$']
+    profiles:
+      - label: home
+        given_name: Zach
+        email: zach@example.org
+        street: ["742 Evergreen Terrace", "Apt 9"]
+        country: US
+#+end_src
+
+Profiles come from =file= (a mapping with a =profiles= list) and from the inline =profiles= list. An inline profile with the label of a file profile overrides that profile field by field; new labels are appended; a label repeated within one source replaces the earlier one with a warning. Card data (=cc_name=, =cc_number=, =cc_exp=) is accepted only from the file, and only when it is private (=chmod 600=, owned by you, not a symlink); otherwise the card data is refused with a warning on stderr and the rest of the file is used. =cc_csc= is never stored. Malformed values (a card number failing the Luhn check, a bad expiry, an e-mail without =@=, a country that is not an ISO alpha-2 code, ...) are dropped field by field with a warning that never contains the value; unknown keys warn. An invalid =exclude= rule disables autofill on every host until fixed. The full schema, classification order, suggestion UI and security model are in [[file:form-autofill.org][form-autofill.org]].
