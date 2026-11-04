@@ -129,6 +129,10 @@ modules:
     sidebar: false                 # Ctrl+Shift+. shows the tree sidebar
     on_close_parent: promote
 
+  # tmux-style panes: not enabled here (C-h/j/k/l would move between
+  # panes). To try it, add `wmux: { enabled: true }`; docs/wmux.org has a
+  # cookbook (screen-style C-a prefix, vim splits, M-h/j/k/l, ...).
+
   # History log (used by chromebar/omnibar; plain text for dmenu/grep).
   history:
     enabled: true

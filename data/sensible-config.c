@@ -59,6 +59,8 @@ static const char *SENSIBLE_MODULES_YAML =
 "    key_prev: \"Ctrl+Shift+Tab\"\n"
 "    sidebar: false\n"
 "    on_close_parent: promote\n"
+/* tmux-style panes (wmux) are opt-in: add "  wmux:\n    enabled: true\n"
+ * here; docs/wmux.org has a cookbook of setups. */
 "  history:\n"
 "    enabled: true\n"
 "    log_titles: true\n"

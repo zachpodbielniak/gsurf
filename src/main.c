@@ -135,6 +135,7 @@ static const GsurfBuiltinModule builtin_modules[] = {
 	{ "uri_params",     "Per-domain web engine setting overrides (surf uriparams[])" },
 	{ "useragent",      "Dynamic and per-domain user-agent switching" },
 	{ "userscripts",    "Inject global and per-domain user JavaScript" },
+	{ "wmux",           "tmux-style panes, windows and status line in one browser window" },
 	{ NULL, NULL }
 };
 

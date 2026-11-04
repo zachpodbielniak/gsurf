@@ -24,6 +24,7 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:adblock.org][Content blocking]] — uBlock Origin / EasyList filter lists in the adblock module.
 - [[file:dark-mode.org][Dark mode]] — native, filter and Dark Reader modes with per-site rules and toggles.
 - [[file:tabs.org][Tabs]] — the tab strip and the tree-style tab sidebar.
+- [[file:wmux.org][wmux]] — tmux-style panes, windows and a status line in one browser window.
 - [[file:form-autofill.org][Form autofill]] — identity, address and card profiles filled from an isolated script world.
 - [[file:hardening.org][Privacy hardening]] — LibreWolf-style protections with per-site exemptions.
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
