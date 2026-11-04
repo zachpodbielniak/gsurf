@@ -7,6 +7,7 @@
 
 #include "backend/gtk3/gsurf-gtk3-window.h"
 #include "boxed/gsurf-keybind-help.h"
+#include "window/gsurf-window-layout.h"
 
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
@@ -19,6 +20,7 @@ struct _GsurfGtk3Window
 	GtkWidget *vbox;    /* content box (chrome from modules goes here) */
 	GtkWidget *hbox;    /* side panels + the view stack */
 	GtkWidget *stack;   /* GtkStack of view widgets */
+	GtkWidget *content; /* a layout's root in place of the stack (borrowed) */
 };
 
 G_DEFINE_FINAL_TYPE(GsurfGtk3Window, gsurf_gtk3_window, GSURF_TYPE_WINDOW)
@@ -65,8 +67,12 @@ on_key_press_event(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
 	 * its own keys first (typing, Ctrl+a/c/v, its Escape handler). Only a
 	 * shortcut it declines (Ctrl+t, Ctrl+q, F11, ...) goes on to the
 	 * keymap, so window-level bindings keep working while typing a URL.
-	 * The web view is not a GtkEditable, so it routes as usual. */
-	if (focus != NULL && GTK_IS_EDITABLE(focus)) {
+	 * The web view is not a GtkEditable, so it routes as usual. A key
+	 * grab (gsurf_window_set_key_grab(), e.g. after a wmux prefix) sends
+	 * every key to the keymap first; a key it declines still reaches the
+	 * entry through the toplevel's default handler. */
+	if (focus != NULL && GTK_IS_EDITABLE(focus) &&
+	    !gsurf_window_get_key_grab(GSURF_WINDOW(self))) {
 		if (gtk_window_propagate_key_event(GTK_WINDOW(self->window), event))
 			return TRUE;
 		if (!is_shortcut_key(event->keyval, mods))
@@ -105,6 +111,71 @@ on_view_button_press_event(GtkWidget *widget, GdkEventButton *event, gpointer us
 	return gsurf_window_emit_button_press(GSURF_WINDOW(self), event->button, mods);
 }
 
+/* The view owning @widget in @self, or NULL. */
+static GsurfView *
+view_for_widget(GsurfGtk3Window *self, GtkWidget *widget)
+{
+	GPtrArray *views = gsurf_window_get_views(GSURF_WINDOW(self));
+	guint i;
+
+	for (i = 0; i < views->len; i++) {
+		GsurfView *view = g_ptr_array_index(views, i);
+
+		if (gsurf_view_get_native_widget(view) == widget)
+			return view;
+	}
+	return NULL;
+}
+
+/* Focus follows click: with a layout showing several views, the view
+ * the user clicks into (WebKit grabs focus on a press) or tabs into
+ * becomes the active view. Without a layout only the active view is
+ * visible, so nothing changes; a hidden background view never steals the
+ * active role. The setter returns early for the active view, so there
+ * is no focus loop.
+ *
+ * GTK3 watches the toplevel's focus widget (GtkWindow::set-focus, after
+ * the change) rather than each view's focus-in-event: focus-in-event
+ * only fires while the toplevel itself has keyboard focus, set-focus
+ * also follows a focus change made while the window is in the
+ * background. A focus widget inside a view widget counts as the view. */
+static void
+on_set_focus(GtkWindow *toplevel, GtkWidget *focus, gpointer user_data)
+{
+	GsurfGtk3Window *self = user_data;
+	GsurfWindow *window = GSURF_WINDOW(self);
+	GtkWidget *widget;
+
+	(void)toplevel;
+	if (gsurf_window_get_layout(window) == NULL)
+		return;
+	for (widget = focus; widget != NULL; widget = gtk_widget_get_parent(widget)) {
+		GsurfView *view = view_for_widget(self, widget);
+
+		if (view == NULL)
+			continue;
+		if (gsurf_window_get_view_visible(window, view))
+			gsurf_window_set_active_view(window, view);
+		return;
+	}
+}
+
+/* Per-view event routing, done once per widget: the widget keeps its
+ * handlers when it moves between the stack and a layout. (Focus is
+ * followed on the toplevel, see on_set_focus().) */
+static void
+gsurf_gtk3_window_wire_view(GsurfGtk3Window *self, GtkWidget *widget)
+{
+	/* Route mouse buttons (incl. side history buttons) through the window
+	 * so mousebind config + input modules can act on them. Connect once. */
+	if (g_object_get_data(G_OBJECT(widget), "gsurf-btn-wired") == NULL) {
+		g_object_set_data(G_OBJECT(widget), "gsurf-btn-wired", GINT_TO_POINTER(1));
+		gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
+		g_signal_connect(widget, "button-press-event",
+			G_CALLBACK(on_view_button_press_event), self);
+	}
+}
+
 /* --- Vfunc implementations --- */
 
 static void
@@ -131,6 +202,8 @@ gsurf_gtk3_window_realize(GsurfWindow *window)
 		G_CALLBACK(on_key_press_event), self);
 	g_signal_connect(self->window, "delete-event",
 		G_CALLBACK(on_delete_event), self);
+	g_signal_connect_after(self->window, "set-focus",
+		G_CALLBACK(on_set_focus), self);
 }
 
 static void
@@ -142,17 +215,69 @@ gsurf_gtk3_window_insert_view(GsurfWindow *window, GsurfView *view)
 	if (widget == NULL)
 		return;
 
+	gsurf_gtk3_window_wire_view(self, widget);
+	/* Safe to repeat (a layout being removed re-inserts every view). A
+	 * widget still parented elsewhere is a layout that did not let go
+	 * of it in detach/remove_view: say so instead of a GTK critical. */
+	if (gtk_widget_get_parent(widget) == self->stack)
+		return;
+	if (gtk_widget_get_parent(widget) != NULL) {
+		g_warning("gsurf-gtk3-window: view widget still has a parent; not stacked");
+		return;
+	}
 	gtk_container_add(GTK_CONTAINER(self->stack), widget);
 	gtk_widget_show(widget);
+}
 
-	/* Route mouse buttons (incl. side history buttons) through the window
-	 * so mousebind config + input modules can act on them. Connect once. */
-	if (g_object_get_data(G_OBJECT(widget), "gsurf-btn-wired") == NULL) {
-		g_object_set_data(G_OBJECT(widget), "gsurf-btn-wired", GINT_TO_POINTER(1));
-		gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
-		g_signal_connect(widget, "button-press-event",
-			G_CALLBACK(on_view_button_press_event), self);
+static void
+gsurf_gtk3_window_connect_view(GsurfWindow *window, GsurfView *view)
+{
+	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
+	GtkWidget *widget = gsurf_view_get_native_widget(view);
+
+	if (widget != NULL)
+		gsurf_gtk3_window_wire_view(self, widget);
+}
+
+/* Show @widget (a layout's root) where the stack is, or the stack again
+ * for NULL. The stack is hidden with no-show-all, so present()'s
+ * gtk_widget_show_all() does not bring it back; the root gets plain
+ * gtk_widget_show() for the same reason (a layout's hidden parts stay
+ * hidden). The hbox holds a reference while the root is packed; the
+ * layout keeps its own. */
+static void
+gsurf_gtk3_window_set_content(GsurfWindow *window, gpointer widget)
+{
+	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
+	GtkWidget *w = widget;
+	gint position = 0;
+
+	if (self->hbox == NULL || w == self->content)
+		return;
+
+	/* 1. Whatever was there before leaves (a root replacing a root). */
+	if (self->content != NULL) {
+		if (gtk_widget_get_parent(self->content) == self->hbox)
+			gtk_container_remove(GTK_CONTAINER(self->hbox), self->content);
+		self->content = NULL;
 	}
+
+	/* 2. NULL: the stack comes back. */
+	if (w == NULL) {
+		gtk_widget_set_no_show_all(self->stack, FALSE);
+		gtk_widget_show(self->stack);
+		return;
+	}
+
+	/* 3. The root takes the stack's place (right after it, the stack
+	 *    hidden), expanding like the stack does. */
+	gtk_widget_hide(self->stack);
+	gtk_widget_set_no_show_all(self->stack, TRUE);
+	gtk_container_child_get(GTK_CONTAINER(self->hbox), self->stack, "position", &position, NULL);
+	gtk_box_pack_start(GTK_BOX(self->hbox), w, TRUE, TRUE, 0);
+	gtk_box_reorder_child(GTK_BOX(self->hbox), w, position + 1);
+	gtk_widget_show(w);
+	self->content = w;
 }
 
 static void
@@ -443,9 +568,12 @@ gsurf_gtk3_window_dispose(GObject *object)
 {
 	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(object);
 
+	/* A layout leaves first, while its root and the stack still exist. */
+	gsurf_window_set_layout(GSURF_WINDOW(self), NULL);
 	if (self->window != NULL) {
 		gtk_widget_destroy(self->window);
 		self->window = NULL;
+		self->content = NULL;
 	}
 
 	G_OBJECT_CLASS(gsurf_gtk3_window_parent_class)->dispose(object);
@@ -471,6 +599,8 @@ gsurf_gtk3_window_class_init(GsurfGtk3WindowClass *klass)
 	window_class->add_chrome_widget = gsurf_gtk3_window_add_chrome_widget;
 	window_class->show_keybind_help = gsurf_gtk3_window_show_keybind_help;
 	window_class->add_side_widget = gsurf_gtk3_window_add_side_widget;
+	window_class->set_content = gsurf_gtk3_window_set_content;
+	window_class->connect_view = gsurf_gtk3_window_connect_view;
 }
 
 static void

@@ -145,3 +145,5 @@ The =modal= module (enabled by default) provides vim-style navigation. It is
 Focus is tracked by a small content script that reports DOM focus changes to the
 browser, so the right behavior happens automatically as you move between the
 page, form fields, and the address bar.
+
+A module can take the next key away from a focused field with a *key grab* (=gsurf_window_set_key_grab()=): while it is set, every key goes to the keymap first, wherever focus is. =wmux= uses it for the key after its prefix (=C-b %= works while typing in a page field or the address bar); see "Window layouts (panes)" in =architecture.org=.

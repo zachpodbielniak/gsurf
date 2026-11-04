@@ -305,8 +305,10 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	 * modal module is in INSERT passthrough — bare keys must reach the page
 	 * and not be consumed by any module (e.g. find-bar's n/N) or core
 	 * keybind. Modified keys and Escape still pass through (shortcuts; exit
-	 * insert / blur). */
-	if ((gsurf_module_manager_get_input_passthrough(mgr) ||
+	 * insert / blur). A key grab (a module waiting for the key after its
+	 * prefix, e.g. wmux's C-b) skips the guard: that key is a command. */
+	if (!gsurf_window_get_key_grab(window) &&
+	    (gsurf_module_manager_get_input_passthrough(mgr) ||
 	     (view != NULL && gsurf_view_get_editing(view))) &&
 	    !has_mod && !is_escape)
 		return FALSE;

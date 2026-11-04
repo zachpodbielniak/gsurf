@@ -37,8 +37,20 @@ G_DECLARE_DERIVABLE_TYPE(GsurfWindow, gsurf_window, GSURF, WINDOW, GObject)
  * @set_default_size: set the default window size
  * @set_fullscreen: enter/leave fullscreen
  * @get_native_widget: the native toplevel widget (as gpointer)
+ * @add_chrome_widget: pack a chrome widget above or below the view area
+ * @show_keybind_help: show the keybinding help overlay
+ * @add_side_widget: pack a side panel beside the view area
+ * @set_content: optional; show a native widget (a #GsurfWindowLayout's
+ *   root) in place of the view stack, at the stack's position; %NULL
+ *   shows the stack again. A backend without it (libregnum) cannot take
+ *   a layout: gsurf_window_set_layout() refuses.
+ * @connect_view: optional; wire a view's per-view event routing (mouse
+ *   buttons, focus) without packing it into the stack; used for views
+ *   added while a layout is set. Must be safe to call more than once for
+ *   the same view, as must @insert_view (it also wires).
  *
- * Virtual table for #GsurfWindow.
+ * Virtual table for #GsurfWindow. @set_content and @connect_view took two
+ * of the reserved padding slots in 0.4, so the class size is unchanged.
  */
 struct _GsurfWindowClass
 {
@@ -65,7 +77,12 @@ struct _GsurfWindowClass
 	 * as the tree tab sidebar). */
 	void     (*add_side_widget)   (GsurfWindow *self, gpointer widget, GsurfChromeEdge edge);
 
-	gpointer padding[6];
+	/* Layouts (#GsurfWindowLayout): swap the view stack for the layout's
+	 * root widget, and wire a view the stack never sees. */
+	void     (*set_content)       (GsurfWindow *self, gpointer widget);
+	void     (*connect_view)      (GsurfWindow *self, GsurfView *view);
+
+	gpointer padding[4];
 };
 
 /* --- View management (handled by the abstract base) --- */
@@ -145,6 +162,44 @@ guint       gsurf_window_get_n_views(GsurfWindow *self);
  * Returns: (transfer none) (nullable): the view at @index
  */
 GsurfView  *gsurf_window_get_nth_view(GsurfWindow *self, guint index);
+
+/**
+ * gsurf_window_get_view_visible:
+ * @self: a #GsurfWindow
+ * @view: a view
+ *
+ * Whether @view is on screen. Without a #GsurfWindowLayout only the
+ * active view is; with one, the layout decides (several panes can show
+ * several views). Changes are announced by
+ * #GsurfWindow::visible-views-changed while a layout is set, and by
+ * #GsurfWindow::active-view-changed otherwise.
+ *
+ * Returns: %TRUE when @view belongs to @self and is visible
+ */
+gboolean    gsurf_window_get_view_visible(GsurfWindow *self, GsurfView *view);
+
+/**
+ * gsurf_window_set_key_grab:
+ * @self: a #GsurfWindow
+ * @grab: whether the next keys must reach the window's key handlers
+ *
+ * While the grab is set, every key press goes to #GsurfWindow::key-press
+ * even when the user is typing: the GTK backends no longer hand bare keys
+ * to a focused chrome entry (address bar, find box) first, and the
+ * gsurf binary skips its typing guard (a focused page field, a modal
+ * INSERT passthrough). A module sets it after a prefix key (the wmux
+ * `C-b`) so the next key reaches it, and clears it once handled. Escape
+ * reaches modules as usual.
+ */
+void        gsurf_window_set_key_grab(GsurfWindow *self, gboolean grab);
+
+/**
+ * gsurf_window_get_key_grab:
+ * @self: a #GsurfWindow
+ *
+ * Returns: whether gsurf_window_set_key_grab() set the grab
+ */
+gboolean    gsurf_window_get_key_grab(GsurfWindow *self);
 
 /* --- Native operations --- */
 void        gsurf_window_present(GsurfWindow *self);
