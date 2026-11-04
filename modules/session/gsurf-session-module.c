@@ -17,6 +17,7 @@
  *           parent: 0             # index of the opener tab (optional)
  *         - uri: https://news.example/
  *           container: temporary:0
+ *       layout: "<state>"           # window layout (optional, see below)
  *
  * Temporary containers are saved as group tokens ("temporary:<n>"):
  * tabs that shared one temporary container come back in one fresh
@@ -24,9 +25,21 @@
  * container (gsurf_view_new_full()), so the tabs module rebuilds the
  * tree from the openers.
  *
+ * Window layouts (#GsurfWindowLayout, e.g. the wmux module): when a
+ * window has a layout that can serialize, its state is saved as the
+ * window's `layout:` string, with every view named by its saved tab index
+ * (the numbering `parent` and `active` use; unsaved tabs map to -1). On
+ * restore, once the tabs exist and the active tab is set, the layout of
+ * the restored window gets the string back with the restored views
+ * indexed the same way (gsurf_window_layout_restore()). The layout
+ * module must activate before this one (wmux has priority -10) so the
+ * layout is installed by then; a missing layout, or one that refuses the
+ * string, is reported once and the default arrangement stays.
+ *
  * Implements #GsurfNavigationHook (save after each committed
  * navigation), #GsurfInputHandler + #GsurfKeybindProvider (a manual save
- * key). It also saves when a tab closes or moves. The plain-text format
+ * key). It also saves when a tab closes or moves, and (coalesced in an
+ * idle) when the window layout shows other views. The plain-text format
  * of earlier versions (one URI per line) is migrated once. See
  * docs/configuration.org, "Session".
  */
@@ -56,6 +69,7 @@ struct _GsurfSessionModule
 	gboolean  auto_restore;
 	gboolean  restoring;    /* suppress saves while restore builds tabs */
 	gboolean  connected;    /* window/application signals connected */
+	guint     save_idle;    /* pending coalesced save, 0 = none */
 };
 
 /* One saved tab. */
@@ -63,12 +77,15 @@ typedef struct {
 	gchar *uri;
 	gchar *container;   /* NULL = default, "temporary:<n>", or an id */
 	gint   parent;      /* index of the opener tab in its window, -1 = none */
+	guint  file_index;  /* position in the file's `tabs` list (layout index) */
 } SessionTab;
 
 /* One saved window. */
 typedef struct {
 	GPtrArray *tabs;    /* SessionTab* */
 	gint       active;  /* -1 = not recorded */
+	gchar     *layout;  /* window layout state, NULL = none */
+	guint      n_file_tabs; /* length of the file's `tabs` list */
 } SessionWindow;
 
 static void gsurf_session_nav_init(GsurfNavigationHookInterface *iface);
@@ -112,6 +129,7 @@ session_window_free(gpointer data)
 	SessionWindow *window = data;
 
 	g_ptr_array_unref(window->tabs);
+	g_free(window->layout);
 	g_free(window);
 }
 
@@ -212,7 +230,20 @@ container_token(GsurfView *view, GHashTable *temps)
 	return g_strdup_printf(TEMP_TOKEN_PREFIX "%u", GPOINTER_TO_UINT(group));
 }
 
-/* Append @window's saveable tabs to @session. */
+/* GsurfWindowLayoutIndexFunc for capture_window(): the saved index of
+ * @view (@user_data is the view -> index table), or -1 when it is not
+ * saved (a blank tab). */
+static gint
+saved_index(GsurfView *view, gpointer user_data)
+{
+	gpointer index;
+
+	if (!g_hash_table_lookup_extended(user_data, view, NULL, &index))
+		return -1;
+	return (gint)GPOINTER_TO_UINT(index);
+}
+
+/* Append @window's saveable tabs (and its layout, if any) to @session. */
 static void
 capture_window(GsurfWindow *window, GHashTable *temps, GPtrArray *session)
 {
@@ -255,6 +286,19 @@ capture_window(GsurfWindow *window, GHashTable *temps, GPtrArray *session)
 		}
 		if (view == active)
 			out->active = (gint)i;
+	}
+
+	/* 3. The window layout, with views named by their saved index. A
+	 *    layout that cannot serialize (NULL) or has nothing to say ("")
+	 *    leaves the field out. */
+	out->n_file_tabs = out->tabs->len;
+	for (i = 0; i < out->tabs->len; i++)
+		((SessionTab *)g_ptr_array_index(out->tabs, i))->file_index = i;
+	if (gsurf_window_get_layout(window) != NULL) {
+		out->layout = gsurf_window_layout_serialize(gsurf_window_get_layout(window),
+			window, saved_index, index_of);
+		if (out->layout != NULL && *out->layout == '\0')
+			g_clear_pointer(&out->layout, g_free);
 	}
 	g_ptr_array_add(session, out);
 }
@@ -325,6 +369,10 @@ session_to_yaml(GPtrArray *session, GError **error)
 			yaml_builder_end_mapping(builder);
 		}
 		yaml_builder_end_sequence(builder);
+		if (window->layout != NULL) {
+			yaml_builder_set_member_name(builder, "layout");
+			yaml_builder_add_string_value(builder, window->layout);
+		}
 		yaml_builder_end_mapping(builder);
 	}
 	yaml_builder_end_sequence(builder);
@@ -374,8 +422,9 @@ member_index(YamlMapping *m, const gchar *key, const gchar *where)
  * Parses a session file. A file that is not YAML, or whose root is not
  * a mapping with a `windows` list, is an error. Inside, every bad entry
  * (a tab without a URI, a parent that does not name another tab of the
- * window, an active index out of range) is reported and dropped, and the
- * rest is restored.
+ * window, an active index out of range, a `layout` that is not a
+ * non-empty string) is reported and dropped, and the rest is restored.
+ * Unknown keys are ignored (older gsurf ignores `layout` that way).
  *
  * Returns: (transfer full) (nullable): the session, or %NULL on error
  */
@@ -432,6 +481,7 @@ session_from_yaml(const gchar *data, GError **error)
 		tabs = yaml_node_get_sequence(tabs_node);
 		n_tabs = yaml_sequence_get_length(tabs);
 		out = session_window_new();
+		out->n_file_tabs = n_tabs;
 		keep = g_array_sized_new(FALSE, FALSE, sizeof(gint), n_tabs);
 		parents = g_array_sized_new(FALSE, FALSE, sizeof(gint), n_tabs);
 
@@ -450,11 +500,15 @@ session_from_yaml(const gchar *data, GError **error)
 				if (uri != NULL && *uri != '\0') {
 					const gchar *container = member_scalar(tm, "container");
 
+					SessionTab *tab;
+
 					kept = (gint)out->tabs->len;
 					parent = member_index(tm, "parent", where);
-					g_ptr_array_add(out->tabs, session_tab_new(uri,
+					tab = session_tab_new(uri,
 						(container != NULL && *container != '\0') ? container : NULL,
-						-1));
+						-1);
+					tab->file_index = t;
+					g_ptr_array_add(out->tabs, tab);
 				}
 			}
 			if (kept < 0)
@@ -490,6 +544,18 @@ session_from_yaml(const gchar *data, GError **error)
 			g_warning("gsurf: session: window %u: active tab %d does not exist; ignored",
 				w, active);
 
+		/* 4. The window layout: an opaque string for the layout module,
+		 *    whose indices are file indices (like `parent`). */
+		if (yaml_mapping_has_member(wm, "layout")) {
+			const gchar *layout = member_scalar(wm, "layout");
+
+			if (layout == NULL || *layout == '\0')
+				g_warning("gsurf: session: window %u: `layout` is not a non-empty "
+					"string; ignored", w);
+			else
+				out->layout = g_strdup(layout);
+		}
+
 		if (out->tabs->len == 0) {
 			session_window_free(out);
 			continue;
@@ -510,10 +576,15 @@ session_from_legacy(const gchar *data)
 
 	for (i = 0; lines[i] != NULL; i++) {
 		const gchar *uri = g_strstrip(lines[i]);
+		SessionTab *tab;
 
-		if (*uri != '\0')
-			g_ptr_array_add(window->tabs, session_tab_new(uri, NULL, -1));
+		if (*uri == '\0')
+			continue;
+		tab = session_tab_new(uri, NULL, -1);
+		tab->file_index = window->tabs->len;
+		g_ptr_array_add(window->tabs, tab);
 	}
+	window->n_file_tabs = window->tabs->len;
 	if (window->tabs->len > 0) {
 		window->active = 0;
 		g_ptr_array_add(session, window);
@@ -654,6 +725,50 @@ visit_tab(SessionWindow *window, guint index, gboolean *seen, GArray *order)
 }
 
 /**
+ * restore_layout:
+ * @window: the window the tabs were restored into
+ * @saved: the saved window whose `layout` to apply
+ * @number: @saved's position in the file (for the warnings)
+ * @views: (array): the restored view of each of @saved's tabs, by kept
+ *   index (%NULL where creating the tab failed)
+ *
+ * Hands @saved's layout string to the layout installed in @window, with
+ * the restored views indexed like the file's `tabs` list: entry i is the
+ * view of the tab saved at index i, %NULL for a tab that was dropped
+ * (no `uri`) or could not be created. Validating the indices in the
+ * string against that array is the layout's business. Without a layout,
+ * or when the layout refuses the string, the window keeps its default
+ * arrangement and one warning names the window; the string is dropped
+ * (the next save writes the arrangement actually on screen).
+ */
+static void
+restore_layout(GsurfWindow *window, SessionWindow *saved, guint number, GsurfView **views)
+{
+	GsurfWindowLayout *layout = gsurf_window_get_layout(window);
+	g_autofree GsurfView **by_file = NULL;
+	guint i;
+
+	if (saved->layout == NULL)
+		return;
+	if (layout == NULL) {
+		g_warning("gsurf: session: window %u: no window layout is installed; "
+			"its saved layout is dropped", number);
+		return;
+	}
+	by_file = g_new0(GsurfView *, MAX(saved->n_file_tabs, 1));
+	for (i = 0; i < saved->tabs->len; i++) {
+		SessionTab *tab = g_ptr_array_index(saved->tabs, i);
+
+		if (tab->file_index < saved->n_file_tabs)
+			by_file[tab->file_index] = views[i];
+	}
+	if (!gsurf_window_layout_restore(layout, window, saved->layout, by_file,
+	                                 saved->n_file_tabs))
+		g_warning("gsurf: session: window %u: the window layout cannot restore its "
+			"saved layout; keeping the default arrangement", number);
+}
+
+/**
  * session_restore:
  * @self: the module
  * @window: the window to restore into
@@ -666,6 +781,11 @@ visit_tab(SessionWindow *window, guint index, gboolean *seen, GArray *order)
  * first tab when it is in that tab's container; otherwise it is removed
  * once the session is restored (a view cannot change container).
  *
+ * Last, with every tab in place and the active tab set, the first saved
+ * window's `layout` goes to the window's layout (restore_layout()). The
+ * layouts of further saved windows are dropped with a warning: their
+ * tabs were merged into this window, which has one arrangement.
+ *
  * Returns: the number of tabs restored
  */
 static guint
@@ -676,6 +796,7 @@ session_restore(GsurfSessionModule *self, GsurfWindow *window, GPtrArray *sessio
 		g_free, g_free);
 	g_autoptr(GsurfView) initial = NULL;
 	GsurfView *first_active = NULL;
+	g_autofree GsurfView **first_views = NULL;  /* window 0's views by kept index */
 	gboolean reused = FALSE;
 	guint restored = 0;
 	guint base = 0;
@@ -748,6 +869,11 @@ session_restore(GsurfSessionModule *self, GsurfWindow *window, GPtrArray *sessio
 			if (views[i] != NULL)
 				base++;
 		}
+		if (w == 0)
+			first_views = g_steal_pointer(&views);
+		else if (saved->layout != NULL)
+			g_warning("gsurf: session: window %u: its tabs join the first window; "
+				"its saved layout is dropped", w);
 	}
 
 	/* The startup view was not reused: it goes, the restored tabs stay. */
@@ -758,6 +884,11 @@ session_restore(GsurfSessionModule *self, GsurfWindow *window, GPtrArray *sessio
 		first_active = gsurf_window_get_nth_view(window, 0);
 	if (first_active != NULL)
 		gsurf_window_set_active_view(window, first_active);
+
+	/* The layout last: the views exist and the active one is set. Saves
+	 * stay suppressed meanwhile (the layout emits visible-views-changed). */
+	if (session->len > 0 && first_views != NULL)
+		restore_layout(window, g_ptr_array_index(session, 0), 0, first_views);
 
 	self->restoring = FALSE;
 	return restored;
@@ -886,12 +1017,50 @@ on_view_moved(GsurfWindow *window, GsurfView *view, guint from, guint to, gpoint
 		session_save(self);
 }
 
+static gboolean
+save_idle_cb(gpointer data)
+{
+	GsurfSessionModule *self = data;
+
+	self->save_idle = 0;
+	if (gsurf_module_is_active(GSURF_MODULE(self)))
+		session_save(self);
+	return G_SOURCE_REMOVE;
+}
+
+/* The window layout changed what is on screen (a split, a closed pane,
+ * another tab in a pane): save the new arrangement. A layout operation
+ * can emit this several times in a row (and every tab switch emits it),
+ * so the saves are coalesced into one idle. */
+static void
+on_visible_views_changed(GsurfWindow *window, gpointer data)
+{
+	GsurfSessionModule *self = data;
+
+	(void)window;
+	if (self->save_idle != 0 || self->restoring ||
+	    !gsurf_module_is_active(GSURF_MODULE(self)))
+		return;
+	self->save_idle = g_idle_add(save_idle_cb, self);
+}
+
+static void
+cancel_save_idle(GsurfSessionModule *self)
+{
+	if (self->save_idle != 0) {
+		g_source_remove(self->save_idle);
+		self->save_idle = 0;
+	}
+}
+
 static void
 watch_window(GsurfSessionModule *self, GsurfWindow *window)
 {
 	g_signal_handlers_disconnect_by_data(window, self);
 	g_signal_connect_object(window, "view-removed", G_CALLBACK(on_view_removed), self, 0);
 	g_signal_connect_object(window, "view-moved", G_CALLBACK(on_view_moved), self, 0);
+	g_signal_connect_object(window, "visible-views-changed",
+		G_CALLBACK(on_visible_views_changed), self, 0);
 }
 
 static void
@@ -925,6 +1094,7 @@ unwatch_host(GsurfSessionModule *self)
 	g_autoptr(GPtrArray) windows = NULL;
 	guint i;
 
+	cancel_save_idle(self);
 	if (!self->connected)
 		return;
 	windows = host_windows();
@@ -1019,6 +1189,7 @@ gsurf_session_module_finalize(GObject *object)
 {
 	GsurfSessionModule *self = GSURF_SESSION_MODULE(object);
 
+	cancel_save_idle(self);
 	g_clear_pointer(&self->file, g_free);
 	g_clear_pointer(&self->legacy_file, g_free);
 	g_clear_pointer(&self->key_save, g_free);

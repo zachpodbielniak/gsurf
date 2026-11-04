@@ -18,7 +18,10 @@
  * promote and close_children, title/favicon updates, container stripes
  * following the registry, strip hiding, kiosk, the tab context menu
  * (right click on a row or a strip tab) without containers, and the same
- * lifetime rules as the other chrome modules.
+ * lifetime rules as the other chrome modules. With a fake window layout
+ * installed: the "visible" style of tabs shown in another pane following
+ * visible-views-changed, and the Open in Split entries dispatching the
+ * pane-split actions with the right view.
  *
  * Needs a display, so every case skips unless GSURF_TEST_GUI=1 (make
  * test-gui runs it under Xvfb). No web process or network is used.
@@ -51,7 +54,12 @@ typedef struct {
 	gpointer     favicon;      /* native favicon (cairo surface / texture) */
 } TestChromeView;
 typedef struct { GsurfViewClass parent; } TestChromeViewClass;
-typedef struct { GsurfWindow parent; GtkWidget *box; GtkWidget *side; } TestChromeWindow;
+typedef struct {
+	GsurfWindow parent;
+	GtkWidget  *box;
+	GtkWidget  *side;
+	gpointer    content;   /* last set_content() argument (a layout root) */
+} TestChromeWindow;
 typedef struct { GsurfWindowClass parent; } TestChromeWindowClass;
 
 G_DEFINE_TYPE(TestChromeView, test_chrome_view, GSURF_TYPE_VIEW)
@@ -381,11 +389,20 @@ test_chrome_window_dispose(GObject *object)
 	G_OBJECT_CLASS(test_chrome_window_parent_class)->dispose(object);
 }
 
+/* Lets the window take a #GsurfWindowLayout (gsurf_window_set_layout()
+ * refuses a window without set_content); the root is only recorded. */
+static void
+set_content(GsurfWindow *window, gpointer widget)
+{
+	((TestChromeWindow *)window)->content = widget;
+}
+
 static void
 test_chrome_window_class_init(TestChromeWindowClass *klass)
 {
 	GSURF_WINDOW_CLASS(klass)->add_chrome_widget = add_chrome;
 	GSURF_WINDOW_CLASS(klass)->add_side_widget = add_side;
+	GSURF_WINDOW_CLASS(klass)->set_content = set_content;
 	G_OBJECT_CLASS(klass)->dispose = test_chrome_window_dispose;
 }
 
@@ -1472,6 +1489,333 @@ test_tabs_menu(void)
 	chrome_teardown(&c);
 }
 
+/* --- Tabs: a window layout (panes) --- */
+
+/* A fake #GsurfWindowLayout: no widgets; the active view plus the views
+ * in @shown are "on screen". The tests change @shown and call
+ * gsurf_window_layout_notify_visible() as a real layout does. */
+typedef struct {
+	GObject     parent;
+	GObject    *root;   /* stands in for the native root widget */
+	GHashTable *shown;  /* GsurfView* set, borrowed */
+} PaneLayout;
+typedef struct { GObjectClass parent; } PaneLayoutClass;
+
+static void pane_layout_iface_init(GsurfWindowLayoutInterface *iface);
+GType pane_layout_get_type(void);
+G_DEFINE_TYPE_WITH_CODE(PaneLayout, pane_layout, G_TYPE_OBJECT,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_WINDOW_LAYOUT, pane_layout_iface_init))
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(PaneLayout, g_object_unref)
+
+static gpointer pane_get_root(GsurfWindowLayout *l) { return ((PaneLayout *)l)->root; }
+static void pane_attach(GsurfWindowLayout *l, GsurfWindow *w) { (void)l; (void)w; }
+static void pane_add(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v) { (void)l; (void)w; (void)v; }
+static void pane_activate(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v) { (void)l; (void)w; (void)v; }
+
+static void
+pane_detach(GsurfWindowLayout *l, GsurfWindow *w)
+{
+	(void)w;
+	g_hash_table_remove_all(((PaneLayout *)l)->shown);
+}
+
+static void
+pane_remove(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v)
+{
+	(void)w;
+	g_hash_table_remove(((PaneLayout *)l)->shown, v);
+}
+
+static gboolean
+pane_visible(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v)
+{
+	return gsurf_window_get_active_view(w) == v ||
+	       g_hash_table_contains(((PaneLayout *)l)->shown, v);
+}
+
+static void
+pane_layout_iface_init(GsurfWindowLayoutInterface *iface)
+{
+	iface->get_root = pane_get_root;
+	iface->attach = pane_attach;
+	iface->detach = pane_detach;
+	iface->add_view = pane_add;
+	iface->remove_view = pane_remove;
+	iface->activate_view = pane_activate;
+	iface->is_view_visible = pane_visible;
+}
+
+static void
+pane_layout_finalize(GObject *object)
+{
+	PaneLayout *self = (PaneLayout *)object;
+
+	g_clear_object(&self->root);
+	g_hash_table_unref(self->shown);
+	G_OBJECT_CLASS(pane_layout_parent_class)->finalize(object);
+}
+
+static void
+pane_layout_class_init(PaneLayoutClass *klass)
+{
+	G_OBJECT_CLASS(klass)->finalize = pane_layout_finalize;
+}
+
+static void
+pane_layout_init(PaneLayout *self)
+{
+	self->root = g_object_new(G_TYPE_OBJECT, NULL);
+	self->shown = g_hash_table_new(g_direct_hash, g_direct_equal);
+}
+
+/* Show (or hide) @view in a pane of @layout and tell the window. */
+static void
+pane_show(PaneLayout *layout, GsurfWindow *window, GsurfView *view, gboolean shown)
+{
+	if (shown)
+		g_hash_table_add(layout->shown, view);
+	else
+		g_hash_table_remove(layout->shown, view);
+	gsurf_window_layout_notify_visible(window);
+}
+
+/* A stand-in for the module owning the panes (wmux): records the
+ * pane-split actions it is offered and the view they came with. */
+typedef struct {
+	GsurfModule  parent;
+	GsurfAction  last;
+	GsurfView   *view;   /* borrowed, compared only */
+	guint        calls;
+} SplitModule;
+typedef struct { GsurfModuleClass parent; } SplitModuleClass;
+
+static void split_module_iface_init(GsurfActionHandlerInterface *iface);
+GType split_module_get_type(void);
+G_DEFINE_TYPE_WITH_CODE(SplitModule, split_module, GSURF_TYPE_MODULE,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, split_module_iface_init))
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(SplitModule, g_object_unref)
+
+static gboolean
+split_module_handle(GsurfActionHandler *handler, GsurfView *view, GsurfAction action)
+{
+	SplitModule *self = (SplitModule *)handler;
+
+	if (action != GSURF_ACTION_PANE_SPLIT_RIGHT && action != GSURF_ACTION_PANE_SPLIT_DOWN)
+		return FALSE;
+	self->last = action;
+	self->view = view;
+	self->calls++;
+	return TRUE;
+}
+
+static void
+split_module_iface_init(GsurfActionHandlerInterface *iface)
+{
+	iface->handle_action = split_module_handle;
+}
+
+static const gchar *split_module_name(GsurfModule *m) { (void)m; return "test-split"; }
+
+static void
+split_module_class_init(SplitModuleClass *klass)
+{
+	GSURF_MODULE_CLASS(klass)->get_name = split_module_name;
+}
+
+static void split_module_init(SplitModule *self) { self->last = GSURF_ACTION_NONE; }
+
+/* The strip tab (its outer box) of @view. */
+static GtkWidget *
+strip_tab_of(GsurfWindow *window, GsurfView *view)
+{
+	g_autoptr(GPtrArray) tabs = children_of(only_child(window));
+	guint i;
+
+	for (i = 0; i < tabs->len; i++) {
+		GtkWidget *button = NULL;
+
+		box_children(g_ptr_array_index(tabs, i), &button, NULL);
+		if (widget_id(button) == gsurf_view_get_id(view))
+			return g_ptr_array_index(tabs, i);
+	}
+	g_assert_not_reached();
+	return NULL;
+}
+
+/* Tabs shown in another pane get the "visible" style in the sidebar and
+ * the strip, following visible-views-changed; the active tab keeps the
+ * active style only; without a layout nothing is marked. A row is only
+ * touched when its state changes. The stylesheet carries visible_color,
+ * which is validated and reset by a second configure(). Deactivation
+ * disconnects visible-views-changed. */
+static void
+test_tabs_visible(void)
+{
+	g_autoptr(PaneLayout) layout = NULL;
+	g_autofree gchar *css = NULL;
+	Chrome c;
+	GsurfModule *module;
+	GsurfView *third;
+
+	if (!chrome_setup(&c, "tabs", &module))
+		return;
+	configure_tabs(module, "modules:\n  tabs:\n    enabled: true\n"
+		"    visible_color: '#123456'\n");
+	g_assert_true(gsurf_module_activate(module));
+	third = tab_view(NULL, NULL, "third");
+	gsurf_window_add_view(c.window, third);
+	gsurf_window_set_active_view(c.window, c.first);
+	css = tabs_css(module);
+	g_assert_nonnull(strstr(css, "gsurf-tab-row-visible"));
+	g_assert_nonnull(strstr(css, "gsurf-tab-visible"));
+	g_assert_nonnull(strstr(css, "rgb(18,52,86)"));
+	g_clear_pointer(&css, g_free);
+
+	/* 1. No layout: only the active view is visible, nothing is marked. */
+	g_assert_false(has_class(row_of(c.window, c.second), "gsurf-tab-row-visible"));
+	g_assert_false(has_class(strip_tab_of(c.window, c.second), "gsurf-tab-visible"));
+
+	/* 2. A layout showing the second tab in another pane marks it, not
+	 *    the active tab and not the background tab. */
+	layout = g_object_new(pane_layout_get_type(), NULL);
+	g_hash_table_add(layout->shown, c.second);
+	g_assert_true(gsurf_window_set_layout(c.window, GSURF_WINDOW_LAYOUT(layout)));
+	g_assert_true(((TestChromeWindow *)c.window)->content == layout->root);
+	g_assert_true(has_class(row_of(c.window, c.second), "gsurf-tab-row-visible"));
+	g_assert_true(has_class(strip_tab_of(c.window, c.second), "gsurf-tab-visible"));
+	g_assert_false(has_class(row_of(c.window, c.first), "gsurf-tab-row-visible"));
+	g_assert_true(has_class(row_of(c.window, c.first), "gsurf-tab-row-active"));
+	g_assert_false(has_class(strip_tab_of(c.window, c.first), "gsurf-tab-visible"));
+	g_assert_false(has_class(row_of(c.window, third), "gsurf-tab-row-visible"));
+
+	/* 3. The layout swaps panes: the marks follow. */
+	g_hash_table_remove(layout->shown, c.second);
+	pane_show(layout, c.window, third, TRUE);
+	g_assert_false(has_class(row_of(c.window, c.second), "gsurf-tab-row-visible"));
+	g_assert_true(has_class(row_of(c.window, third), "gsurf-tab-row-visible"));
+	g_assert_true(has_class(strip_tab_of(c.window, third), "gsurf-tab-visible"));
+
+	/* 4. Activating the tab in the other pane: active style, not both. */
+	gsurf_window_set_active_view(c.window, third);
+	g_assert_true(has_class(row_of(c.window, third), "gsurf-tab-row-active"));
+	g_assert_false(has_class(row_of(c.window, third), "gsurf-tab-row-visible"));
+	g_assert_false(has_class(strip_tab_of(c.window, third), "gsurf-tab-visible"));
+	gsurf_window_set_active_view(c.window, c.first);
+	g_assert_true(has_class(row_of(c.window, third), "gsurf-tab-row-visible"));
+
+	/* 5. Removing the layout: nothing is marked any more. */
+	g_assert_true(gsurf_window_set_layout(c.window, NULL));
+	g_assert_false(has_class(row_of(c.window, third), "gsurf-tab-row-visible"));
+	g_assert_false(has_class(strip_tab_of(c.window, third), "gsurf-tab-visible"));
+
+	/* 6. A bad visible_color warns and keeps the default; a second
+	 *    configure() without the key goes back to the default too. */
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*tabs.visible_color*not a CSS colour*");
+	configure_tabs(module, "modules:\n  tabs:\n    visible_color: 'nope; }'\n");
+	g_test_assert_expected_messages();
+	gsurf_module_deactivate(module);
+	g_assert_true(gsurf_module_activate(module));
+	css = tabs_css(module);
+	g_assert_null(strstr(css, "rgb(18,52,86)"));
+	g_assert_nonnull(strstr(css, "rgb(30,30,46)"));
+	g_clear_pointer(&css, g_free);
+
+	/* 7. Deactivation disconnects visible-views-changed with the rest:
+	 *    a later change reaches nothing of the module. */
+	g_assert_true(gsurf_window_set_layout(c.window, GSURF_WINDOW_LAYOUT(layout)));
+	gsurf_module_deactivate(module);
+	assert_disconnected(c.window, module);
+	pane_show(layout, c.window, c.second, TRUE);
+	g_assert_true(gsurf_window_set_layout(c.window, NULL));
+
+	gsurf_window_remove_view(c.window, third);
+	g_object_unref(third);
+	chrome_teardown(&c);
+}
+
+/* With a layout installed the tab menu offers Open in Split Right and
+ * Below; they dispatch pane-split-right / pane-split-down with the view
+ * of the tab the menu was opened on (not the active one) to the module
+ * owning the panes. Without a layout the entries are gone. */
+static void
+test_tabs_menu_split(void)
+{
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	g_autoptr(PaneLayout) layout = NULL;
+	g_autoptr(SplitModule) split = NULL;
+	GActionGroup *actions;
+	GtkWidget *button = NULL;
+	Chrome c;
+	GsurfModule *module;
+	gchar *labels;
+
+	if (!chrome_setup(&c, "tabs", &module))
+		return;
+	split = g_object_new(split_module_get_type(), NULL);
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(split));
+	g_assert_true(gsurf_module_activate(GSURF_MODULE(split)));
+	configure_tabs(module, "modules:\n  tabs:\n    enabled: true\n");
+	g_assert_true(gsurf_module_activate(module));
+	actions = g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-actions");
+	g_assert_nonnull(actions);
+
+	/* 1. No layout: no split entries. */
+	click_row(row_of(c.window, c.second), 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==, "Reload Tab|Duplicate Tab|Close Tab|");
+	g_free(labels);
+
+	/* 2. With a layout: the entries, after Reload/Duplicate. */
+	layout = g_object_new(pane_layout_get_type(), NULL);
+	g_assert_true(gsurf_window_set_layout(c.window, GSURF_WINDOW_LAYOUT(layout)));
+	gsurf_window_set_active_view(c.window, c.first);
+	click_row(row_of(c.window, c.second), 3);
+	labels = tab_menu_labels(module);
+	g_assert_cmpstr(labels, ==, "Reload Tab|Duplicate Tab|Open in Split Right|"
+		"Open in Split Below|Close Tab|");
+	g_free(labels);
+
+	/* 3. They dispatch with the menu's tab, not the active one. */
+	g_action_group_activate_action(actions, "split-right", NULL);
+	g_assert_cmpuint(split->calls, ==, 1);
+	g_assert_cmpint(split->last, ==, GSURF_ACTION_PANE_SPLIT_RIGHT);
+	g_assert_true(split->view == c.second);
+	click_row(row_of(c.window, c.first), 3);
+	g_action_group_activate_action(actions, "split-down", NULL);
+	g_assert_cmpuint(split->calls, ==, 2);
+	g_assert_cmpint(split->last, ==, GSURF_ACTION_PANE_SPLIT_DOWN);
+	g_assert_true(split->view == c.first);
+
+	/* 4. A strip tab (its label button) offers them too. */
+	box_children(strip_tab_of(c.window, c.second), &button, NULL);
+	click_row(button, 3);
+	labels = tab_menu_labels(module);
+	g_assert_nonnull(strstr(labels, "Open in Split Right|Open in Split Below|"));
+	g_free(labels);
+
+	/* 5. The layout goes while the menu's actions live: they do nothing
+	 *    (nothing owns panes), and the next menu has no entries. */
+	g_assert_true(gsurf_window_set_layout(c.window, NULL));
+	g_action_group_activate_action(actions, "split-right", NULL);
+	g_assert_cmpuint(split->calls, ==, 2);
+	click_row(row_of(c.window, c.second), 3);
+	labels = tab_menu_labels(module);
+	g_assert_null(strstr(labels, "Split"));
+	g_free(labels);
+
+	/* 6. A closed tab: the actions are no-ops. */
+	g_assert_true(gsurf_window_set_layout(c.window, GSURF_WINDOW_LAYOUT(layout)));
+	click_row(row_of(c.window, c.second), 3);
+	gsurf_window_remove_view(c.window, c.second);
+	g_action_group_activate_action(actions, "split-down", NULL);
+	g_assert_cmpuint(split->calls, ==, 2);
+	g_assert_true(gsurf_window_set_layout(c.window, NULL));
+
+	gsurf_module_deactivate(module);
+	gsurf_module_deactivate(GSURF_MODULE(split));
+	chrome_teardown(&c);
+}
+
 /* Container stripes follow the registry: colour, name, added, removed. */
 static void
 test_tabs_containers(void)
@@ -1561,6 +1905,9 @@ test_tabs_kiosk(void)
 	g_assert_true(gsurf_module_activate(module));
 	g_assert_cmpuint(box_children(((TestChromeWindow *)c.window)->box, NULL, NULL), ==, 0);
 	g_assert_cmpuint(box_children(((TestChromeWindow *)c.window)->side, NULL, NULL), ==, 0);
+	/* No menu at all, so no Open in Split either (kiosk also refuses a
+	 * window layout). */
+	g_assert_null(g_object_get_data(G_OBJECT(module), "gsurf-tabs-menu-actions"));
 	g_assert_true(tabs_action(module, c.first, GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
 	g_assert_true(tabs_action(module, c.first, GSURF_ACTION_TAB_TREE_COLLAPSE));
 	g_assert_true(tabs_action(module, c.first, GSURF_ACTION_TAB_MOVE_DOWN));
@@ -1585,6 +1932,8 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/chrome/tabs-sidebar", test_tabs_sidebar_tree);
 	g_test_add_func("/gsurf/chrome/tabs-close-children", test_tabs_close_children);
 	g_test_add_func("/gsurf/chrome/tabs-menu", test_tabs_menu);
+	g_test_add_func("/gsurf/chrome/tabs-visible", test_tabs_visible);
+	g_test_add_func("/gsurf/chrome/tabs-menu-split", test_tabs_menu_split);
 	g_test_add_func("/gsurf/chrome/tabs-containers", test_tabs_containers);
 	g_test_add_func("/gsurf/chrome/tabs-kiosk", test_tabs_kiosk);
 #endif
