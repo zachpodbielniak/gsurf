@@ -223,5 +223,6 @@ modules:
 
   # --- Opt-in extras (left disabled here) ---
   # omnibar, externalpipe, userscripts, site_styles, uri_params, useragent,
-  # cert_manager, session, proxy_switch, spacesearch, and the MCP server
-  # (mcp, requires building with MCP=1) — see data/default-config.yaml.
+  # cert_manager, session, proxy_switch, spacesearch, hardening (LibreWolf-
+  # style privacy; see docs/hardening.org), and the MCP server (mcp,
+  # requires building with MCP=1) — see data/default-config.yaml.

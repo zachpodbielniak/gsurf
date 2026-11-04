@@ -20,6 +20,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =chromebar=      | (address bar)        | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented |
 | =adblock=        | (new; high value)    | =GsurfNavigationHook= + =GsurfScriptInjector= + =GsurfRequestFilter= | implemented (uBO/ABP lists; see [[file:adblock.org][adblock.org]]) |
 | =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |
+| =hardening=      | (new; LibreWolf)     | =GsurfSettingProvider= + web-process extension + session policy | implemented (see [[file:hardening.org][hardening.org]]) |
 | =find_bar=       | WebKit find          | =GsurfInputHandler= + =GsurfActionHandler= | implemented |
 
 * Tier 2 — important
@@ -48,7 +49,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 29 modules build with =make= (the =mcp= module requires =MCP=1=). With =GTK_BACKEND=gtk4= every module except =tabs= builds; =tabs= is GTK3-only while it is being rewritten, and the GTK4 build skips it.
+All 30 modules build with =make= (the =mcp= module requires =MCP=1=). With =GTK_BACKEND=gtk4= every module except =tabs= builds; =tabs= is GTK3-only while it is being rewritten, and the GTK4 build skips it.
 
 * AI modules (deferred)
 

@@ -113,6 +113,7 @@ static const GsurfBuiltinModule builtin_modules[] = {
 	{ "externalpipe",   "Pipe page HTML/text/selection to external commands" },
 	{ "find_bar",       "Find-in-page UI over the engine find controller" },
 	{ "geolocation",    "Fine-grained geolocation permission policy per-site" },
+	{ "hardening",      "LibreWolf-style privacy hardening with per-site exemptions" },
 	{ "history",        "Log visited URIs to a history file (dmenu integration)" },
 	{ "homepage",       "Startup/new-view page and go-home keybind" },
 	{ "inspector",      "Toggle the web inspector / devtools" },

@@ -398,6 +398,23 @@ modules:
     default: deny                   # allow, deny, ask
     per_site: {}
 
+  # LibreWolf-style privacy hardening; see docs/hardening.org.
+  hardening:
+    enabled: false
+    https_only: true                # upgrade http:// navigations and subresources
+    https_only_local: false         # also upgrade localhost/LAN/private IPs
+    strip_params: [utm_*, fbclid, gclid, dclid, mc_eid, igshid, _hsenc, yclid, msclkid]
+    referer: trim_cross_origin      # off, trim_cross_origin, strip_cross_origin
+    gpc: true                       # Sec-GPC: 1 + navigator.globalPrivacyControl
+    dnt: false                      # DNT: 1 (absent = network.do_not_track)
+    no_prefetch: true               # DNS prefetch off; cancel prefetches and <a ping>
+    third_party_cookies: block      # allow, block, block_all (every container)
+    itp: true                       # WebKit intelligent tracking prevention
+    webrtc: false                   # false forces WebRTC off
+    exempt:                         # by TOP-LEVEL page host; skip: names features
+      - match: '^(localhost|127\.0\.0\.1|.*\.lan)$'
+        skip: [https_only]
+
   session:
     enabled: false
     auto_restore: false
