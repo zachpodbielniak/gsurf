@@ -382,9 +382,25 @@ modules:
 
   dark_mode:
     enabled: false
-    mode: auto                      # auto, light, dark
-    key_toggle: "Ctrl+Shift+d"
-    force_dark_css: false
+    # off | native (the site's own dark theme) | filter (CSS invert) |
+    # dynamic (Dark Reader). Legacy: auto, light, dark (+ force_dark_css).
+    mode: filter
+    brightness: 100                 # 0-200 (%); 100/100/0/0 leave colours as they are
+    contrast: 100                   # 0-200 (%)
+    sepia: 0                        # 0-100 (%)
+    grayscale: 0                    # 0-100 (%)
+    key_toggle: "Ctrl+Alt+d"        # everything on/off (dark-mode-toggle)
+    key_toggle_site: "Ctrl+Alt+Shift+d"   # this site, saved (dark-mode-toggle-site)
+    # Per-site rules (host regexes, first match wins; unset keys come from
+    # above). Toggled sites are saved in $XDG_DATA_HOME/gsurf/dark_mode/sites.yaml.
+    sites: []
+    #  - match: '(^|\.)github\.com$'
+    #    mode: native
+    #  - match: '(^|\.)example\.org$'
+    #    mode: off
+    #  - match: 'news'
+    #    brightness: 90
+    #    sepia: 10
 
   status_bar:
     enabled: false

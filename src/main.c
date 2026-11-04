@@ -108,7 +108,7 @@ static const GsurfBuiltinModule builtin_modules[] = {
 	{ "cert_manager",   "Per-domain certificate exceptions and pinning" },
 	{ "chromebar",      "Address bar that falls back to search for non-URI input" },
 	{ "cookie_policy",  "Cookie accept policy with an @Aa-style cycle toggle" },
-	{ "dark_mode",      "Force dark color scheme with optional dark user CSS" },
+	{ "dark_mode",      "Dark mode (native, filter, Dark Reader) with per-site rules" },
 	{ "downloads",      "Download manager list UI with progress and notifications" },
 	{ "externalpipe",   "Pipe page HTML/text/selection to external commands" },
 	{ "find_bar",       "Find-in-page UI over the engine find controller" },

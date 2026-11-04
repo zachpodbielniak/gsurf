@@ -44,7 +44,7 @@ Working today:
   history, homepage, vim modal navigation, tabs, an address bar, adblock,
   cookie policy, toggles, find, downloads, userscripts, site styles, per-URI
   params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,
-  playexternal, dark mode, status bar, inspector, geolocation/notification
+  playexternal, dark mode (per-site, Dark Reader), status bar, inspector, geolocation/notification
   policy, proxy switching, session, spacesearch, and =mcp= (=MCP=1=).
   See [[file:docs/modules.org][docs/modules.org]].
 - Embedded default config + =--generate-yaml-config= / =--generate-c-config= /

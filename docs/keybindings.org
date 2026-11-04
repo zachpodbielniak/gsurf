@@ -74,6 +74,8 @@ In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
 
+=dark_mode= binds =Ctrl+Alt+d= (=dark-mode-toggle=, everything on/off) and =Ctrl+Alt+Shift+d= (=dark-mode-toggle-site=, the current site, remembered across restarts); set =modules.dark_mode.key_toggle= / =key_toggle_site= to change or unbind them (see [[file:dark-mode.org][Dark mode]]). =Ctrl+Shift+d= belongs to the bookmarks module.
+
 * Focus: the page and the address bar
 
 The page has keyboard focus when the window opens and after every tab switch, so command keys work from the first keystroke.

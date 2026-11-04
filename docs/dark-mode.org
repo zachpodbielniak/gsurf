@@ -1,0 +1,190 @@
+#+TITLE: Dark mode
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+The =dark_mode= module darkens web pages the way the Dark Reader browser extension does, with a global mode, per-site rules in the config, and two runtime toggles: one for everything, one for the current site, which is remembered across restarts.
+
+| Mode      | What it does                                                                                                                                                                                                                                       | Cost                                                    |
+|-----------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------------------------------------------|
+| =off=     | Nothing. The page is left exactly as it is.                                                                                                                                                                                                        | none                                                    |
+| =native=  | Uses the site's own dark theme: =color-scheme: dark= on the root, and every =@media (prefers-color-scheme: dark)= rule the page ships is switched on (its =light= rules off). Sites without a dark theme only get dark form controls and scrollbars. | tiny                                                    |
+| =filter=  | Inverts the page with a CSS filter (=invert(1) hue-rotate(180deg)=, plus brightness, contrast, sepia and grayscale) and re-inverts images, video, canvas, =embed= and =object= so they keep their colours.                                                | tiny; works on every site, colours are approximate      |
+| =dynamic= | Runs the vendored upstream Dark Reader engine (version 4.9.133), which analyses the page's stylesheets and generates a dark theme for it.                                                                                                          | about 350 KB of script per page; the best-looking result |
+
+Brightness, contrast, sepia and grayscale apply in every mode: as part of the filter in =filter= mode, as Dark Reader's theme options in =dynamic= mode, and as a plain CSS filter on the page (without inversion) in =native= mode when any of them differs from its neutral value.
+
+* Configuration
+
+#+begin_src yaml
+modules:
+  dark_mode:
+    enabled: true
+    mode: filter                # off | native | filter | dynamic
+    brightness: 100             # 0-200 (%)
+    contrast: 100               # 0-200 (%)
+    sepia: 0                    # 0-100 (%)
+    grayscale: 0                # 0-100 (%)
+    key_toggle: Ctrl+Alt+d      # everything on/off ("" or null: unbound)
+    key_toggle_site: Ctrl+Alt+Shift+d
+    sites:
+      - match: '(^|\.)github\.com$'
+        mode: native
+      - match: '(^|\.)example\.org$'
+        mode: off
+      - match: 'news'
+        brightness: 90
+        sepia: 10
+#+end_src
+
+** Keys
+
+| Key               | Type                 | Default            | Meaning                                                                                       |
+|-------------------+----------------------+--------------------+-----------------------------------------------------------------------------------------------|
+| =enabled=         | bool                 | =false=            | Read by the module manager: load and activate the module.                                     |
+| =mode=            | string               | =auto= (see below) | =off=, =native=, =filter= or =dynamic=, case-insensitive; legacy values are mapped (below).    |
+| =force_dark_css=  | bool                 | =false=            | Legacy: turns =mode: dark= into =filter=. Ignored with any other mode.                        |
+| =brightness=      | integer 0-200        | =100=              | Percent.                                                                                      |
+| =contrast=        | integer 0-200        | =100=              | Percent.                                                                                      |
+| =sepia=           | integer 0-100        | =0=                | Percent.                                                                                      |
+| =grayscale=       | integer 0-100        | =0=                | Percent.                                                                                      |
+| =key_toggle=      | key string           | =Ctrl+Alt+d=       | Global on/off ([[*Toggles][toggles]]). =""= or =null= unbinds it.                              |
+| =key_toggle_site= | key string           | =Ctrl+Alt+Shift+d= | Current site on/off, persisted. =""= or =null= unbinds it.                                    |
+| =sites=           | list of rules        | empty              | Per-site rules ([[*Per-site rules][below]]).                                                   |
+
+=Ctrl+Shift+d= is the bookmarks module's "open bookmark" key, which is why the toggles moved to =Ctrl+Alt+…=. Both actions can also be bound in the core =keybinds:= table (="Ctrl+F12": dark-mode-toggle=, =dark-mode-toggle-site=); the core forwards them to this module.
+
+** Legacy values
+
+Configs written before per-site rules keep working:
+
+| Old config                              | Means                                                                                              |
+|-----------------------------------------+----------------------------------------------------------------------------------------------------|
+| =mode: dark= + =force_dark_css: true=   | =filter=                                                                                           |
+| =mode: dark=                            | =native=                                                                                           |
+| =mode: auto= (also: no =mode= key)      | =native= with =color-scheme: light dark=: form controls and scrollbars follow the system preference; the page's =prefers-color-scheme= rules are not rewritten. This is the module's historical default. |
+| =mode: light=                           | =off=                                                                                              |
+
+=auto=, =light= and =dark= are accepted inside site rules too. The old =key_toggle: "Ctrl+Shift+d"= default is gone. An explicit =key_toggle= from an old config is still honoured; if it is =Ctrl+Shift+d= it competes with the bookmarks module, so move it to another key.
+
+** Validation
+
+Every problem is reported as a warning (log domain =gsurf-dark-mode=) and only the bad part is dropped; the rest of the section still applies:
+
+- an unknown =mode=, a non-integer or out-of-range adjustment, a non-boolean =force_dark_css=: the key keeps its default (or, in a rule, inherits);
+- a key binding that is not a string: the default key;
+- an unknown key, top-level or in a rule: warned about and ignored (typo guard);
+- =sites= not a list: no rules;
+- a rule without a =match= pattern, or of the wrong shape: that rule is skipped;
+- a =match= that is not a valid regular expression: that rule is skipped;
+- =dark_mode= itself not a mapping: all defaults.
+
+Calling =configure()= again (a config reload) rebuilds everything from defaults, so removed rules and keys do not linger; the global switch keeps its runtime value and the state file is re-read.
+
+* Per-site rules
+
+Each element of =sites= is a mapping with a =match= host regex and any of =mode=, =force_dark_css=, =brightness=, =contrast=, =sepia=, =grayscale=. A bare string is a pattern without settings (it matches, stops later rules, and changes nothing).
+
+- *Matching.* Patterns use the shared =GsurfHostRules= matcher: case-insensitive, matched against the bare lowercase host (no scheme, port or trailing dot), not anchored implicitly. Write =(^|\.)example\.com$= for a domain and its subdomains. They are evaluated with JavaScript =RegExp= in the page, so stay within the syntax PCRE and JavaScript share.
+- *First match wins.* Rules are tried in order; the first that matches is used and the rest are ignored. They are not merged with each other.
+- *Inheritance.* A rule replaces only the keys it sets; everything else comes from the global settings. The =news= rule above keeps the global mode and contrast and changes brightness and sepia.
+
+** Precedence
+
+From highest to lowest, for the top-level page's host:
+
+1. The global switch (=dark-mode-toggle=): when off, every page is off.
+2. The per-site override from the state file (=dark-mode-toggle-site=).
+3. The first matching =sites= rule.
+4. The global settings.
+
+* Toggles
+
+** Global: =dark-mode-toggle= (=Ctrl+Alt+d=)
+
+Switches dark mode off on every page, and back on. It takes effect at once on all open views and on everything loaded afterwards. It is runtime state only: it is not saved, and gsurf always starts with dark mode switched on (the config decides what "on" means). Per-site overrides are kept while it is off.
+
+** Per site: =dark-mode-toggle-site= (=Ctrl+Alt+Shift+d=)
+
+Flips the current page's host between "never dark" and dark:
+
+- if the host is dark now (by rule, global mode or an earlier override), it becomes off;
+- otherwise it becomes dark, with its rule's mode if that rule darkens anything, else the global mode if that does, else =filter=. Legacy =auto= counts as "not dark" here, so toggling a site on always gives a dark page.
+
+The change applies immediately to every open view showing that host. An override that equals what the config already does is removed instead of stored, so toggling twice leaves no trace. Overrides are keyed by the exact host (=www.example.org= and =example.org= are different sites). Pages without a host (=about:=, =file:=, =data:=) cannot be toggled.
+
+** The state file
+
+Per-site overrides live in =$XDG_DATA_HOME/gsurf/dark_mode/sites.yaml= (usually =~/.local/share/gsurf/dark_mode/sites.yaml=):
+
+#+begin_src yaml
+# gsurf dark_mode per-site overrides, written by dark-mode-toggle-site.
+version: 1
+sites:
+  "example.org": true      # always dark
+  "news.example": false    # never dark
+#+end_src
+
+- It is written atomically, mode 0600 in a 0700 directory, after every per-site toggle, and read when the module is configured (startup and config reloads). Hand edits are picked up on the next reload.
+- The file overrides the config's =sites= rules for the hosts it lists.
+- Values may be =true=/=false=, =yes=/=no=, =on=/=off= or =1=/=0=; host names are normalized (lowercase, no IPv6 brackets or trailing dot). A bad entry is skipped with a warning.
+- A file with loose permissions is still used, with a warning, and rewritten 0600 on the next save. An unparsable file is ignored; on the next save it is kept as =sites.yaml.bad= and a new file is written.
+
+* How it works
+
+** One script per view, in an isolated world
+
+=GsurfScriptInjector::inject()= runs once per view, at creation, without a URI, so the module cannot pick CSS per host there. Instead it adds one document-start user script to every frame, in the isolated script world =gsurf-dark-mode=. The script is the page engine (=modules/dark_mode/js/dark-mode.js=) followed by =__gsurf_dark.init(<state>)=, where the state is a JSON object built by the module: the global switch, the global settings, the rules (only the keys each sets), the overrides and a version counter. The engine works out the top-level host, calls the pure function =__gsurf_dark.decide(state, host)= and applies the result synchronously at document start, before the first paint, so dark pages never flash white.
+
+Because the script runs in its own world, it shares the DOM with the page but none of its JavaScript globals: the page cannot read the configuration or the override list, call the engine, or replace the functions it uses. What the page can observe is the effect on the DOM: a =<style>= element as the first child of =<html>= (filter, native), rewritten =media= texts of its own stylesheets (native), and Dark Reader's styles and attributes (dynamic).
+
+** Runtime changes reach existing views
+
+A script baked in at view creation would go stale after a toggle. Every state change (either toggle, or a config reload) therefore goes to every open view twice:
+
+1. as another document-start user script, =__gsurf_dark.set_state(<new state>)=, appended to the view, so every document loaded later in that view starts from the new state, still synchronously and without a flash (scripts run in the order they were added; an older state never replaces a newer one);
+2. evaluated once in the view's current main frame, so the open page changes immediately.
+
+Each change adds one small script (the state JSON, typically well under a kilobyte) to each open view; new views start with just the one engine script.
+
+** Frames
+
+Every frame runs the engine, and all of them decide by the *top-level* page's host, never their own: a frame finds it from =window.top= (same origin), else =location.ancestorOrigins=, else the referrer. So a third-party iframe on a page you made dark is dark too, and an iframe on a page you turned off is left alone, whatever rules its own host has.
+
+- =filter=: the top page's filter already covers the pixels of every subframe, so subframes do not invert themselves again (that would undo it); they only re-invert their own media.
+- =native=: each frame sets its own =color-scheme= and rewrites its own stylesheets.
+- =dynamic=: when Dark Reader is preloaded (global mode =dynamic=) every frame runs it; when it is loaded on demand (below) only the main frame gets it, and subframes stay as they are.
+- A live toggle updates the main frame of each open page immediately; subframes of that page pick the change up when they or the page next load.
+
+** native mode details
+
+=native= rewrites media queries in the CSSOM: =(prefers-color-scheme: dark)= becomes an always-true query and =(prefers-color-scheme: light)= a never-true one, in =@media= rules (also nested, in =@supports= and =@layer= blocks and =@import=ed sheets), in a sheet's own =media= and in =<picture><source media>=. It watches for stylesheets added later. Limits: cross-origin stylesheets cannot be read from the CSSOM and are not rewritten; rules a script inserts into an already-scanned sheet with =insertRule()= are not seen; and =matchMedia()= in the page's own scripts still reports the system preference (WebKitGTK has no per-view colour-scheme setting, and patching the page's =matchMedia= would mean running in the page's world). Turning native mode off restores every rewritten text.
+
+** dynamic mode and the cost of Dark Reader
+
+Dark Reader is compiled into =dark_mode.so= (a compressed GResource; the module grows by about 70 KB) and injected only when needed:
+
+- *Global mode =dynamic=:* every page needs it, so it is added to new views as a document-start script in the =gsurf-dark-mode= world, before the engine, in every frame.
+- *Only some sites are =dynamic=* (a rule or an override): it is not preloaded. When the engine decides =dynamic= without it, it shows a dark placeholder stylesheet and posts =need-engine= to the =gsurf_dark_mode= script-message handler (registered in our world only, so pages cannot post to it); the module then evaluates Dark Reader in that view's main frame and the engine enables it. Pages on other hosts never load it.
+
+Dark Reader runs from the isolated world: it reads the page's stylesheets through the shared DOM and fetches cross-origin stylesheets with =fetch()= from that world (=DarkReader.setFetchMethod=), which only succeeds where the stylesheet's CORS headers allow it. As upstream does, it inserts a small script into the page to watch stylesheet changes the page makes from JavaScript; that script runs in the page's world (subject to the page's Content Security Policy) and is how upstream's extension works too. Dark Reader's own =DarkReader= global stays in our world; the page cannot see or call it.
+
+** Test hooks
+
+The module exposes read-only GObject properties used by the tests and handy for debugging: =state-json= (the state the engine receives), =state-file=, =preload-engine=, =key-toggle=, =key-toggle-site=, and the read-write =global-on= (the global switch). In the =gsurf-dark-mode= world, =__gsurf_dark.decide(state, host)= is the pure decision function, and =__gsurf_dark.current= the decision applied to the current document (=mode=, =scheme=, the adjustments, =source=: =global=, =rule=, =override= or =disabled=, and the matching =rule= index).
+
+* Tests
+
+- =tests/test-dark-mode.c= (headless, the real =dark_mode.so=): defaults, the legacy mapping, every key and each validation warning, the rules JSON, reconfiguration back to defaults, the state file (load, normalization, bad entries, loose permissions, malformed file kept as =.bad=, unwritable path), both toggles through the action, key and keybind-help hooks, injection into a recording headless view (world, message handler, live updates, on-demand Dark Reader, weak view tracking, a view outliving the module).
+- =tests/test-dark-mode-webkit.c= (=make test-gui=, both backends): a loopback server under the host names =127.0.0.1= and =localhost=; computed =filter= and =color-scheme= per host rule, the page's own dark theme in native mode, =off= leaving the page untouched, the page world not seeing the engine, =decide()= evaluated in the world, Dark Reader preloaded and on demand, a cross-origin child frame following its top page, and the toggles (per-site flipping every open view of the host and persisting 0600, global, and a navigation in a view created before a toggle).
+
+* Vendored Dark Reader
+
+=modules/dark_mode/vendor/= holds =darkreader-4.9.133.js= and its =LICENSE= (MIT, compatible with gsurf's AGPL-3.0-or-later), unmodified from the npm package =darkreader@4.9.133= (https://registry.npmjs.org/darkreader/-/darkreader-4.9.133.tgz). =vendor/PROVENANCE.org= records the tarball URL, the npm integrity hash and the sha256 of the tarball and of each vendored file:
+
+| File                     | sha256                                                             |
+|--------------------------+--------------------------------------------------------------------|
+| =darkreader-4.9.133.js=  | =82619e7a0bcabbea15a91488bc74fd0f9ba8f8f2a1cc67527f78166037cce166= |
+| =LICENSE=                | =f0a5f835174494f8981b2cbb1a34054d4f887a5c865318650d6a17afe1c7850e= |
+
+To update it, follow "How to update" in =vendor/PROVENANCE.org=: download the new tarball with curl from the npm registry into a scratch directory, verify its integrity hash, replace the file and the licence, bump =DARKREADER_VERSION= in =modules/dark_mode/Makefile= and =GSURF_DARK_MODE_DARKREADER_VERSION= in the module source, update the checksums here and in =PROVENANCE.org=, run =make test-gui= on both backends, and commit the import on its own.

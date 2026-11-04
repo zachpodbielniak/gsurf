@@ -71,3 +71,5 @@ reads its own options from its section (=gsurf_config_get_module_node=).
 
 Sections that map to surf concepts: =search_engines= (searchengines patch),
 =uri_params= (=uriparams[]=), =site_styles= (=styles[]=), =cert_pins= (=certs[]=).
+
+=dark_mode= takes a global =mode= (=off=, =native=, =filter=, =dynamic=; legacy =auto=, =light=, =dark= still work), =brightness=/=contrast=/=sepia=/=grayscale=, =key_toggle=/=key_toggle_site=, and a =sites:= list of per-host rules; runtime per-site toggles are saved in =$XDG_DATA_HOME/gsurf/dark_mode/sites.yaml=. The full reference is in [[file:dark-mode.org][Dark mode]].
