@@ -74,6 +74,8 @@ In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
 
+The =containers= module (disabled by default) adds =Ctrl+Alt+t= (=container-new-temp=: a new tab in a temporary container) and =Ctrl+Alt+c= (=container-reopen-next=: reopen the tab in the next container), configurable as =key_new_temp= / =key_reopen_next=; see [[file:containers.org][containers.org]].
+
 * Focus: the page and the address bar
 
 The page has keyboard focus when the window opens and after every tab switch, so command keys work from the first keystroke.

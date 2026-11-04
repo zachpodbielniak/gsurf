@@ -398,6 +398,21 @@ modules:
     default: deny                   # allow, deny, ask
     per_site: {}
 
+  # Containers: separate cookie jars / storage per tab group (like
+  # Firefox Multi-Account and Temporary Containers). See docs/containers.org.
+  containers:
+    enabled: false
+    new_tab: temporary              # temporary | default | <container id>
+    inherit_opener: true            # links opened from a tab stay in its container
+    temp_cleanup_delay: 30          # seconds after a temporary container's last tab
+    temp_color: "#89b4fa"
+    containers: []                  # e.g.
+    #  - name: Media                # id defaults to the lowercased name ("media")
+    #    color: "#f9e2af"
+    #    hosts: ['(^|\.)youtube\.com$', '(^|\.)twitch\.tv$']
+    key_new_temp: "Ctrl+Alt+t"      # container-new-temp
+    key_reopen_next: "Ctrl+Alt+c"   # container-reopen-next
+
   session:
     enabled: false
     auto_restore: false

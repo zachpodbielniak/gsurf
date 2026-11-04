@@ -69,5 +69,9 @@ Native settings regressions run with =make test-gui= under Xvfb. On an existing 
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).
 
+* Containers
+
+=modules.containers= turns on per-host and temporary containers (separate cookie jars and storage per tab): =new_tab=, =inherit_opener=, =temp_cleanup_delay=, =temp_color=, the =containers:= list (=name=, =id=, =color=, =hosts=) and =key_new_temp= / =key_reopen_next=. The full reference, placement order and host assignment rules are in [[file:containers.org][containers.org]].
+
 Sections that map to surf concepts: =search_engines= (searchengines patch),
 =uri_params= (=uriparams[]=), =site_styles= (=styles[]=), =cert_pins= (=certs[]=).
