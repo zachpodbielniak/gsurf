@@ -8,6 +8,8 @@
 #include <glib/gstdio.h>
 #include <string.h>
 
+#include "test-util.h"
+
 /* A headless view captures scripts at the public backend boundary. Complete
  * asynchronously so modal's nested loop follows the real backend contract. */
 typedef struct {
@@ -200,10 +202,6 @@ int
 main(int argc, char **argv)
 {
 	g_autofree gchar *cache = NULL;
-	g_autofree gchar *compiled_dir = NULL;
-	g_autofree gchar *browser_dir = NULL;
-	g_autoptr(GDir) dir = NULL;
-	const gchar *name;
 	gint result;
 
 	g_test_init(&argc, &argv, NULL);
@@ -214,18 +212,9 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/modal/hint-invalid", test_hint_invalid);
 	g_test_add_func("/gsurf/modal/hint-c-config", test_hint_c_config);
 	result = g_test_run();
-	browser_dir = g_build_filename(cache, "gsurf", NULL);
-	compiled_dir = g_build_filename(browser_dir, "cconfig", NULL);
-	dir = g_dir_open(compiled_dir, 0, NULL);
-	if (dir != NULL) {
-		while ((name = g_dir_read_name(dir)) != NULL) {
-			g_autofree gchar *path = g_build_filename(compiled_dir, name, NULL);
-			g_assert_cmpint(g_unlink(path), ==, 0);
-		}
-		g_clear_pointer(&dir, g_dir_close);
-		g_assert_cmpint(g_rmdir(compiled_dir), ==, 0);
-		g_assert_cmpint(g_rmdir(browser_dir), ==, 0);
-	}
-	g_assert_cmpint(g_rmdir(cache), ==, 0);
+	/* The C config compiler may leave more than gsurf/cconfig behind (a
+	 * ccache-wrapped gcc writes $XDG_CACHE_HOME/ccache), so remove the
+	 * whole temporary tree instead of assuming its layout. */
+	g_assert_true(gsurf_test_rmtree(cache));
 	return result;
 }
