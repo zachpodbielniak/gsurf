@@ -1,0 +1,64 @@
+#+TITLE: Tabs: strip and tree sidebar
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+The =tabs= module keeps a tree of each window's tabs in =modules/tabs/gsurf-tab-tree.c=, a toolkit-neutral model that knows view ids and openers, not GTK or =GsurfView=. This page describes the rules the model implements.
+
+* The tree
+
+** Where the tree comes from
+
+The window's view order is the source of truth; the tree is derived from it. Every view records its opener at construction (=gsurf_view_new_full()=, used by =main.c= for links opened in a new view and popups, and by =modal= for =F= link hints). =gsurf_view_get_opener_id()= keeps that id after the opener closes. A view opened by the user (=tab-new=, startup, the MCP =open= tool) has no opener.
+
+Each tab has a /logical parent/, initially its opener. The tree is built by walking the window order with a stack holding the path from a root to the previous tab:
+
+1. If the tab's logical parent is on the stack, pop down to it; the tab becomes its child.
+2. Otherwise the tab is a root, and the stack restarts with it.
+
+So a tab keeps its parent only while the parent comes earlier in the window and the tab directly continues the parent's block of descendants. Every subtree is therefore one contiguous run of tabs, and the sidebar is the window order with indentation. After each change the logical parents are set to the derived ones, so a tab that once lost its parent never silently re-attaches to it later.
+
+** Placement of new tabs
+
+When a view is added to the window:
+
+- if its opener is in the same window, the view is moved (=gsurf_window_move_view()=) to just after the opener's *last descendant*, making it the opener's last child;
+- otherwise (no opener, or an opener in another window or already closed) it stays where the window put it, which is the end for =gsurf_window_add_view()=; it is a root.
+
+Opening three links from tab A in turn gives =A, A1, A2, A3=, and a link opened from =A1= goes between =A1= and =A2=.
+
+** Closing a tab
+
+=on_close_parent= decides what happens to the children of a closing tab:
+
+- =promote= (default): each direct child takes the closed tab's place in the tree, moving up one level (to the closed tab's parent, or to the root). The children keep their order and their own subtrees, and stay where they are in the window.
+- =close_children=: the closed tab's descendants close with it (and are remembered for =tab-reopen=, most recent first). The module never closes a window's last view: if the descendants are all that would remain, the last one stays open as a root.
+
+This applies however the tab closes: the close key or button, a middle click, the page calling =window.close()=, or another module.
+
+** Orphans
+
+A tab whose opener is closed, or never was in this window, is a root. Its opener id is kept (=gsurf_view_get_opener_id()= never changes), but the tree does not use it once the opener is gone. A promotion is runtime state: when the module is reactivated, or a session is restored, the tree is rebuilt from the window order and the openers alone, so a promoted tab whose opener is closed comes back as a root. A restored session that recreates its views in order with their openers (=gsurf_view_new_full()=) gets the same tree back.
+
+** Collapse
+
+A tab with children shows a twisty (=▾= expanded, =▸= collapsed). Collapsing it hides its descendants in the sidebar; they stay open and keep loading. Collapse state belongs to the tab and survives reorders.
+
+- Clicking the twisty, or =tab-tree-collapse= on a tab with children, toggles its subtree.
+- =tab-tree-collapse= on a leaf collapses the leaf's parent.
+- Collapsing a subtree that holds the active tab makes the collapsed tab active, so the active tab is always visible.
+- Activating a hidden tab by any means (=tab-next=, the strip, the host) expands all its collapsed ancestors.
+
+** Moving subtrees
+
+=tab-move-up= and =tab-move-down= move the active tab together with its whole subtree past the previous or next *sibling* (and that sibling's subtree). A tab never changes parent this way; at its first or last sibling the command does nothing. The window's view order is updated to match.
+
+When something else reorders the window (=gsurf_window_move_view()= from another module or the MCP interface), the tree is re-derived from the new order. A tab moved out of its parent's block becomes a root.
+
+** Depth cap
+
+=max_depth= caps the indentation: a tab deeper than =max_depth= is drawn at =max_depth= levels but keeps its real parent, so collapsing, closing and moving still follow the real tree. =max_depth: 0= draws a flat list.
+
+* Tests
+
+=tests/test-tab-tree.c= (headless, part of =make test=) compiles the model in directly and covers placement after the last descendant, nesting, promote and close_children, collapse and expansion, moving subtrees, =max_depth=, orphaned openers, rebuilding from the window order, a randomized 4000-step stress run checking the block invariants, and a 2000-tab sync.
