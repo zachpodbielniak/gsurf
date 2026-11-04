@@ -749,6 +749,36 @@ gsurf_webkit2_view_constructed(GObject *object)
 		gsurf_module_manager_get_default(), GSURF_VIEW(self), NULL);
 }
 
+/* Unregister every script message handler this view registered (the
+ * focus tracker's and the modules'), so a message the page posted just
+ * before the view went away is dropped by WebKit instead of reaching a
+ * handler whose content manager is being destroyed (a WebKit critical:
+ * "Script message ... received after the WebKitUserContentManager has
+ * been destroyed"). Quick tab closes (wmux kill-pane) hit that race. */
+static void
+unregister_message_handlers(GsurfWebkit2View *self)
+{
+	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
+	GHashTableIter iter;
+	gpointer key;
+
+	webkit_user_content_manager_unregister_script_message_handler(ucm, "gsurfFocus");
+	if (self->message_handlers == NULL)
+		return;
+	g_hash_table_iter_init(&iter, self->message_handlers);
+	while (g_hash_table_iter_next(&iter, &key, NULL)) {
+		g_auto(GStrv) parts = g_strsplit(key, "\x1f", 2);
+
+		if (parts[0] == NULL || parts[1] == NULL)
+			continue;
+		if (*parts[0] != '\0')
+			webkit_user_content_manager_unregister_script_message_handler_in_world(ucm,
+				parts[1], parts[0]);
+		else
+			webkit_user_content_manager_unregister_script_message_handler(ucm, parts[1]);
+	}
+}
+
 static void
 gsurf_webkit2_view_dispose(GObject *object)
 {
@@ -756,6 +786,7 @@ gsurf_webkit2_view_dispose(GObject *object)
 
 	if (self->webview != NULL) {
 		gsurf_webkit_protocol_cancel(self->webview);
+		unregister_message_handlers(self);
 		/* The host may retain the native widget, and the context is shared.
 		 * Neither may keep callbacks into a disposed library wrapper. */
 		g_signal_handlers_disconnect_by_data(
