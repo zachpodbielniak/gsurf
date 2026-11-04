@@ -12,7 +12,9 @@
  *   - a popup is a related view in its opener's container, with a live
  *     window.opener;
  *   - isolated script worlds hide page globals, share the DOM, and post
- *     messages to GsurfView::script-message.
+ *     messages to GsurfView::script-message;
+ *   - gsurf_window_reopen_view() moves a page to another container in
+ *     place (index, opener, activation, signal order, the new jar).
  * Runs only with GSURF_TEST_GUI=1 (make test-gui).
  */
 
@@ -296,6 +298,121 @@ test_script_worlds(void)
 	g_free(world.value);
 }
 
+/* Window signals, logged in order as "added:<id>", "replaced:<old>><new>"
+ * and "removed:<id>", comma separated. */
+static void
+log_added(GsurfWindow *window, GsurfView *view, gpointer data)
+{
+	(void)window;
+	g_string_append_printf(data, "added:%" G_GUINT64_FORMAT ",", gsurf_view_get_id(view));
+}
+
+static void
+log_removed(GsurfWindow *window, GsurfView *view, gpointer data)
+{
+	(void)window;
+	g_string_append_printf(data, "removed:%" G_GUINT64_FORMAT ",", gsurf_view_get_id(view));
+}
+
+static void
+log_replaced(GsurfWindow *window, GsurfView *old_view, GsurfView *new_view, gpointer data)
+{
+	(void)window;
+	g_string_append_printf(data, "replaced:%" G_GUINT64_FORMAT ">%" G_GUINT64_FORMAT ",",
+		gsurf_view_get_id(old_view), gsurf_view_get_id(new_view));
+}
+
+/* gsurf_window_reopen_view(): the page moves to the requested container
+ * at the same index with the same opener, becomes active, and the old
+ * view is removed after view-replaced; the new view browses with the new
+ * container's jar. Back to the default container finds the default jar. */
+static void
+test_reopen_view(void)
+{
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+	g_autoptr(SoupServer) server = NULL;
+	g_autoptr(GsurfWindow) window = NULL;
+	g_autoptr(GsurfView) stray = NULL;
+	g_autoptr(GString) log = g_string_new(NULL);
+	g_autofree gchar *expected = NULL;
+	g_autofree gchar *seen = NULL;
+	GsurfView *parent;
+	GsurfView *view;
+	GsurfView *fresh;
+	GsurfView *back;
+	gpointer weak;
+	guint64 old_id;
+	guint16 port;
+	guint i;
+
+	if (!gsurf_webkit_test_init())
+		return;
+	server = soup_server_new(NULL, NULL);
+	soup_server_add_handler(server, NULL, serve, NULL, NULL);
+	port = gsurf_webkit_test_listen(server);
+	g_assert_nonnull(gsurf_container_registry_define(registry, "gui-re", NULL, NULL, NULL));
+
+	/* 1. [parent, view]; view (a child of parent) sets a cookie in the
+	 *    default jar. */
+	window = gsurf_window_new();
+	parent = gsurf_view_new_full(NULL, NULL, NULL, FALSE);
+	gsurf_window_add_view(window, parent);
+	g_object_unref(parent);
+	view = gsurf_view_new_full(parent, NULL, NULL, FALSE);
+	gsurf_window_add_view(window, view);
+	g_object_unref(view);
+	set_cookie(view, port);
+
+	/* 2. Reopen in gui-re. */
+	g_signal_connect(window, "view-added", G_CALLBACK(log_added), log);
+	g_signal_connect(window, "view-replaced", G_CALLBACK(log_replaced), log);
+	g_signal_connect(window, "view-removed", G_CALLBACK(log_removed), log);
+	weak = view;
+	g_object_add_weak_pointer(G_OBJECT(view), &weak);
+	/* The window held the only reference: read the id before. */
+	old_id = gsurf_view_get_id(view);
+	fresh = gsurf_window_reopen_view(window, view, "gui-re");
+	g_assert_nonnull(fresh);
+	g_assert_cmpuint(gsurf_view_get_id(fresh), !=, old_id);
+	g_assert_cmpstr(gsurf_view_get_container_id(fresh), ==, "gui-re");
+	g_assert_true(gsurf_view_get_opener(fresh) == parent);
+	g_assert_cmpint(gsurf_window_get_view_index(window, fresh), ==, 1);
+	g_assert_cmpuint(gsurf_window_get_n_views(window), ==, 2);
+	g_assert_true(gsurf_window_get_active_view(window) == fresh);
+	g_assert_true(g_str_has_suffix(gsurf_view_get_initial_uri(fresh), "/set"));
+	expected = g_strdup_printf("added:%" G_GUINT64_FORMAT ",replaced:%" G_GUINT64_FORMAT
+		">%" G_GUINT64_FORMAT ",removed:%" G_GUINT64_FORMAT ",",
+		gsurf_view_get_id(fresh), old_id, gsurf_view_get_id(fresh), old_id);
+	g_assert_cmpstr(log->str, ==, expected);
+
+	/* 3. The old view is gone for good. */
+	for (i = 0; i < 100 && weak != NULL; i++)
+		gsurf_webkit_test_spin(20);
+	g_assert_null(weak);
+
+	/* 4. The page loads in gui-re's empty jar (its /set fills it). */
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(fresh));
+	g_free(gsurf_webkit_test_eval(gsurf_webkit_test_native(fresh), "1"));
+
+	/* 5. NULL means the default container, whose jar has the cookie
+	 *    from step 1. */
+	back = gsurf_window_reopen_view(window, fresh, NULL);
+	g_assert_nonnull(back);
+	g_assert_null(gsurf_view_get_container_id(back));
+	g_assert_true(gsurf_view_get_opener(back) == parent);
+	seen = cookie_seen(back, port);
+	g_assert_cmpstr(seen, ==, "jar=filled");
+
+	/* 6. A view that is not in the window is refused, untouched. */
+	stray = gsurf_view_new();
+	g_assert_null(gsurf_window_reopen_view(window, stray, "gui-re"));
+	g_assert_cmpuint(gsurf_window_get_n_views(window), ==, 2);
+
+	g_signal_handlers_disconnect_by_data(window, log);
+	while (gsurf_window_get_n_views(window) > 0)
+		gsurf_window_remove_view(window, gsurf_window_get_nth_view(window, 0));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -311,6 +428,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/containers/webkit/cookie-isolation", test_cookie_isolation);
 	g_test_add_func("/gsurf/containers/webkit/popup-inherits", test_popup_inherits_container);
 	g_test_add_func("/gsurf/containers/webkit/script-worlds", test_script_worlds);
+	g_test_add_func("/gsurf/containers/webkit/reopen-view", test_reopen_view);
 	result = g_test_run();
 	gsurf_test_rmtree(home);
 	return result;

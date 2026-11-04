@@ -15,7 +15,10 @@
  *   - a main-frame navigation by script moves too (main-frame response),
  *     keeping the old tab, which becomes the new tab's opener;
  *   - an iframe of the assigned host is NOT moved;
- *   - container-new-temp and container-reopen-next.
+ *   - container-new-temp and container-reopen-next;
+ *   - the tabs module's tab context menu: its entries, reopening a tab in
+ *     another container in place with its children kept (also through
+ *     container-reopen-next), duplicating, and closing children.
  * Runs only with GSURF_TEST_GUI=1 (make test-gui).
  */
 
@@ -449,6 +452,300 @@ test_tabs_reopen_uses_hint(void)
 	clear_window(fx.window);
 }
 
+/* --- Tab context menu --- */
+
+/* The tabs module, loading it if no earlier case did. */
+static GsurfModule *
+tabs_module(void)
+{
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	g_autofree gchar *so = NULL;
+	g_autoptr(GError) error = NULL;
+	GsurfModule *tabs = gsurf_module_manager_get_module(mgr, "tabs");
+
+	if (tabs != NULL)
+		return tabs;
+	so = gsurf_webkit_test_module_path("tabs");
+	if (!g_file_test(so, G_FILE_TEST_EXISTS))
+		return NULL;
+	tabs = gsurf_module_manager_load_module(mgr, so, &error);
+	g_assert_no_error(error);
+	return tabs;
+}
+
+/* The sidebar row (the widget with the "gsurf-tab-row" class) of the
+ * view with @id, searching the widget tree under @root. */
+static GtkWidget *
+find_row(GtkWidget *root, guint64 id)
+{
+	guint64 *wid = g_object_get_data(G_OBJECT(root), "gsurf-tab-view-id");
+	GtkWidget *found = NULL;
+
+#ifdef GSURF_BACKEND_GTK4
+	if (wid != NULL && *wid == id && gtk_widget_has_css_class(root, "gsurf-tab-row"))
+		return root;
+	{
+		GtkWidget *child;
+
+		for (child = gtk_widget_get_first_child(root); child != NULL && found == NULL;
+		     child = gtk_widget_get_next_sibling(child))
+			found = find_row(child, id);
+	}
+#else
+	if (wid != NULL && *wid == id &&
+	    gtk_style_context_has_class(gtk_widget_get_style_context(root), "gsurf-tab-row"))
+		return root;
+	if (GTK_IS_CONTAINER(root)) {
+		g_autoptr(GList) children = gtk_container_get_children(GTK_CONTAINER(root));
+		GList *l;
+
+		for (l = children; l != NULL && found == NULL; l = l->next)
+			found = find_row(l->data, id);
+	}
+#endif
+	return found;
+}
+
+/* Right-click @view's sidebar row (once it is on screen), as the user
+ * does: the GTK4 gesture or the GTK3 button-press handler for button 3. */
+static void
+right_click(GsurfView *view)
+{
+	GtkWidget *toplevel = gsurf_window_get_native_widget(fx.window);
+	GtkWidget *row = NULL;
+	guint i;
+
+	for (i = 0; i < 200; i++) {
+		row = find_row(toplevel, gsurf_view_get_id(view));
+		if (row != NULL && gtk_widget_get_mapped(row))
+			break;
+		gsurf_webkit_test_spin(25);
+	}
+	g_assert_nonnull(row);
+	g_assert_true(gtk_widget_get_mapped(row));
+#ifdef GSURF_BACKEND_GTK4
+	{
+		g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(row);
+		GtkEventController *found = NULL;
+		GtkWidget *title;
+		graphene_rect_t bounds;
+
+		for (i = 0; i < g_list_model_get_n_items(controllers) && found == NULL; i++) {
+			g_autoptr(GtkEventController) c = g_list_model_get_item(controllers, i);
+
+			if (g_strcmp0(gtk_event_controller_get_name(c), "gsurf-chrome-click-3") == 0)
+				found = c; /* still owned by the row */
+		}
+		g_assert_nonnull(found);
+		/* Press on the title, as a user would: the row ignores presses
+		 * that land on its own buttons (twisty, close). */
+		for (title = gtk_widget_get_first_child(row); title != NULL;
+		     title = gtk_widget_get_next_sibling(title)) {
+			if (g_strcmp0(gtk_widget_get_name(title), "gsurf-tab-title") == 0)
+				break;
+		}
+		g_assert_nonnull(title);
+		/* Mapped is not laid out: wait for the title to get its size. */
+		for (i = 0; i < 200 && gtk_widget_get_width(title) == 0; i++)
+			gsurf_webkit_test_spin(25);
+		g_assert_true(gtk_widget_compute_bounds(title, row, &bounds));
+		g_assert_cmpfloat(bounds.size.width, >, 0);
+		g_signal_emit_by_name(found, "pressed", 1,
+			(gdouble)(bounds.origin.x + bounds.size.width / 2),
+			(gdouble)(bounds.origin.y + bounds.size.height / 2));
+	}
+#else
+	{
+		GdkEvent *event = gdk_event_new(GDK_BUTTON_PRESS);
+		gboolean handled = FALSE;
+
+		event->button.button = 3;
+		g_signal_emit_by_name(row, "button-press-event", event, &handled);
+		gdk_event_free(event);
+		g_assert_true(handled);
+	}
+#endif
+}
+
+/* Every label of @model in order, "|"-terminated; a submenu's labels
+ * are bracketed after its own. */
+static void
+append_labels(GMenuModel *model, GString *out)
+{
+	gint i;
+
+	for (i = 0; i < g_menu_model_get_n_items(model); i++) {
+		g_autofree gchar *label = NULL;
+		g_autoptr(GMenuModel) section = NULL;
+		g_autoptr(GMenuModel) submenu = NULL;
+
+		if (g_menu_model_get_item_attribute(model, i, G_MENU_ATTRIBUTE_LABEL, "s", &label))
+			g_string_append_printf(out, "%s|", label);
+		section = g_menu_model_get_item_link(model, i, G_MENU_LINK_SECTION);
+		if (section != NULL)
+			append_labels(section, out);
+		submenu = g_menu_model_get_item_link(model, i, G_MENU_LINK_SUBMENU);
+		if (submenu != NULL) {
+			g_string_append_c(out, '[');
+			append_labels(submenu, out);
+			g_string_append_c(out, ']');
+		}
+	}
+}
+
+/* The labels of the menu last opened by @tabs. */
+static gchar *
+menu_labels(GsurfModule *tabs)
+{
+	GMenuModel *model = g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-model");
+	GString *out = g_string_new(NULL);
+
+	g_assert_nonnull(model);
+	append_labels(model, out);
+	return g_string_free(out, FALSE);
+}
+
+/* The string state of the menu's "container" action. */
+static gchar *
+menu_container_state(GActionGroup *actions)
+{
+	g_autoptr(GVariant) state = g_action_group_get_action_state(actions, "container");
+
+	return g_variant_dup_string(state, NULL);
+}
+
+#define MENU_WITH_CHILDREN \
+	"Reload Tab|Duplicate Tab|Reopen in Container|" \
+	"[Default|Media|Work|New Temporary Container|]" \
+	"Collapse Tree|Close Children|Close Tab|"
+#define MENU_LEAF \
+	"Reload Tab|Duplicate Tab|Reopen in Container|" \
+	"[Default|Media|Work|New Temporary Container|]Close Tab|"
+
+/* Right click on a tab in the tree sidebar: the menu offers the
+ * containers and the tree actions that apply; reopening in another
+ * container (from the menu, or with container-reopen-next) replaces the
+ * tab in place and keeps its children under it; Duplicate opens a child
+ * copy in the same container; Close Children closes the subtree; Close
+ * is disabled on the last tab. */
+static void
+test_tabs_context_menu(void)
+{
+	g_autofree gchar *page = url("127.0.0.1", "/page");
+	g_autofree gchar *labels = NULL;
+	g_autofree gchar *state = NULL;
+	GActionGroup *actions;
+	GsurfModule *tabs;
+	GsurfView *base;
+	GsurfView *child;
+	GsurfView *fresh;
+	GsurfView *next;
+	GsurfView *copy;
+	gpointer weak;
+	guint i;
+
+	if (!setup())
+		return;
+	tabs = tabs_module();
+	if (tabs == NULL) {
+		g_test_skip("tabs.so not built");
+		return;
+	}
+	clear_window(fx.window);
+	g_assert_true(gsurf_module_activate(tabs));
+	actions = g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-actions");
+	g_assert_nonnull(actions);
+
+	/* 1. [base, child of base], the sidebar on screen. */
+	base = add_tab(fx.window, GSURF_CONTAINER_DEFAULT, NULL);
+	gsurf_webkit_test_load(gsurf_webkit_test_native(base), page);
+	child = gsurf_view_new_full(base, GSURF_CONTAINER_DEFAULT, page, FALSE);
+	gsurf_window_add_view(fx.window, child);
+	g_object_unref(child);
+	gsurf_webkit_test_load(gsurf_webkit_test_native(child), page);
+	gsurf_window_set_active_view(fx.window, base);
+	gsurf_window_present(fx.window);
+	g_assert_true(act(base, GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
+
+	/* 2. The parent's menu: containers, tree actions, a real menu. */
+	right_click(base);
+	labels = menu_labels(tabs);
+	g_assert_cmpstr(labels, ==, MENU_WITH_CHILDREN);
+	g_assert_nonnull(g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-widget"));
+	state = menu_container_state(actions);
+	g_assert_cmpstr(state, ==, GSURF_CONTAINER_DEFAULT);
+	g_assert_true(g_action_group_get_action_enabled(actions, "close"));
+
+	/* 3. Reopen in Media: same place, active, the child still its
+	 *    child, the old tab gone. */
+	weak = base;
+	g_object_add_weak_pointer(G_OBJECT(base), &weak);
+	g_action_group_activate_action(actions, "container", g_variant_new_string("media"));
+	fresh = gsurf_window_get_nth_view(fx.window, 0);
+	g_assert_true(fresh != weak || weak == NULL);
+	g_assert_cmpstr(gsurf_view_get_container_id(fresh), ==, "media");
+	g_assert_true(gsurf_window_get_active_view(fx.window) == fresh);
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 2);
+	g_assert_true(gsurf_window_get_nth_view(fx.window, 1) == child);
+	wait_loaded(fresh, page);
+	for (i = 0; i < 100 && weak != NULL; i++)
+		gsurf_webkit_test_spin(20);
+	g_assert_null(weak);
+	right_click(fresh);
+	g_clear_pointer(&labels, g_free);
+	labels = menu_labels(tabs);
+	g_assert_cmpstr(labels, ==, MENU_WITH_CHILDREN);
+	g_clear_pointer(&state, g_free);
+	state = menu_container_state(actions);
+	g_assert_cmpstr(state, ==, "media");
+
+	/* 4. container-reopen-next (Ctrl+Alt+c) keeps the children too. */
+	g_assert_true(act(fresh, GSURF_ACTION_CONTAINER_REOPEN_NEXT));
+	next = gsurf_window_get_nth_view(fx.window, 0);
+	g_assert_cmpstr(gsurf_view_get_container_id(next), ==, "work");
+	g_assert_true(gsurf_window_get_nth_view(fx.window, 1) == child);
+	wait_loaded(next, page);
+	right_click(next);
+	g_clear_pointer(&labels, g_free);
+	labels = menu_labels(tabs);
+	g_assert_cmpstr(labels, ==, MENU_WITH_CHILDREN);
+
+	/* 5. Duplicate the child: a child copy in the child's container,
+	 *    right after it, active. */
+	right_click(child);
+	g_clear_pointer(&labels, g_free);
+	labels = menu_labels(tabs);
+	g_assert_cmpstr(labels, ==, MENU_LEAF);
+	g_action_group_activate_action(actions, "duplicate", NULL);
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 3);
+	copy = gsurf_window_get_nth_view(fx.window, 2);
+	g_assert_true(gsurf_window_get_active_view(fx.window) == copy);
+	g_assert_true(gsurf_view_get_opener(copy) == child);
+	g_assert_null(gsurf_view_get_container_id(copy));
+	wait_loaded(copy, page);
+
+	/* 6. Close Children on the top tab closes the whole subtree. */
+	right_click(next);
+	g_action_group_activate_action(actions, "close-children", NULL);
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 1);
+	g_assert_true(gsurf_window_get_nth_view(fx.window, 0) == next);
+
+	/* 7. The last tab cannot be closed from the menu. */
+	right_click(next);
+	g_clear_pointer(&labels, g_free);
+	labels = menu_labels(tabs);
+	g_assert_cmpstr(labels, ==, MENU_LEAF);
+	g_assert_false(g_action_group_get_action_enabled(actions, "close"));
+	g_action_group_activate_action(actions, "close", NULL);
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 1);
+
+	g_assert_true(act(next, GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
+	gsurf_module_deactivate(tabs);
+	g_assert_null(g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-actions"));
+	g_assert_null(g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-widget"));
+	clear_window(fx.window);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -469,6 +766,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/containers-module/webkit/actions", test_actions);
 	g_test_add_func("/gsurf/containers-module/webkit/tabs-reopen-uses-hint",
 		test_tabs_reopen_uses_hint);
+	g_test_add_func("/gsurf/containers-module/webkit/tabs-context-menu",
+		test_tabs_context_menu);
 	result = g_test_run();
 	/* The window, application and module stay alive until exit: the
 	 * default module manager outlives the test functions. */

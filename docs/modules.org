@@ -16,7 +16,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =history=        | history              | =GsurfNavigationHook=            | implemented |
 | =homepage=       | homepage             | =GsurfInputHandler=              | implemented |
 | =toggles=        | toggle keybinds      | =GsurfInputHandler=              | implemented |
-| =tabs=           | tabbed(1) / tree tabs | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented (strip + tree sidebar; see [[file:tabs.org][tabs.org]]) |
+| =tabs=           | tabbed(1) / tree tabs | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented (strip + tree sidebar + tab context menu; see [[file:tabs.org][tabs.org]]) |
 | =chromebar=      | (address bar)        | =GsurfInputHandler= + =GsurfActionHandler= + window chrome | implemented |
 | =adblock=        | (new; high value)    | =GsurfNavigationHook= + =GsurfScriptInjector= + =GsurfRequestFilter= | implemented (uBO/ABP lists; see [[file:adblock.org][adblock.org]]) |
 | =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |

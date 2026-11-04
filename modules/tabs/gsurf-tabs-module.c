@@ -248,6 +248,90 @@ gsurf_tabs_toggle_collapse(GsurfTabsModule *self, guint64 id)
 	gsurf_tabs_ui_sync(self);
 }
 
+/* Reload the tab with @id from the network cache rules (not bypassed). */
+void
+gsurf_tabs_reload_tab(GsurfTabsModule *self, guint64 id)
+{
+	GsurfView *view = window_view(self, id);
+
+	if (view != NULL)
+		gsurf_view_reload(view, FALSE);
+}
+
+/* Open a copy of the tab with @id as its child (so the tree shows it
+ * right under the original), in the same container, and activate it. */
+void
+gsurf_tabs_duplicate_tab(GsurfTabsModule *self, guint64 id)
+{
+	GsurfConfig *config = gsurf_config_get_default();
+	GsurfView *view = window_view(self, id);
+	g_autoptr(GsurfView) copy = NULL;
+	const gchar *container;
+	const gchar *uri;
+
+	if (view == NULL)
+		return;
+	uri = gsurf_view_get_uri(view);
+	if (uri == NULL || *uri == '\0')
+		uri = gsurf_view_get_initial_uri(view);
+	if (uri == NULL || *uri == '\0')
+		uri = (config != NULL && config->new_view_uri != NULL)
+			? config->new_view_uri : "about:blank";
+	/* An explicit container (default included), so the containers
+	 * module's new-tab policy does not pick another one. */
+	container = gsurf_view_get_container_id(view);
+	copy = gsurf_view_new_full(view, container != NULL ? container : GSURF_CONTAINER_DEFAULT,
+		uri, FALSE);
+	if (copy == NULL)
+		return;
+	if (config != NULL && config->settings != NULL)
+		gsurf_view_apply_settings(copy, config->settings);
+	gsurf_window_add_view(self->window, copy);
+	gsurf_window_set_active_view(self->window, copy);
+	gsurf_view_load_uri(copy, uri);
+}
+
+/* Close every descendant of the tab with @id, keeping the tab itself
+ * (and, as always, at least one view in the window). */
+void
+gsurf_tabs_close_children(GsurfTabsModule *self, guint64 id)
+{
+	g_autoptr(GArray) doomed = NULL;
+	gint index;
+	gint last;
+	gint i;
+	guint j;
+
+	if (self->tree == NULL || window_view(self, id) == NULL)
+		return;
+	index = gsurf_tab_tree_get_index(self->tree, id);
+	last = gsurf_tab_tree_get_last_descendant_index(self->tree, id);
+	if (index < 0 || last <= index)
+		return;
+
+	/* Collect first: every removal re-derives the tree. */
+	doomed = g_array_new(FALSE, FALSE, sizeof(guint64));
+	for (i = index + 1; i <= last; i++) {
+		guint64 child = gsurf_tab_tree_get_nth(self->tree, (guint)i);
+
+		g_array_append_val(doomed, child);
+	}
+	for (j = 0; j < doomed->len; j++)
+		gsurf_tabs_close_tab(self, g_array_index(doomed, guint64, j));
+}
+
+/* Reopen the tab with @id in @container, in its place in the tree (the
+ * view-replaced handler hands the new view its children). */
+void
+gsurf_tabs_reopen_tab(GsurfTabsModule *self, guint64 id, const gchar *container)
+{
+	GsurfView *view = window_view(self, id);
+
+	if (view == NULL || gsurf_kiosk_is_enabled())
+		return;
+	gsurf_window_reopen_view(self->window, view, container);
+}
+
 /* tab-tree-collapse on the active tab: toggle its subtree; on a leaf,
  * collapse its parent (activating the parent). */
 static void
@@ -377,6 +461,26 @@ on_view_removed(GsurfWindow *window, GsurfView *view, gpointer user_data)
 	    gsurf_tab_tree_get_n_tabs(self->tree) != gsurf_window_get_n_views(window))
 		tree_sync_from_window(self);
 	gsurf_tabs_ui_sync(self);
+}
+
+/* gsurf_window_reopen_view() (this module's menu, the containers
+ * module's container-reopen-next, anyone): the new view takes the old
+ * one's place in the tree, children and collapse state included, so the
+ * old view's removal right after finds nothing to promote or close. */
+static void
+on_view_replaced(GsurfWindow *window, GsurfView *old_view, GsurfView *new_view,
+                 gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+
+	(void)window;
+	if (self->tree == NULL)
+		return;
+	if (gsurf_tab_tree_replace(self->tree, gsurf_view_get_id(old_view),
+	                           gsurf_view_get_id(new_view))) {
+		apply_tree_order(self);
+		gsurf_tabs_ui_sync(self);
+	}
 }
 
 /* Someone else reordered the window: the window order wins. */
@@ -688,6 +792,7 @@ gsurf_tabs_activate(GsurfModule *module)
 	g_signal_connect(window, "view-added", G_CALLBACK(on_view_added), self);
 	g_signal_connect(window, "view-removed", G_CALLBACK(on_view_removed), self);
 	g_signal_connect(window, "view-moved", G_CALLBACK(on_view_moved), self);
+	g_signal_connect(window, "view-replaced", G_CALLBACK(on_view_replaced), self);
 	g_signal_connect(window, "active-view-changed", G_CALLBACK(on_active_view_changed), self);
 
 	/* 3. Kiosk shows no strip and no sidebar; the keys still work. */

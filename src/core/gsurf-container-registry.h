@@ -268,6 +268,18 @@ void gsurf_container_registry_set_resolver(GsurfContainerRegistry *self,
                                            GDestroyNotify destroy);
 
 /**
+ * gsurf_container_registry_has_resolver:
+ * @self: a #GsurfContainerRegistry
+ *
+ * Whether a placement policy is installed, i.e. whether containers are
+ * in use (the containers module installs one while it is enabled).
+ * Chrome uses it to decide whether to offer container choices.
+ *
+ * Returns: %TRUE when a resolver is set
+ */
+gboolean gsurf_container_registry_has_resolver(GsurfContainerRegistry *self);
+
+/**
  * gsurf_container_registry_resolve:
  * @self: a #GsurfContainerRegistry
  * @opener: (nullable): the opening view

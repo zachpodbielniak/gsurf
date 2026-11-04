@@ -86,7 +86,7 @@ Each row shows, left to right:
 - the title (or the URI, or "New Tab"), ellipsized, updated on =title-changed=;
 - a close button.
 
-The row is indented by =indent= pixels per level and the active tab is highlighted with =active_color=. Clicking a row activates its tab; a middle click closes it. Clicks on the twisty and close buttons stay with those buttons.
+The row is indented by =indent= pixels per level and the active tab is highlighted with =active_color=. Clicking a row activates its tab; a middle click closes it; a right click opens its context menu (see "Context menu" below). Clicks on the twisty and close buttons stay with those buttons.
 
 Rows are kept and updated in place: adding, closing or moving a tab creates, removes or reorders one row, and each row only re-applies the properties (indentation, twisty, visibility, highlight) that changed. The strip is simply rebuilt.
 
@@ -94,9 +94,28 @@ Rows are kept and updated in place: adding, closing or moving a tab creates, rem
 
 A tab in a container (=gsurf_view_get_container_id()=, see =GsurfContainerRegistry=) gets a coloured stripe, a tooltip naming the container on the stripe, and "Container: <name>" in the row's tooltip. Tabs in the default container show none. The colour is the container's =color= (=fg_color= when it has none). The module follows the registry: =container-added= and =container-removed=, and each container's =notify::color= and =notify::name=, restyle and retitle the rows at once. Container colours pass through =GdkRGBA= before they reach the stylesheet, and only ids made of letters, digits, =-= and =_= become CSS classes (=gsurf-ctr-<id>=).
 
+** Context menu
+
+A right click on a sidebar row or a strip tab opens that tab's menu (a =GtkPopoverMenu= on GTK4, a =GtkMenu= on GTK3), in the style of Sidebery. It is built each time it opens, so it only offers what applies to that tab:
+
+| Entry                 | Shown when                | What it does |
+|-----------------------+---------------------------+--------------|
+| Reload Tab            | always                    | Reloads the tab (=gsurf_view_reload()=, cache not bypassed). |
+| Duplicate Tab         | always                    | Opens the tab's page in a new tab, as its child (right under it in the tree), in the same container, and activates it. |
+| Reopen in Container ▸ | containers are in use     | A submenu: =Default=, each persistent container in config order, and =New Temporary Container=. The tab's current container is the checked item. Picking one reopens the tab there (below). |
+| Collapse / Expand Tree | the tab has children     | Collapses or expands its subtree, like the twisty. |
+| Close Children        | the tab has children      | Closes its whole subtree and keeps the tab. |
+| Close Tab             | always (disabled on the last tab) | Closes the tab, like its close button. |
+
+"Containers are in use" means a placement policy is installed in the container registry (=gsurf_container_registry_has_resolver()=), i.e. the =containers= module is enabled. With it disabled the submenu is left out; the other entries work the same.
+
+*Reopening in a container* goes through =gsurf_window_reopen_view()=: WebKit fixes a tab's session when it is created, so a new tab is created in the chosen container with the old tab's opener, put at its place, made active and loaded with its URI, and then the old tab is removed. The window emits =view-replaced (old, new)= in between, and the module hands the old tab's place in the tree to the new one: same position, same parent, its children stay its children and its collapse state is kept, whatever =on_close_parent= says. =container-reopen-next= (=Ctrl+Alt+c=, the =containers= module) uses the same function, so it keeps the children too. The reopened page loads in the new container's jar: its cookies and storage, not the old ones. History (back/forward) does not carry over.
+
+The menu acts on the tab that was right-clicked, not on the active tab, and does nothing if that tab closed in the meantime. Its actions live in an action group inserted as =tab= on the strip and on the sidebar (=tab.reload=, =tab.duplicate=, =tab.container= with a string target, =tab.toggle-collapse=, =tab.close-children=, =tab.close=). The menu hangs off the strip or the sidebar and is positioned against the toplevel window, never against the tab's own widget, so reopening or closing the tab from the menu cannot leave the menu anchored to a destroyed widget (GTK3 on Wayland repositions popups against their anchor window).
+
 * The strip
 
-The strip shows one flat button per tab in window order (titles cut to 24 characters) with a close button; the active tab uses =active_color=. Clicking a tab activates it. It is shown when the window has more than one tab, or always with =show_single: true=, unless the sidebar is shown and =sidebar_hides_strip= is set. =strip: false= turns the strip off entirely, for a sidebar-only setup: the sidebar toggle then switches between the tree and no tab chrome at all, and the keyboard keys (=Ctrl+Tab= and friends) keep working.
+The strip shows one flat button per tab in window order (titles cut to 24 characters) with a close button; the active tab uses =active_color=. Clicking a tab activates it; a right click opens its context menu (see "Context menu"). It is shown when the window has more than one tab, or always with =show_single: true=, unless the sidebar is shown and =sidebar_hides_strip= is set. =strip: false= turns the strip off entirely, for a sidebar-only setup: the sidebar toggle then switches between the tree and no tab chrome at all, and the keyboard keys (=Ctrl+Tab= and friends) keep working.
 
 * Configuration
 
@@ -186,10 +205,12 @@ Click helpers ignore presses on a =GtkButton= nested in the clickable widget (GT
 
 The module follows the chrome module rules (=docs/modules.org=, "Chrome module lifetime"):
 
-- Deactivation and disposal disconnect every handler (window, views, container registry, containers, rows, strip buttons), detach the strip and sidebar, remove the stylesheet and free the tree. Both are idempotent, and =activate()= after =deactivate()= builds exactly one strip and one sidebar.
+- Deactivation and disposal disconnect every handler (window, views, container registry, containers, rows, strip buttons), close and drop the context menu and its action group, detach the strip and sidebar, remove the stylesheet and free the tree. Both are idempotent, and =activate()= after =deactivate()= builds exactly one strip and one sidebar.
 - The strip, the sidebar, its list and every row are retained by the module until cleanup, so the host destroying the window chrome first leaves no dangling pointers. The module holds a weak reference on the window and releases everything when the window finalizes first.
 
 * Tests
 
-- =tests/test-tab-tree.c= (headless, part of =make test=): the model compiled in directly (placement after the last descendant, nesting, promote and close_children, collapse and expansion, moving subtrees, =max_depth=, orphaned openers, rebuilding from the window order, a randomized 4000-step stress run checking the block invariants, a 2000-tab sync), and the real =tabs.so= configuration (defaults, custom and empty keys, a second =configure()= back to defaults, the shipped default config parsing without warnings, and every bad value warning).
-- =tests/test-chrome-lifecycle.c= (=make test-gui=, both backends): strip and sidebar lifetime (deactivate twice, reactivate, repeated disposal, the window dying first), toggling by =Ctrl+Shift+.= and by action, rows and indentation following the tree, =max_depth=, collapse by action, key and twisty, expansion on activation, move up/down by action and key, external reorders, row clicks and middle clicks, the close button, promote and close_children (including the last-view rule), title and favicon updates, container stripes following the registry (colour, name, added, removed, a malformed colour), strip hiding, sidebar position and width, and kiosk.
+- =tests/test-tab-tree.c= (headless, part of =make test=): the model compiled in directly (placement after the last descendant, nesting, promote and close_children, collapse and expansion, moving subtrees, =max_depth=, orphaned openers, rebuilding from the window order, handing a tab's place to its replacement (=gsurf_tab_tree_replace()=: position, parent, children, collapse state, refusals), a randomized 4000-step stress run checking the block invariants, a 2000-tab sync), and the real =tabs.so= configuration (defaults, custom and empty keys, a second =configure()= back to defaults, the shipped default config parsing without warnings, and every bad value warning).
+- =tests/test-chrome-lifecycle.c= (=make test-gui=, both backends): strip and sidebar lifetime (deactivate twice, reactivate, repeated disposal, the window dying first), toggling by =Ctrl+Shift+.= and by action, rows and indentation following the tree, =max_depth=, collapse by action, key and twisty, expansion on activation, move up/down by action and key, external reorders, row clicks and middle clicks, the close button, promote and close_children (including the last-view rule), title and favicon updates, container stripes following the registry (colour, name, added, removed, a malformed colour), strip hiding, sidebar position and width, kiosk, and the context menu without containers (entries per tab, collapse/expand, Close and Close Children acting on the right-clicked tab, the strip opening the same menu, no menu widget off screen, actions dropped on deactivation).
+- =tests/test-tabs-webkit.c= (=make test-gui=, both backends): the sidebar keeps exactly =sidebar_width= in a real window with a long tab title.
+- =tests/test-containers-module-webkit.c= (=make test-gui=, both backends), case =tabs-context-menu=: with the =containers= module enabled, in a real window, a right click on a row opens a real menu listing the containers with the current one checked; Reopen in Container moves the tab to Media in place with its child kept under it; =container-reopen-next= keeps the child too; Duplicate opens a child copy in the same container; Close Children closes the subtree; Close is disabled on the last tab.

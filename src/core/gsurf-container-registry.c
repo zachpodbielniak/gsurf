@@ -517,6 +517,14 @@ gsurf_container_registry_set_resolver(GsurfContainerRegistry *self,
 	self->resolver_destroy = destroy;
 }
 
+gboolean
+gsurf_container_registry_has_resolver(GsurfContainerRegistry *self)
+{
+	g_return_val_if_fail(GSURF_IS_CONTAINER_REGISTRY(self), FALSE);
+
+	return self->resolver != NULL;
+}
+
 gchar *
 gsurf_container_registry_resolve(GsurfContainerRegistry *self, GsurfView *opener,
                                  const gchar *requested, const gchar *uri,

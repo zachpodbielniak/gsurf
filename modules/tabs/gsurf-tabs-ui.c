@@ -155,6 +155,271 @@ build_css(GsurfTabsModule *self)
 }
 
 /* ------------------------------------------------------------------ */
+/* Context menu                                                        */
+/* ------------------------------------------------------------------ */
+
+/* The actions behind the menu items ("tab.<name>"). They act on
+ * self->menu_tab, the tab the menu was opened on; a tab that closed in
+ * the meantime makes them no-ops. */
+static const gchar *const menu_simple_actions[] = {
+	"reload", "duplicate", "toggle-collapse", "close-children", "close", NULL
+};
+
+static void
+on_menu_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	const gchar *name = g_action_get_name(G_ACTION(action));
+	guint64 id = self->menu_tab;
+
+	if (g_strcmp0(name, "reload") == 0)
+		gsurf_tabs_reload_tab(self, id);
+	else if (g_strcmp0(name, "duplicate") == 0)
+		gsurf_tabs_duplicate_tab(self, id);
+	else if (g_strcmp0(name, "toggle-collapse") == 0)
+		gsurf_tabs_toggle_collapse(self, id);
+	else if (g_strcmp0(name, "close-children") == 0)
+		gsurf_tabs_close_children(self, id);
+	else if (g_strcmp0(name, "close") == 0)
+		gsurf_tabs_close_tab(self, id);
+	else if (g_strcmp0(name, "container") == 0 && parameter != NULL)
+		gsurf_tabs_reopen_tab(self, id, g_variant_get_string(parameter, NULL));
+}
+
+/* The "tab" action group: the plain actions plus "container", a
+ * string-stateful action (its state, the tab's current container, makes
+ * the matching menu item a checked radio item). */
+static GSimpleActionGroup *
+menu_actions_new(GsurfTabsModule *self)
+{
+	GSimpleActionGroup *group = g_simple_action_group_new();
+	g_autoptr(GSimpleAction) container = NULL;
+	guint i;
+
+	for (i = 0; menu_simple_actions[i] != NULL; i++) {
+		g_autoptr(GSimpleAction) action = g_simple_action_new(menu_simple_actions[i], NULL);
+
+		g_signal_connect(action, "activate", G_CALLBACK(on_menu_action), self);
+		g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(action));
+	}
+	container = g_simple_action_new_stateful("container", G_VARIANT_TYPE_STRING,
+		g_variant_new_string(GSURF_CONTAINER_DEFAULT));
+	g_signal_connect(container, "activate", G_CALLBACK(on_menu_action), self);
+	g_action_map_add_action(G_ACTION_MAP(group), G_ACTION(container));
+	return group;
+}
+
+static void
+menu_set_enabled(GsurfTabsModule *self, const gchar *name, gboolean enabled)
+{
+	GAction *action = g_action_map_lookup_action(G_ACTION_MAP(self->menu_actions), name);
+
+	if (action != NULL)
+		g_simple_action_set_enabled(G_SIMPLE_ACTION(action), enabled);
+}
+
+/* One menu item bound to "tab.container" with @target. */
+static void
+menu_append_container(GMenu *menu, const gchar *label, const gchar *target)
+{
+	g_autoptr(GMenuItem) item = g_menu_item_new(label, NULL);
+
+	g_menu_item_set_action_and_target_value(item, GSURF_TABS_MENU_PREFIX ".container",
+		g_variant_new_string(target));
+	g_menu_append_item(menu, item);
+}
+
+/*
+ * menu_model_new:
+ *
+ * The menu for the tab with @id, built fresh on every opening so it only
+ * offers what applies:
+ *   1. Reload, Duplicate;
+ *   2. "Reopen in Container" (only while containers are in use, i.e. a
+ *      placement policy is installed): Default, each persistent
+ *      container in registry order, and a new temporary container;
+ *   3. Collapse/Expand Tree and Close Children (only with children);
+ *   4. Close Tab.
+ */
+static GMenuModel *
+menu_model_new(GsurfTabsModule *self, guint64 id)
+{
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+	GMenu *menu = g_menu_new();
+	g_autoptr(GMenu) basic = g_menu_new();
+	g_autoptr(GMenu) tree = g_menu_new();
+	g_autoptr(GMenu) closing = g_menu_new();
+	guint children;
+
+	/* 1. */
+	g_menu_append(basic, "Reload Tab", GSURF_TABS_MENU_PREFIX ".reload");
+	g_menu_append(basic, "Duplicate Tab", GSURF_TABS_MENU_PREFIX ".duplicate");
+	g_menu_append_section(menu, NULL, G_MENU_MODEL(basic));
+
+	/* 2. */
+	if (gsurf_container_registry_has_resolver(registry)) {
+		g_autoptr(GMenu) containers = g_menu_new();
+		g_autoptr(GMenu) section = g_menu_new();
+		g_autoptr(GPtrArray) all = gsurf_container_registry_list(registry);
+		guint i;
+
+		menu_append_container(containers, "Default", GSURF_CONTAINER_DEFAULT);
+		for (i = 0; i < all->len; i++) {
+			GsurfContainer *c = g_ptr_array_index(all, i);
+
+			if (!gsurf_container_get_temporary(c))
+				menu_append_container(containers, gsurf_container_get_name(c),
+					gsurf_container_get_id(c));
+		}
+		menu_append_container(containers, "New Temporary Container",
+			GSURF_CONTAINER_TEMPORARY);
+		g_menu_append_submenu(section, "Reopen in Container", G_MENU_MODEL(containers));
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(section));
+	}
+
+	/* 3. */
+	children = self->tree != NULL ? gsurf_tab_tree_get_n_children(self->tree, id) : 0;
+	if (children > 0) {
+		g_menu_append(tree, gsurf_tab_tree_get_collapsed(self->tree, id)
+			? "Expand Tree" : "Collapse Tree", GSURF_TABS_MENU_PREFIX ".toggle-collapse");
+		g_menu_append(tree, "Close Children", GSURF_TABS_MENU_PREFIX ".close-children");
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(tree));
+	}
+
+	/* 4. */
+	g_menu_append(closing, "Close Tab", GSURF_TABS_MENU_PREFIX ".close");
+	g_menu_append_section(menu, NULL, G_MENU_MODEL(closing));
+	return G_MENU_MODEL(menu);
+}
+
+/* Pop down and drop the open menu, if any. */
+static void
+menu_close(GsurfTabsModule *self)
+{
+	if (self->menu == NULL)
+		return;
+	g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_WIDGET_DATA, NULL);
+#ifdef GSURF_BACKEND_GTK4
+	/* The parent holds the only reference. */
+	gtk_widget_unparent(self->menu);
+	self->menu = NULL;
+#else
+	gtk_widget_destroy(self->menu);
+	g_clear_object(&self->menu);
+#endif
+}
+
+/*
+ * menu_popup:
+ * @id: the tab the menu is for
+ * @anchor: the clicked widget (a sidebar row or a strip tab)
+ * @parent: a long-lived ancestor of @anchor holding the "tab" actions
+ *   (the sidebar or the strip); the menu hangs off it, so rebuilding the
+ *   strip or dropping a row never leaves the menu without a parent
+ *
+ * Prepares the actions for @id (the current container checked, Close
+ * disabled for the last tab) and shows the menu: a #GtkPopoverMenu on
+ * GTK4, a #GtkMenu on GTK3. The model is published as object data even
+ * when @anchor is not on screen (headless tests), where no menu widget
+ * is created.
+ */
+static void
+menu_popup(GsurfTabsModule *self, guint64 id, GtkWidget *anchor, GtkWidget *parent)
+{
+	g_autoptr(GMenuModel) model = NULL;
+	GsurfView *view = gsurf_view_lookup(id);
+	GAction *container;
+	const gchar *current;
+
+	if (self->menu_actions == NULL || view == NULL || self->window == NULL)
+		return;
+	menu_close(self);
+	self->menu_tab = id;
+
+	/* 1. Action state for this tab. */
+	current = gsurf_view_get_container_id(view);
+	container = g_action_map_lookup_action(G_ACTION_MAP(self->menu_actions), "container");
+	g_simple_action_set_state(G_SIMPLE_ACTION(container),
+		g_variant_new_string(current != NULL ? current : GSURF_CONTAINER_DEFAULT));
+	menu_set_enabled(self, "close", gsurf_window_get_n_views(self->window) > 1);
+
+	/* 2. The model. */
+	model = menu_model_new(self, id);
+	g_object_set_data_full(G_OBJECT(self), GSURF_TABS_MENU_MODEL_DATA,
+		g_object_ref(model), g_object_unref);
+	if (!gtk_widget_get_mapped(anchor))
+		return;
+
+	/* 3. The menu widget. */
+#ifdef GSURF_BACKEND_GTK4
+	{
+		graphene_rect_t bounds;
+
+		self->menu = gtk_popover_menu_new_from_model(model);
+		gtk_widget_set_name(self->menu, GSURF_TABS_MENU_NAME);
+		gtk_widget_set_parent(self->menu, parent);
+		if (gtk_widget_compute_bounds(anchor, parent, &bounds)) {
+			GdkRectangle rect;
+
+			rect.x = (gint)bounds.origin.x;
+			rect.y = (gint)bounds.origin.y;
+			rect.width = (gint)bounds.size.width;
+			rect.height = (gint)bounds.size.height;
+			gtk_popover_set_pointing_to(GTK_POPOVER(self->menu), &rect);
+		}
+		gtk_popover_set_has_arrow(GTK_POPOVER(self->menu), FALSE);
+		gtk_popover_popup(GTK_POPOVER(self->menu));
+	}
+#else
+	{
+		GdkEvent *event = gtk_get_current_event();
+		GtkWidget *toplevel = gtk_widget_get_toplevel(anchor);
+		GdkWindow *toplevel_window = gtk_widget_get_window(toplevel);
+		GtkAllocation allocation;
+		GdkRectangle rect;
+		GdkDevice *device;
+
+		/* 1. Where: the pointer for a real click, else the tab's lower
+		 *    left corner; in the toplevel's coordinates. The menu is
+		 *    positioned against the toplevel's window, never the tab's:
+		 *    the tab's row may be destroyed while the menu is up (the
+		 *    tab is reopened from it), and GTK3 on Wayland would then
+		 *    reposition the popup against a dead window. */
+		gtk_widget_get_allocation(anchor, &allocation);
+		gtk_widget_translate_coordinates(anchor, toplevel, 0, allocation.height,
+			&rect.x, &rect.y);
+		device = event != NULL ? gdk_event_get_device(event) : NULL;
+		if (device != NULL)
+			gdk_window_get_device_position(toplevel_window, device, &rect.x, &rect.y, NULL);
+		rect.width = 1;
+		rect.height = 1;
+
+		/* 2. A trigger event for the grab: the click being handled, or
+		 *    (a synthesized click, no event being dispatched) one made
+		 *    on the toplevel for the seat's pointer. */
+		if (event == NULL) {
+			GdkSeat *seat = gdk_display_get_default_seat(gtk_widget_get_display(anchor));
+
+			event = gdk_event_new(GDK_BUTTON_PRESS);
+			event->button.window = g_object_ref(toplevel_window);
+			event->button.button = 3;
+			event->button.time = GDK_CURRENT_TIME;
+			if (seat != NULL)
+				gdk_event_set_device(event, gdk_seat_get_pointer(seat));
+		}
+
+		self->menu = g_object_ref_sink(gtk_menu_new_from_model(model));
+		gtk_widget_set_name(self->menu, GSURF_TABS_MENU_NAME);
+		gtk_menu_attach_to_widget(GTK_MENU(self->menu), parent, NULL);
+		gtk_menu_popup_at_rect(GTK_MENU(self->menu), toplevel_window, &rect,
+			GDK_GRAVITY_NORTH_WEST, GDK_GRAVITY_NORTH_WEST, event);
+		gdk_event_free(event);
+	}
+#endif
+	g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_WIDGET_DATA, self->menu);
+}
+
+/* ------------------------------------------------------------------ */
 /* Strip                                                               */
 /* ------------------------------------------------------------------ */
 
@@ -163,6 +428,15 @@ on_strip_tab_clicked(GtkButton *button, gpointer user_data)
 {
 	gsurf_tabs_activate_tab(GSURF_TABS_MODULE(user_data),
 		gsurf_tabs_get_widget_id(GTK_WIDGET(button)));
+}
+
+/* Right click on a strip tab: its context menu. */
+static void
+on_strip_tab_menu(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+
+	menu_popup(self, gsurf_tabs_get_widget_id(widget), widget, self->bar);
 }
 
 static void
@@ -208,6 +482,7 @@ strip_rebuild(GsurfTabsModule *self)
 		button = gsurf_chrome_button_new_flat(label);
 		gsurf_tabs_set_widget_id(button, id);
 		g_signal_connect(button, "clicked", G_CALLBACK(on_strip_tab_clicked), self);
+		gsurf_chrome_connect_click(button, 3, on_strip_tab_menu, self);
 
 		close = gsurf_chrome_button_new_flat(CLOSE_LABEL);
 		gsurf_tabs_set_widget_id(close, id);
@@ -234,6 +509,15 @@ static void
 on_row_middle_click(GtkWidget *widget, gpointer user_data)
 {
 	gsurf_tabs_close_tab(GSURF_TABS_MODULE(user_data), gsurf_tabs_get_widget_id(widget));
+}
+
+/* Right click on a row: the tab's context menu. */
+static void
+on_row_menu(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+
+	menu_popup(self, gsurf_tabs_get_widget_id(widget), widget, self->sidebar_box);
 }
 
 static void
@@ -297,13 +581,14 @@ row_new(GsurfTabsModule *self, guint64 id)
 	gsurf_chrome_box_pack(row->box, row->title, TRUE, 0);
 	gsurf_chrome_box_pack(row->box, row->close, FALSE, 0);
 
-	/* Clicks: primary activates, middle closes. The twisty and close
-	 * buttons keep their own presses. */
+	/* Clicks: primary activates, middle closes, secondary opens the
+	 * context menu. The twisty and close buttons keep their own presses. */
 	row->row = g_object_ref_sink(gsurf_chrome_clickable_new(row->box));
 	gsurf_chrome_widget_add_class(row->row, "gsurf-tab-row");
 	gsurf_tabs_set_widget_id(row->row, id);
 	gsurf_chrome_connect_click(row->row, 1, on_row_click, self);
 	gsurf_chrome_connect_click(row->row, 2, on_row_middle_click, self);
+	gsurf_chrome_connect_click(row->row, 3, on_row_menu, self);
 	return row;
 }
 
@@ -504,13 +789,34 @@ gsurf_tabs_ui_install(GsurfTabsModule *self)
 	self->rows = g_hash_table_new(g_int64_hash, g_int64_equal);
 	self->row_order = g_ptr_array_new();
 
-	/* 4. Fill both from the current tabs. */
+	/* 4. The context menu actions, reachable from both tab views. */
+	self->menu_actions = menu_actions_new(self);
+	gtk_widget_insert_action_group(self->bar, GSURF_TABS_MENU_PREFIX,
+		G_ACTION_GROUP(self->menu_actions));
+	gtk_widget_insert_action_group(self->sidebar_box, GSURF_TABS_MENU_PREFIX,
+		G_ACTION_GROUP(self->menu_actions));
+	g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_ACTIONS_DATA, self->menu_actions);
+
+	/* 5. Fill both from the current tabs. */
 	gsurf_tabs_ui_sync(self);
 }
 
 void
 gsurf_tabs_ui_uninstall(GsurfTabsModule *self)
 {
+	/* The menu hangs off the strip or the sidebar: it goes first. */
+	menu_close(self);
+	g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_MODEL_DATA, NULL);
+	if (self->menu_actions != NULL) {
+		g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_ACTIONS_DATA, NULL);
+		if (self->bar != NULL)
+			gtk_widget_insert_action_group(self->bar, GSURF_TABS_MENU_PREFIX, NULL);
+		if (self->sidebar_box != NULL)
+			gtk_widget_insert_action_group(self->sidebar_box, GSURF_TABS_MENU_PREFIX, NULL);
+		g_clear_object(&self->menu_actions);
+	}
+	self->menu_tab = 0;
+
 	/* Rows first: they hold handlers with the module as data. */
 	if (self->row_order != NULL) {
 		guint i;

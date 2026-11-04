@@ -279,6 +279,48 @@ gsurf_tab_tree_remove(GsurfTabTree *tree, guint64 id, GsurfTabTreeClosePolicy po
 	derive(tree);
 }
 
+gboolean
+gsurf_tab_tree_replace(GsurfTabTree *tree, guint64 old_id, guint64 new_id)
+{
+	TabNode *node;
+	TabNode *other;
+	GHashTableIter iter;
+	gpointer value;
+
+	if (old_id == 0 || new_id == 0 || old_id == new_id)
+		return FALSE;
+	node = lookup(tree, old_id);
+	if (node == NULL)
+		return FALSE;
+
+	/* 1. The replacement leaves wherever it was put. */
+	other = lookup(tree, new_id);
+	if (other != NULL) {
+		g_array_remove_index(tree->order, other->index);
+		g_hash_table_remove(tree->nodes, &new_id);
+		/* Indices after it shifted; re-derive before using them. */
+		derive(tree);
+	}
+
+	/* 2. The old node becomes the new one: re-key it (the key points at
+	 *    node->id) and rename it in the order. */
+	g_hash_table_steal(tree->nodes, &old_id);
+	node->id = new_id;
+	g_hash_table_insert(tree->nodes, &node->id, node);
+	g_array_index(tree->order, guint64, node->index) = new_id;
+
+	/* 3. Its children follow it. */
+	g_hash_table_iter_init(&iter, tree->nodes);
+	while (g_hash_table_iter_next(&iter, NULL, &value)) {
+		TabNode *n = value;
+
+		if (n->hint == old_id)
+			n->hint = new_id;
+	}
+	derive(tree);
+	return TRUE;
+}
+
 void
 gsurf_tab_tree_sync(GsurfTabTree *tree, const guint64 *ids, const guint64 *opener_ids,
                     guint n)

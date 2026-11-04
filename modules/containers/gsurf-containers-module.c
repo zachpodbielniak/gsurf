@@ -954,34 +954,25 @@ next_container(const gchar *current)
 }
 
 /* container-reopen-next: the current page, reopened in the next
- * container of the cycle, in the same place with the same opener. */
+ * container of the cycle, in the same place with the same opener
+ * (gsurf_window_reopen_view(), shared with the tabs context menu). */
 static gboolean
 action_reopen_next(GsurfContainersModule *self, GsurfView *view)
 {
-	GsurfConfig *config = gsurf_config_get_default();
 	GsurfWindow *window;
 	g_autofree gchar *next = NULL;
-	const gchar *uri;
-	gint index;
+	GsurfView *fresh;
 
 	if (view == NULL || (window = window_for_view(view)) == NULL)
 		return FALSE;
-	uri = gsurf_view_get_uri(view);
-	if (uri == NULL || *uri == '\0')
-		uri = gsurf_view_get_initial_uri(view);
-	if (uri == NULL || *uri == '\0')
-		uri = (config != NULL && config->new_view_uri != NULL)
-			? config->new_view_uri : "about:blank";
-
 	next = next_container(gsurf_view_get_container_id(view));
-	index = gsurf_window_get_view_index(window, view);
-
-	/* Hold the old view: its opener must outlive the new view's
-	 * construction, and removal drops the window's reference. */
-	g_object_ref(view);
-	open_view(self, window, (guint)index, gsurf_view_get_opener(view), next, uri);
-	gsurf_window_remove_view(window, view);
-	g_object_unref(view);
+	fresh = gsurf_window_reopen_view(window, view, next);
+	if (fresh == NULL)
+		return FALSE;
+	/* Explicit placement: exempt from host reassignment until its first
+	 * load commits, like every view this module opens. */
+	view_state(fresh)->exempt = TRUE;
+	track_view(self, fresh);
 	return TRUE;
 }
 
