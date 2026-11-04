@@ -122,6 +122,108 @@ These are answered *synchronously*, so a host hook must decide without blocking:
   permission module is enabled. A blocking modal inside this callback is unsafe;
   decide from a policy, or defer by reffing the request and answering later.
 
+* Arranging views: window layouts
+
+A host that wants several views on screen in one =GsurfWindow= (panes, a grid, a carousel) implements =GsurfWindowLayout= and installs it with =gsurf_window_set_layout()=; see "Window layouts (panes)" in =architecture.org= for the full contract and call order. The layout owns its root widget and decides where each view widget goes; the window keeps the view list, the active view and every signal, so modules (tabs, chromebar, session) keep working. cmacs could implement it to put several gsurf views in one frame without giving up the window's bookkeeping.
+
+The minimal useful layout shows two views side by side (GTK4 shown; GTK3 uses =gtk_box_pack_start()= / =gtk_container_remove()=). =tests/test-window-layout-webkit.c= has the same layout for both toolkits.
+
+#+begin_src c
+typedef struct { GObject parent; GtkWidget *box; } PairLayout;
+typedef struct { GObjectClass parent; } PairLayoutClass;
+static void pair_iface_init(GsurfWindowLayoutInterface *iface);
+G_DEFINE_TYPE_WITH_CODE(PairLayout, pair_layout, G_TYPE_OBJECT,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_WINDOW_LAYOUT, pair_iface_init))
+
+static gpointer pair_root(GsurfWindowLayout *l) { return ((PairLayout *)l)->box; }
+
+static void
+drop(GtkWidget *box, GtkWidget *w)
+{
+	if (gtk_widget_get_parent(w) == box)
+		gtk_box_remove(GTK_BOX(box), w);
+}
+
+static void
+pair_add(GsurfWindowLayout *l, GsurfWindow *window, GsurfView *view)
+{
+	GtkWidget *box = ((PairLayout *)l)->box;
+	GtkWidget *w = gsurf_view_get_native_widget(view);
+
+	/* Two panes; any further view stays an unparented background view. */
+	if (gtk_widget_get_first_child(box) == gtk_widget_get_last_child(box)) {
+		gtk_widget_set_hexpand(w, TRUE);
+		gtk_box_append(GTK_BOX(box), w);
+	}
+}
+
+static void
+pair_remove(GsurfWindowLayout *l, GsurfWindow *window, GsurfView *view)
+{
+	drop(((PairLayout *)l)->box, gsurf_view_get_native_widget(view));
+	gsurf_window_layout_notify_visible(window);
+}
+
+static void
+pair_activate(GsurfWindowLayout *l, GsurfWindow *window, GsurfView *view)
+{
+	/* A background view would be swapped into a pane here. */
+	gsurf_view_focus(view);
+}
+
+static void
+pair_detach(GsurfWindowLayout *l, GsurfWindow *window)
+{
+	GPtrArray *views = gsurf_window_get_views(window);
+
+	for (guint i = 0; i < views->len; i++)
+		drop(((PairLayout *)l)->box,
+		     gsurf_view_get_native_widget(g_ptr_array_index(views, i)));
+}
+
+static gboolean
+pair_visible(GsurfWindowLayout *l, GsurfWindow *window, GsurfView *view)
+{
+	return gtk_widget_get_parent(gsurf_view_get_native_widget(view)) ==
+	       ((PairLayout *)l)->box;
+}
+
+static void
+pair_iface_init(GsurfWindowLayoutInterface *iface)
+{
+	iface->get_root = pair_root;
+	iface->detach = pair_detach;
+	iface->add_view = pair_add;
+	iface->remove_view = pair_remove;
+	iface->activate_view = pair_activate;
+	iface->is_view_visible = pair_visible;
+}
+
+static void pair_layout_class_init(PairLayoutClass *klass) { }
+
+static void
+pair_layout_init(PairLayout *self)
+{
+	/* The layout keeps its own reference: the window only packs it. */
+	self->box = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+	gtk_box_set_homogeneous(GTK_BOX(self->box), TRUE);
+}
+
+/* ... */
+PairLayout *layout = g_object_new(pair_layout_get_type(), NULL);
+if (!gsurf_window_set_layout(window, GSURF_WINDOW_LAYOUT(layout)))
+	;   /* kiosk mode, or the libregnum backend: one view at a time */
+g_object_unref(layout);                        /* the window holds it */
+/* later: gsurf_window_set_layout(window, NULL) restores the stack */
+#+end_src
+
+Rules worth knowing:
+
+- Views keep their own reference to their widget, so a layout may unparent a view widget freely; WebKit unrealizes a widget that is unparented, which can flash.
+- =add_view= must not focus; =activate_view= must (the window does not focus the view itself while a layout is set). Focus into a visible view makes it active (focus follows click); a background view never becomes active that way.
+- Call =gsurf_window_layout_notify_visible()= whenever the views on screen change, so chrome can follow (=visible-views-changed=).
+- =gsurf_window_set_key_grab()= lets a host or module see the next key even while the user types in a page field or the address bar, e.g. after a prefix key.
+
 * GObject Introspection
 
 =make BUILD_GIR=1= produces =Gsurf-0.2.gir= / =Gsurf-0.2.typelib=, so gsurf can be

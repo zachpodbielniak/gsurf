@@ -49,6 +49,7 @@
 
 /* Window */
 #include "window/gsurf-window.h"
+#include "window/gsurf-window-layout.h"
 
 /* Module system */
 #include "module/gsurf-module.h"

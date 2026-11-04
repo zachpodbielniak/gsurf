@@ -8,6 +8,7 @@
 #include "boxed/gsurf-keybind-help.h"
 #include "util/gsurf-kiosk.h"
 #include "window/gsurf-window.h"
+#include "window/gsurf-window-layout.h"
 
 #include <gdk/gdk.h>
 
@@ -16,6 +17,9 @@ typedef struct {
 	GsurfView *active;    /* borrowed (element of views) */
 	gboolean   fullscreen;
 	gboolean   help_overlay; /* in-page JS help is visible */
+	GsurfWindowLayout *layout; /* owned; NULL = the backend's view stack */
+	gboolean   layout_warned;  /* refusal already logged for this window */
+	gboolean   key_grab;       /* every key goes to key-press */
 } GsurfWindowPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfWindow, gsurf_window, G_TYPE_OBJECT)
@@ -29,6 +33,7 @@ enum {
 	SIG_BUTTON_PRESS,
 	SIG_VIEW_MOVED,
 	SIG_VIEW_REPLACED,
+	SIG_VISIBLE_VIEWS_CHANGED,
 	N_SIGNALS
 };
 
@@ -46,6 +51,23 @@ gsurf_window_constructed(GObject *object)
 	 * instance has been initialized. */
 	if (klass->realize != NULL)
 		klass->realize(self);
+}
+
+/* Remove an installed layout before the views and the backend's widgets
+ * go: the layout drops its per-window state and every view widget is
+ * back in the stack, where the backend's own teardown expects it. The
+ * GTK backends do this themselves before destroying their toplevel;
+ * this covers every other subclass. */
+static void
+gsurf_window_dispose(GObject *object)
+{
+	GsurfWindow *self = GSURF_WINDOW(object);
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+
+	if (priv->layout != NULL)
+		gsurf_window_set_layout(self, NULL);
+
+	G_OBJECT_CLASS(gsurf_window_parent_class)->dispose(object);
 }
 
 static void
@@ -225,6 +247,7 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 
 	object_class->constructed = gsurf_window_constructed;
+	object_class->dispose = gsurf_window_dispose;
 	object_class->finalize = gsurf_window_finalize;
 	klass->show_keybind_help = gsurf_window_show_keybind_help_js;
 
@@ -308,15 +331,33 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 	 * @old_view: the view being replaced, still in the window
 	 * @new_view: its replacement, already in the window
 	 *
-	 * Emitted by gsurf_window_reopen_view() between adding @new_view
-	 * (#GsurfWindow::view-added) and removing @old_view
+	 * Emitted by gsurf_window_reopen_view() after adding @new_view
+	 * (#GsurfWindow::view-added) and before activating it
+	 * (#GsurfWindow::active-view-changed) and removing @old_view
 	 * (#GsurfWindow::view-removed), so chrome can hand @old_view's place
-	 * (for example its children in a tab tree) to @new_view.
+	 * (its children in a tab tree, its pane in a layout) to @new_view
+	 * before activation would move it.
 	 */
 	signals[SIG_VIEW_REPLACED] = g_signal_new(
 		"view-replaced", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 2, GSURF_TYPE_VIEW, GSURF_TYPE_VIEW);
+
+	/**
+	 * GsurfWindow::visible-views-changed:
+	 * @window: the window
+	 *
+	 * Emitted when the set of views on screen may have changed: a
+	 * #GsurfWindowLayout was installed or removed, or the layout called
+	 * gsurf_window_layout_notify_visible(). Ask
+	 * gsurf_window_get_view_visible() for each view. Without a layout the
+	 * visible view is the active one; follow
+	 * #GsurfWindow::active-view-changed for that.
+	 */
+	signals[SIG_VISIBLE_VIEWS_CHANGED] = g_signal_new(
+		"visible-views-changed", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 0);
 }
 
 static void
@@ -359,8 +400,15 @@ gsurf_window_insert_view(GsurfWindow *self, GsurfView *view, guint index)
 		return;
 	g_ptr_array_insert(priv->views, (gint)MIN(index, priv->views->len), g_object_ref(view));
 
-	if (klass->insert_view != NULL)
+	/* With a layout the view goes to the layout, not the stack; the
+	 * backend still wires its event routing (buttons, focus). */
+	if (priv->layout != NULL) {
+		if (klass->connect_view != NULL)
+			klass->connect_view(self, view);
+		gsurf_window_layout_add_view(priv->layout, self, view);
+	} else if (klass->insert_view != NULL) {
 		klass->insert_view(self, view);
+	}
 
 	g_signal_emit(self, signals[SIG_VIEW_ADDED], 0, view);
 
@@ -384,7 +432,11 @@ gsurf_window_remove_view(GsurfWindow *self, GsurfView *view)
 	if (!g_ptr_array_find(priv->views, view, &idx))
 		return;
 
-	if (klass->remove_view != NULL)
+	/* The layout unparents the widget; the neighbour logic below then
+	 * activates the next view through the layout too. */
+	if (priv->layout != NULL)
+		gsurf_window_layout_remove_view(priv->layout, self, view);
+	else if (klass->remove_view != NULL)
 		klass->remove_view(self, view);
 
 	/* Hold a ref across the removal so we can still emit the signal. */
@@ -464,7 +516,9 @@ gsurf_window_set_active_view(GsurfWindow *self, GsurfView *view)
 
 	priv->active = view;
 
-	if (klass->set_active_view != NULL)
+	if (priv->layout != NULL)
+		gsurf_window_layout_activate_view(priv->layout, self, view);
+	else if (klass->set_active_view != NULL)
 		klass->set_active_view(self, view);
 
 	g_signal_emit(self, signals[SIG_ACTIVE_VIEW_CHANGED], 0, view);
@@ -514,6 +568,181 @@ gsurf_window_get_nth_view(GsurfWindow *self, guint index)
 	if (index >= priv->views->len)
 		return NULL;
 	return g_ptr_array_index(priv->views, index);
+}
+
+/* --- Layouts, visibility, key grab --- */
+
+/* Log a refused gsurf_window_set_layout() once per window: a module that
+ * retries on every activation must not flood the log. */
+static void
+gsurf_window_warn_layout(GsurfWindow *self, const gchar *why)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+
+	if (priv->layout_warned)
+		return;
+	priv->layout_warned = TRUE;
+	g_warning("gsurf_window_set_layout: %s; the window keeps one view at a time", why);
+}
+
+/* Hand every view from the backend stack to @layout (priv->layout is
+ * already @layout). The order is part of the contract: the widgets leave
+ * the stack before attach, the views arrive in window order, the active
+ * one is activated, and only then is the root packed. */
+static void
+gsurf_window_attach_layout(GsurfWindow *self, GsurfWindowLayout *layout)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	GsurfWindowClass *klass = GSURF_WINDOW_GET_CLASS(self);
+	guint i;
+
+	/* 1. Out of the stack (the views keep their own widget references). */
+	for (i = 0; i < priv->views->len; i++) {
+		if (klass->remove_view != NULL)
+			klass->remove_view(self, g_ptr_array_index(priv->views, i));
+	}
+
+	/* 2. The layout takes them over, in order, then shows the active one. */
+	gsurf_window_layout_attach(layout, self);
+	for (i = 0; i < priv->views->len; i++)
+		gsurf_window_layout_add_view(layout, self, g_ptr_array_index(priv->views, i));
+	if (priv->active != NULL)
+		gsurf_window_layout_activate_view(layout, self, priv->active);
+
+	/* 3. Its root replaces the stack on screen. */
+	klass->set_content(self, gsurf_window_layout_get_root(layout));
+}
+
+/* Undo gsurf_window_attach_layout() for the installed layout and drop the
+ * window's reference to it. Every view widget ends up in the stack again,
+ * in window order, with the active view shown. */
+static void
+gsurf_window_detach_layout(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	GsurfWindowClass *klass = GSURF_WINDOW_GET_CLASS(self);
+	g_autoptr(GsurfWindowLayout) layout = NULL;
+	guint i;
+
+	/* 1. Clear the pointer first: from here on the window routes views to
+	 *    the stack again, also for anything the layout's detach triggers
+	 *    (a focus change must not reach a half-detached layout). */
+	layout = g_steal_pointer(&priv->layout);
+
+	/* 2. The layout lets go of every view widget; its root leaves. */
+	gsurf_window_layout_detach(layout, self);
+	if (klass->set_content != NULL)
+		klass->set_content(self, NULL);
+
+	/* 3. Back into the stack (insert_view is safe to repeat: it wires
+	 *    each widget once), the active one shown and focused. */
+	for (i = 0; i < priv->views->len; i++) {
+		if (klass->insert_view != NULL)
+			klass->insert_view(self, g_ptr_array_index(priv->views, i));
+	}
+	if (priv->active != NULL && klass->set_active_view != NULL)
+		klass->set_active_view(self, priv->active);
+}
+
+gboolean
+gsurf_window_set_layout(GsurfWindow *self, GsurfWindowLayout *layout)
+{
+	GsurfWindowPrivate *priv;
+	GsurfWindowClass *klass;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+	g_return_val_if_fail(layout == NULL || GSURF_IS_WINDOW_LAYOUT(layout), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	klass = GSURF_WINDOW_GET_CLASS(self);
+
+	/* 1. Nothing to do: the same layout, or no layout to remove. */
+	if (layout == priv->layout)
+		return TRUE;
+
+	/* 2. Refusals (only when installing; removal always works). Kiosk
+	 *    shows exactly one view, and a backend without native content
+	 *    packing (libregnum renders to a texture) has nowhere to put a
+	 *    layout's root. */
+	if (layout != NULL) {
+		if (gsurf_kiosk_is_enabled()) {
+			gsurf_window_warn_layout(self, "kiosk mode shows a single view");
+			return FALSE;
+		}
+		if (klass->set_content == NULL) {
+			gsurf_window_warn_layout(self, "this backend cannot host a layout");
+			return FALSE;
+		}
+	}
+
+	/* 3. Replace: the old layout goes first, then the new one comes. The
+	 *    signal is emitted once, after both. */
+	if (priv->layout != NULL)
+		gsurf_window_detach_layout(self);
+	if (layout != NULL) {
+		priv->layout = g_object_ref(layout);
+		gsurf_window_attach_layout(self, layout);
+	}
+
+	g_signal_emit(self, signals[SIG_VISIBLE_VIEWS_CHANGED], 0);
+	return TRUE;
+}
+
+GsurfWindowLayout *
+gsurf_window_get_layout(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), NULL);
+
+	priv = gsurf_window_get_instance_private(self);
+	return priv->layout;
+}
+
+void
+gsurf_window_layout_notify_visible(GsurfWindow *window)
+{
+	g_return_if_fail(GSURF_IS_WINDOW(window));
+
+	g_signal_emit(window, signals[SIG_VISIBLE_VIEWS_CHANGED], 0);
+}
+
+gboolean
+gsurf_window_get_view_visible(GsurfWindow *self, GsurfView *view)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+	g_return_val_if_fail(GSURF_IS_VIEW(view), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	if (!g_ptr_array_find(priv->views, view, NULL))
+		return FALSE;
+	if (priv->layout != NULL)
+		return gsurf_window_layout_is_view_visible(priv->layout, self, view);
+	return priv->active == view;
+}
+
+void
+gsurf_window_set_key_grab(GsurfWindow *self, gboolean grab)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_if_fail(GSURF_IS_WINDOW(self));
+
+	priv = gsurf_window_get_instance_private(self);
+	priv->key_grab = grab ? TRUE : FALSE;
+}
+
+gboolean
+gsurf_window_get_key_grab(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	return priv->key_grab;
 }
 
 /* --- Native operations --- */

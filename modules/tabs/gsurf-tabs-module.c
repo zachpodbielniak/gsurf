@@ -15,7 +15,9 @@
  *   - view-removed: the tree promotes or closes the children
  *     (on_close_parent);
  *   - view-moved by anyone else: the tree re-syncs from the window order;
- *   - active-view-changed: collapsed ancestors of the new tab expand.
+ *   - active-view-changed: collapsed ancestors of the new tab expand;
+ *   - visible-views-changed (a window layout such as wmux): tabs shown
+ *     in another pane get the "visible" style.
  *
  * The strip and sidebar widgets live in gsurf-tabs-ui.c. Implements
  * #GsurfInputHandler, #GsurfKeybindProvider and #GsurfActionHandler.
@@ -332,6 +334,30 @@ gsurf_tabs_reopen_tab(GsurfTabsModule *self, guint64 id, const gchar *container)
 	gsurf_window_reopen_view(self->window, view, container);
 }
 
+/* Open the tab with @id in a split: the module that owns the window
+ * layout (wmux) handles GSURF_ACTION_PANE_SPLIT_RIGHT / _DOWN for the
+ * given view: it splits that tab's pane when the tab is on screen, else
+ * shows the tab in a new pane. Without a layout nothing handles it, so
+ * the menu only offers it while a layout is installed. */
+void
+gsurf_tabs_split_tab(GsurfTabsModule *self, guint64 id, GsurfAction action)
+{
+	GsurfView *view = window_view(self, id);
+
+	if (view == NULL || gsurf_window_get_layout(self->window) == NULL)
+		return;
+	gsurf_module_manager_dispatch_action(gsurf_module_manager_get_default(), view, action);
+}
+
+gboolean
+gsurf_tabs_view_in_other_pane(GsurfTabsModule *self, GsurfView *view)
+{
+	if (self->window == NULL || view == NULL ||
+	    view == gsurf_window_get_active_view(self->window))
+		return FALSE;
+	return gsurf_window_get_view_visible(self->window, view);
+}
+
 /* tab-tree-collapse on the active tab: toggle its subtree; on a leaf,
  * collapse its parent (activating the parent). */
 static void
@@ -505,6 +531,16 @@ on_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
 	if (self->tree != NULL && view != NULL)
 		gsurf_tab_tree_expand_ancestors(self->tree, gsurf_view_get_id(view));
 	gsurf_tabs_ui_sync(self);
+}
+
+/* The window layout showed or hid views (a split, a closed pane, another
+ * tab in a pane): restyle the tabs that are on screen. Rows only change
+ * when their state did. */
+static void
+on_visible_views_changed(GsurfWindow *window, gpointer user_data)
+{
+	(void)window;
+	gsurf_tabs_ui_sync(GSURF_TABS_MODULE(user_data));
 }
 
 static void
@@ -794,6 +830,7 @@ gsurf_tabs_activate(GsurfModule *module)
 	g_signal_connect(window, "view-moved", G_CALLBACK(on_view_moved), self);
 	g_signal_connect(window, "view-replaced", G_CALLBACK(on_view_replaced), self);
 	g_signal_connect(window, "active-view-changed", G_CALLBACK(on_active_view_changed), self);
+	g_signal_connect(window, "visible-views-changed", G_CALLBACK(on_visible_views_changed), self);
 
 	/* 3. Kiosk shows no strip and no sidebar; the keys still work. */
 	if (gsurf_kiosk_is_enabled())
@@ -920,6 +957,7 @@ reset_config(GsurfTabsModule *self)
 	set_string(&self->bg_color, GSURF_TABS_DEFAULT_BG_COLOR);
 	set_string(&self->active_color, GSURF_TABS_DEFAULT_ACTIVE_COLOR);
 	set_string(&self->fg_color, GSURF_TABS_DEFAULT_FG_COLOR);
+	set_string(&self->visible_color, GSURF_TABS_DEFAULT_VISIBLE_COLOR);
 	self->position_top = TRUE;
 	self->strip = TRUE;
 	self->show_single = FALSE;
@@ -969,6 +1007,7 @@ gsurf_tabs_configure(GsurfModule *module, gpointer config_ptr)
 	read_color(m, "bg_color", &self->bg_color);
 	read_color(m, "active_color", &self->active_color);
 	read_color(m, "fg_color", &self->fg_color);
+	read_color(m, "visible_color", &self->visible_color);
 
 	read_bool(m, "sidebar", &self->sidebar);
 	read_choice(m, "sidebar_position", "left", "right", &self->sidebar_right);
@@ -1007,6 +1046,7 @@ gsurf_tabs_module_finalize(GObject *object)
 	g_clear_pointer(&self->bg_color, g_free);
 	g_clear_pointer(&self->active_color, g_free);
 	g_clear_pointer(&self->fg_color, g_free);
+	g_clear_pointer(&self->visible_color, g_free);
 	if (self->closed_uris != NULL) {
 		g_queue_free_full(self->closed_uris, g_free);
 		self->closed_uris = NULL;

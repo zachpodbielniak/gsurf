@@ -1,4 +1,4 @@
-.TH GSURF 1 "2026" "gsurf 0.3.3" "User Commands"
+.TH GSURF 1 "2026" "gsurf 0.4.0" "User Commands"
 .SH NAME
 gsurf \- GObject Surf, a minimal modular web browser
 .SH SYNOPSIS
@@ -17,7 +17,9 @@ would be surf
 are implemented as runtime-loaded
 .B .so
 modules (tabs, ad blocking, a vim-style modal layer, link hinting, history,
-bookmarks, a find bar, an MCP server for AI control, and more).
+bookmarks, a find bar, tmux-style panes and windows
+.RB ( wmux ,
+off by default), an MCP server for AI control, and more).
 .PP
 Configuration is read from a YAML file and, optionally, a compiled C config.
 Vim-style modal navigation is available through the

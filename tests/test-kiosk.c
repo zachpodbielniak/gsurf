@@ -130,6 +130,8 @@ test_actions(void)
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_TAB_NEW));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_CONTAINER_NEW_TEMP));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_CONTAINER_REOPEN_NEXT));
+	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_PANE_SPLIT_RIGHT));
+	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_PANE_SPLIT_DOWN));
 	g_assert_true(gsurf_kiosk_allows_action(GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
 	g_assert_true(gsurf_kiosk_allows_action(GSURF_ACTION_DARK_MODE_TOGGLE));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_TAB_REOPEN));

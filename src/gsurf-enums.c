@@ -212,6 +212,8 @@ GSURF_DEFINE_ENUM_TYPE(GsurfAction, gsurf_action, {
 	EV(GSURF_ACTION_DARK_MODE_TOGGLE, "dark-mode-toggle"),
 	EV(GSURF_ACTION_DARK_MODE_TOGGLE_SITE, "dark-mode-toggle-site"),
 	EV(GSURF_ACTION_FORM_AUTOFILL, "form-autofill"),
+	EV(GSURF_ACTION_PANE_SPLIT_RIGHT, "pane-split-right"),
+	EV(GSURF_ACTION_PANE_SPLIT_DOWN, "pane-split-down"),
 	END_EV
 })
 
@@ -309,6 +311,8 @@ gsurf_action_get_description(GsurfAction action)
 	case GSURF_ACTION_DARK_MODE_TOGGLE: return "Toggle dark mode";
 	case GSURF_ACTION_DARK_MODE_TOGGLE_SITE: return "Toggle dark mode for the current site";
 	case GSURF_ACTION_FORM_AUTOFILL: return "Fill the focused form from an autofill profile";
+	case GSURF_ACTION_PANE_SPLIT_RIGHT: return "Split the pane, the new pane on the right";
+	case GSURF_ACTION_PANE_SPLIT_DOWN: return "Split the pane, the new pane below";
 	case GSURF_ACTION_LAST:
 	default:                                return NULL;
 	}

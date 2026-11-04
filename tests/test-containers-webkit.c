@@ -298,8 +298,8 @@ test_script_worlds(void)
 	g_free(world.value);
 }
 
-/* Window signals, logged in order as "added:<id>", "replaced:<old>><new>"
- * and "removed:<id>", comma separated. */
+/* Window signals, logged in order as "added:<id>", "replaced:<old>><new>",
+ * "active:<id>" and "removed:<id>", comma separated. */
 static void
 log_added(GsurfWindow *window, GsurfView *view, gpointer data)
 {
@@ -312,6 +312,14 @@ log_removed(GsurfWindow *window, GsurfView *view, gpointer data)
 {
 	(void)window;
 	g_string_append_printf(data, "removed:%" G_GUINT64_FORMAT ",", gsurf_view_get_id(view));
+}
+
+static void
+log_active(GsurfWindow *window, GsurfView *view, gpointer data)
+{
+	(void)window;
+	g_string_append_printf(data, "active:%" G_GUINT64_FORMAT ",",
+		view != NULL ? gsurf_view_get_id(view) : 0);
 }
 
 static void
@@ -367,6 +375,7 @@ test_reopen_view(void)
 	g_signal_connect(window, "view-added", G_CALLBACK(log_added), log);
 	g_signal_connect(window, "view-replaced", G_CALLBACK(log_replaced), log);
 	g_signal_connect(window, "view-removed", G_CALLBACK(log_removed), log);
+	g_signal_connect(window, "active-view-changed", G_CALLBACK(log_active), log);
 	weak = view;
 	g_object_add_weak_pointer(G_OBJECT(view), &weak);
 	/* The window held the only reference: read the id before. */
@@ -380,9 +389,12 @@ test_reopen_view(void)
 	g_assert_cmpuint(gsurf_window_get_n_views(window), ==, 2);
 	g_assert_true(gsurf_window_get_active_view(window) == fresh);
 	g_assert_true(g_str_has_suffix(gsurf_view_get_initial_uri(fresh), "/set"));
+	/* view-replaced comes before the activation: chrome hands over the
+	 * old view's place first. */
 	expected = g_strdup_printf("added:%" G_GUINT64_FORMAT ",replaced:%" G_GUINT64_FORMAT
-		">%" G_GUINT64_FORMAT ",removed:%" G_GUINT64_FORMAT ",",
-		gsurf_view_get_id(fresh), old_id, gsurf_view_get_id(fresh), old_id);
+		">%" G_GUINT64_FORMAT ",active:%" G_GUINT64_FORMAT ",removed:%" G_GUINT64_FORMAT ",",
+		gsurf_view_get_id(fresh), old_id, gsurf_view_get_id(fresh),
+		gsurf_view_get_id(fresh), old_id);
 	g_assert_cmpstr(log->str, ==, expected);
 
 	/* 3. The old view is gone for good. */

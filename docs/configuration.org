@@ -71,7 +71,11 @@ Native settings regressions run with =make test-gui= under Xvfb. On an existing 
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).
 
-The =tabs= section configures the tab strip and the tree sidebar (=position=, =strip=, =show_single=, the =bg_color= / =active_color= / =fg_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
+The =tabs= section configures the tab strip and the tree sidebar (=position=, =strip=, =show_single=, the =bg_color= / =active_color= / =fg_color= / =visible_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
+
+* wmux
+
+=modules.wmux= (off by default) splits the window into tmux-style panes: =prefix= (=C-b=), =prefix_timeout=, =repeat_time=, =display_panes_time=, the =bindings= / =root_bindings= overrides (key: command in the wmux command language, =""= unbinds) and =repeatable= keys, =split_ratio=, =on_pane_kill= (=close_tab= | =keep_tab=), =on_tab_close= (=close_pane= | =keep_pane=), =confirm_kill=, =mouse=, =remember_layout=, =min_pane_pct=, =gap=, the border options (=border_width=, =active_border_width=, =border_color=, =active_border_color=, =container_colors=, =inactive_opacity=, =active_brighten=) and the status line (=status=, =status_position=, =status_bg=, =status_fg=, =status_current_fg=, =window_name_max=). Bad values warn and keep their default; a bad binding warns and is skipped. [[file:wmux.org][wmux.org]] has the full reference, the tmux key mapping and a cookbook.
 
 * Containers
 
@@ -101,7 +105,7 @@ Every =configure()= starts from these defaults.
 
 ** When it saves
 
-After every committed navigation, on =key_save=, and whenever a tab is closed or moved, so the order and the tab tree stay current. Closing the last tab does not save (the previous session is kept rather than replaced by an empty one). The file lists the URLs of all open tabs, so it is written atomically with mode 0600 in a 0700 directory, and an existing file with looser permissions is made 0600 first.
+After every committed navigation, on =key_save=, and whenever a tab is closed or moved, so the order and the tab tree stay current. With a window layout (=wmux=), also when the layout changes what is on screen (=GsurfWindow::visible-views-changed=: a split, a closed pane, another tab in a pane); a burst of those is coalesced into one save in an idle, and none happens while a session is being restored. Closing the last tab does not save (the previous session is kept rather than replaced by an empty one). The file lists the URLs of all open tabs, so it is written atomically with mode 0600 in a 0700 directory, and an existing file with looser permissions is made 0600 first.
 
 ** Format
 
@@ -119,11 +123,13 @@ windows:
       - uri: https://news.example/article
         container: temporary:0     # ... the same temporary container
         parent: 2
+    layout: "<layout state>"       # window layout, e.g. wmux panes (optional)
 #+end_src
 
 - Each window of the host is a list of its tabs, in tab order. Tabs showing nothing or =about:blank= are not saved.
 - =container= is absent for the default container, the id for a persistent container, and =temporary:<n>= for a temporary one: tabs that shared a temporary container share a group number, which is all that survives (temporary data is never saved).
 - =parent= is the index of the tab's opener in the same window — its parent in the tab tree. When the opener itself is not saved (a blank tab), the nearest saved ancestor is used; an opener that was closed leaves the tab without a parent.
+- =layout= is present only when the window has a window layout (=gsurf_window_get_layout()=, the =wmux= module) that can describe its arrangement. It is a single YAML string, opaque to the session module, produced by =gsurf_window_layout_serialize()=: the module hands the layout a function that maps each view to its saved tab index — the same numbering =parent= and =active= use (the position in this window's =tabs= list) — and -1 for a tab that is not saved (blank), which the layout leaves out of its state. A layout that cannot serialize (=NULL=) or returns an empty string writes no field. The format of the string belongs to the layout (=wmux.org= documents wmux's). The file stays =version: 1=: readers that do not know =layout= (gsurf 0.3 and older) ignore it like any unknown key.
 
 ** Restore
 
@@ -131,6 +137,9 @@ windows:
 - Every temporary group comes back as one fresh temporary container. A persistent container that is not defined any more falls back to the default container, with a warning.
 - The startup view takes the first saved tab when it is already in that tab's container (the default container, the same persistent container, or — for a temporary group — a temporary container that only it uses, which then becomes the group's container). Otherwise the restored tabs are created next to it and the startup view is closed: a view cannot change its container, and loading the tab into the wrong container would mix cookie jars.
 - gsurf runs one window per process, so the tabs of further saved windows are appended to the same window. The active tab of the first window is activated.
+- *Layout.* When every tab is in place and the active tab is set, the first saved window's =layout= goes back to the window's layout: =gsurf_window_layout_restore(layout, window, state, views, n)= with =n= the length of the saved =tabs= list and =views[i]= the restored view of the tab saved at index =i= — =NULL= for a tab that was dropped (no =uri=) or could not be created. Checking the indices in the state against that array is the layout's job. If the layout returns =FALSE= (the state does not fit, e.g. tabs are missing), the window keeps the layout's default arrangement (a single pane for wmux) and a warning names the window. The =layout= of a second or later saved window is dropped with a warning (its tabs joined the first window, which has one arrangement).
+- *Ordering.* The layout must be installed before the session is restored: the =wmux= module activates before =session= (priority -10), so it has installed its layout by the time the tabs are recreated. When the file has a =layout= but the window has none at restore time (wmux disabled, kiosk mode, a backend that cannot host layouts), the module warns once and drops the string rather than keeping it for a layout that may come later: a state only makes sense for the views it was restored with, and the next save writes the arrangement actually on screen, so the warning does not repeat.
+- A =layout= that is not a non-empty string (a mapping, a list, =null=, =''=) is reported and ignored; the window's tabs are restored.
 - A file that is not YAML, not a mapping or has no =windows= list is reported and nothing is restored. Inside, a window without =tabs=, a tab without =uri=, a =parent= that does not name another tab (or a chain of parents that loops) and an =active= index out of range are reported and dropped; everything else is restored.
 - A restored tab keeps its first load in its saved container even if a =containers= host rule would assign the host elsewhere (see [[file:containers.org][containers.org]], "Limits"); the startup view, when it takes the first tab, is the exception, as it was not created for that URL.
 
