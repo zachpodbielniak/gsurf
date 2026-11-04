@@ -1243,6 +1243,9 @@ test_tabs_sidebar_tree(void)
 	sidebar = side_child(c.window);
 	g_assert_true(gtk_widget_get_visible(sidebar));
 	g_assert_true(gtk_widget_get_visible(strip));
+	/* The expanding row titles must not make the sidebar expand (GTK4
+	 * propagates hexpand up from children). */
+	g_assert_false(gtk_widget_compute_expand(sidebar, GTK_ORIENTATION_HORIZONTAL));
 	{
 		gint width = 0;
 

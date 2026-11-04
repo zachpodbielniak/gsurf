@@ -76,7 +76,7 @@ When something else reorders the window (=gsurf_window_move_view()= from another
 
 * The sidebar
 
-The sidebar is packed beside the page with =gsurf_window_add_side_widget()=, on the left or right (=sidebar_position=), =sidebar_width= pixels wide. It is not resizable by dragging. =tab-sidebar-toggle= (default =Ctrl+Shift+.=, which GDK reports as =Ctrl+Shift+greater=) shows and hides it; =sidebar:= sets the state at startup. While it is shown, =sidebar_hides_strip: true= hides the strip.
+The sidebar is packed beside the page with =gsurf_window_add_side_widget()=, on the left or right (=sidebar_position=), =sidebar_width= pixels wide; it keeps exactly that width on GTK3 and GTK4 and the page gets the rest of the window. It is not resizable by dragging. =tab-sidebar-toggle= (default =Ctrl+Shift+.=, which GDK reports as =Ctrl+Shift+greater=) shows and hides it; =sidebar:= sets the state at startup. While it is shown, =sidebar_hides_strip: true= hides the strip.
 
 Each row shows, left to right:
 
