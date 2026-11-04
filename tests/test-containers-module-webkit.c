@@ -390,6 +390,65 @@ test_actions(void)
 	clear_window(fx.window);
 }
 
+/* The tabs module opens new and reopened tabs with their URI as the
+ * container placement hint, so a tab for an assigned host is created
+ * straight in its container: no reassignment, no request from the
+ * wrong jar. Loaded last so the earlier cases see no tab tree. */
+static void
+test_tabs_reopen_uses_hint(void)
+{
+	GsurfModuleManager *mgr;
+	g_autofree gchar *so = NULL;
+	g_autofree gchar *page = url("localhost", "/page");
+	g_autoptr(GError) error = NULL;
+	GsurfModule *tabs;
+	GsurfView *base;
+	GsurfView *media;
+	GsurfView *reopened;
+
+	if (!setup())
+		return;
+	so = gsurf_webkit_test_module_path("tabs");
+	if (!g_file_test(so, G_FILE_TEST_EXISTS)) {
+		g_test_skip("tabs.so not built");
+		return;
+	}
+	clear_window(fx.window);
+
+	mgr = gsurf_module_manager_get_default();
+	tabs = gsurf_module_manager_load_module(mgr, so, &error);
+	g_assert_no_error(error);
+	g_assert_nonnull(tabs);
+	g_assert_true(gsurf_module_activate(tabs));
+
+	base = add_tab(fx.window, GSURF_CONTAINER_DEFAULT, NULL);
+	gsurf_webkit_test_load(gsurf_webkit_test_native(base), "about:blank");
+	media = add_tab(fx.window, "media", page);
+	gsurf_webkit_test_load(gsurf_webkit_test_native(media), page);
+	g_assert_cmpstr(gsurf_view_get_container_id(media), ==, "media");
+
+	/* Close the Media tab through tabs (it remembers the URI), then
+	 * reopen: the new view is in Media the moment it exists. */
+	gsurf_window_set_active_view(fx.window, media);
+	g_assert_true(act(media, GSURF_ACTION_TAB_CLOSE));
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 1);
+	g_assert_true(act(base, GSURF_ACTION_TAB_REOPEN));
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 2);
+	reopened = gsurf_window_get_active_view(fx.window);
+	g_assert_true(reopened != base);
+	g_assert_cmpstr(gsurf_view_get_container_id(reopened), ==, "media");
+	g_assert_cmpstr(gsurf_view_get_initial_uri(reopened), ==, page);
+
+	/* And it stays: the containers module has nothing to move. */
+	wait_loaded(reopened, page);
+	gsurf_webkit_test_spin(100);
+	g_assert_true(gsurf_window_get_active_view(fx.window) == reopened);
+	g_assert_cmpuint(gsurf_window_get_n_views(fx.window), ==, 2);
+
+	gsurf_module_deactivate(tabs);
+	clear_window(fx.window);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -408,6 +467,8 @@ main(int argc, char *argv[])
 		test_main_frame_script_moves);
 	g_test_add_func("/gsurf/containers-module/webkit/subframe-stays", test_subframe_stays);
 	g_test_add_func("/gsurf/containers-module/webkit/actions", test_actions);
+	g_test_add_func("/gsurf/containers-module/webkit/tabs-reopen-uses-hint",
+		test_tabs_reopen_uses_hint);
 	result = g_test_run();
 	/* The window, application and module stay alive until exit: the
 	 * default module manager outlives the test functions. */

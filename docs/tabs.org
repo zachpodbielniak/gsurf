@@ -40,6 +40,8 @@ When a view is added to the window:
 
 Opening three links from tab A in turn gives =A, A1, A2, A3=, and a link opened from =A1= goes between =A1= and =A2=.
 
+=tab-new= and =tab-reopen= create their view with the URL they are about to load as its container placement hint (=gsurf_view_new_full()=), so with the =containers= module a reopened tab for an assigned host comes back directly in that container instead of being moved after its first request.
+
 ** Closing a tab
 
 =on_close_parent= decides what happens to the children of a closing tab:
