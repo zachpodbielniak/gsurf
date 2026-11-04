@@ -308,11 +308,14 @@ gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *cont
 	if (config != NULL && config->settings != NULL)
 		gsurf_view_apply_settings(fresh, config->settings);
 
-	/* 3. Same place, active, loading; then the old view goes. */
+	/* 3. Same place; chrome hands over the old view's place (its tab
+	 *    tree node, a layout its pane) before activation, so activating
+	 *    the new view finds it where the old one was instead of moving
+	 *    it; then active, loading, and the old view goes. */
 	gsurf_window_insert_view(window, fresh, (guint)index);
+	g_signal_emit_by_name(window, "view-replaced", old, fresh);
 	gsurf_window_set_active_view(window, fresh);
 	gsurf_view_load_uri(fresh, uri);
-	g_signal_emit_by_name(window, "view-replaced", old, fresh);
 	gsurf_window_remove_view(window, old);
 	return fresh;
 }

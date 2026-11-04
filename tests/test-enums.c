@@ -15,6 +15,10 @@ test_action_from_string(void)
 	g_assert_cmpint(gsurf_action_from_string("scroll-down"), ==, GSURF_ACTION_SCROLL_DOWN);
 	g_assert_cmpint(gsurf_action_from_string("tab-new"), ==, GSURF_ACTION_TAB_NEW);
 	g_assert_cmpint(gsurf_action_from_string("quit"), ==, GSURF_ACTION_QUIT);
+	g_assert_cmpint(gsurf_action_from_string("pane-split-right"), ==,
+		GSURF_ACTION_PANE_SPLIT_RIGHT);
+	g_assert_cmpint(gsurf_action_from_string("pane_split_down"), ==,
+		GSURF_ACTION_PANE_SPLIT_DOWN);
 
 	/* Underscores are accepted as equivalent to hyphens. */
 	g_assert_cmpint(gsurf_action_from_string("reload_nocache"), ==, GSURF_ACTION_RELOAD_NOCACHE);
@@ -33,6 +37,8 @@ test_action_to_string(void)
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_NONE), ==, "none");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_FOLLOW_HINTS), ==, "follow-hints");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_SHOW_KEYBINDS), ==, "show-keybinds");
+	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_PANE_SPLIT_RIGHT), ==, "pane-split-right");
+	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_PANE_SPLIT_DOWN), ==, "pane-split-down");
 }
 
 static void
@@ -43,6 +49,10 @@ test_action_description(void)
 	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_SHOW_KEYBINDS), ==,
 		"Show all keybindings");
 	g_assert_nonnull(gsurf_action_get_description(GSURF_ACTION_QUIT));
+	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_PANE_SPLIT_RIGHT), ==,
+		"Split the pane, the new pane on the right");
+	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_PANE_SPLIT_DOWN), ==,
+		"Split the pane, the new pane below");
 }
 
 static void

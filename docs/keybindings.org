@@ -123,7 +123,7 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
 
-Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=, default keys =Ctrl+Shift+.=, =Ctrl+Shift+[=, =Ctrl+Shift+Page_Up= / =Page_Down=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Kiosk mode refuses =container-new-temp= and =container-reopen-next= like every action that opens a view.
+Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=, default keys =Ctrl+Shift+.=, =Ctrl+Shift+[=, =Ctrl+Shift+Page_Up= / =Page_Down=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Panes (=wmux=, or any module that installs a window layout and handles them): =pane-split-right=, =pane-split-down= — for the view they are dispatched with, split the pane showing it with a new tab when it is visible, otherwise split the active pane and show that view in the new pane (the =tabs= context menu dispatches them for a chosen tab); they have no default key. Kiosk mode refuses =container-new-temp=, =container-reopen-next= and the two pane splits like every action that opens a view.
 
 * Modal / vim navigation
 
@@ -145,3 +145,5 @@ The =modal= module (enabled by default) provides vim-style navigation. It is
 Focus is tracked by a small content script that reports DOM focus changes to the
 browser, so the right behavior happens automatically as you move between the
 page, form fields, and the address bar.
+
+A module can take the next key away from a focused field with a *key grab* (=gsurf_window_set_key_grab()=): while it is set, every key goes to the keymap first, wherever focus is. =wmux= uses it for the key after its prefix (=C-b %= works while typing in a page field or the address bar); see "Window layouts (panes)" in =architecture.org=.

@@ -181,8 +181,10 @@ GsurfWindow *gsurf_window_new(void);
  * @view. The container registry's resolver (the containers module) has
  * the final say, as for every new view. The window emits
  * #GsurfWindow::view-added for the new view, then
- * #GsurfWindow::view-replaced, then #GsurfWindow::view-removed for
- * @view.
+ * #GsurfWindow::view-replaced, then #GsurfWindow::active-view-changed
+ * for the new view, then #GsurfWindow::view-removed for @view. Chrome
+ * (a tab tree, a #GsurfWindowLayout) therefore hands @view's place to
+ * the new view before it is activated.
  *
  * Returns: (transfer none) (nullable): the new view, owned by @window,
  *   or %NULL when @view is not in @window or no view could be created
