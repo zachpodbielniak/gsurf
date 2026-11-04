@@ -308,10 +308,12 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 	 * @old_view: the view being replaced, still in the window
 	 * @new_view: its replacement, already in the window
 	 *
-	 * Emitted by gsurf_window_reopen_view() between adding @new_view
-	 * (#GsurfWindow::view-added) and removing @old_view
+	 * Emitted by gsurf_window_reopen_view() after adding @new_view
+	 * (#GsurfWindow::view-added) and before activating it
+	 * (#GsurfWindow::active-view-changed) and removing @old_view
 	 * (#GsurfWindow::view-removed), so chrome can hand @old_view's place
-	 * (for example its children in a tab tree) to @new_view.
+	 * (its children in a tab tree, its pane in a layout) to @new_view
+	 * before activation would move it.
 	 */
 	signals[SIG_VIEW_REPLACED] = g_signal_new(
 		"view-replaced", G_TYPE_FROM_CLASS(klass),
