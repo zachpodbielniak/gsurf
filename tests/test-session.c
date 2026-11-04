@@ -9,6 +9,10 @@
  * minimal GsurfView/GsurfWindow subclasses. Restoring creates real
  * views (gsurf_view_new_full() uses the compiled backend), so those
  * tests need WebKit and run only with GSURF_TEST_GUI=1 (make test-gui).
+ *
+ * Window layouts: a fake #GsurfWindowLayout (FakeLayout) serializes as
+ * "g<generation>:<index>,<index>,..." (the index the module maps each
+ * window view to, -1 included) and records what restore() is given.
  */
 
 #include <gsurf.h>
@@ -64,8 +68,158 @@ test_view_class_init(TestViewClass *klass)
 }
 
 static void test_view_init(TestView *self) { (void)self; }
-static void test_window_class_init(TestWindowClass *klass) { (void)klass; }
+
+/* A window layout needs somewhere to put its root (set_content); the
+ * headless window just ignores it. */
+static void
+test_window_set_content(GsurfWindow *window, gpointer widget)
+{
+	(void)window;
+	(void)widget;
+}
+
+static void
+test_window_class_init(TestWindowClass *klass)
+{
+	GSURF_WINDOW_CLASS(klass)->set_content = test_window_set_content;
+}
+
 static void test_window_init(TestWindow *self) { (void)self; }
+
+/* --- a fake window layout --- */
+
+typedef enum {
+	FAKE_SERIALIZE_INDICES,   /* "g<generation>:<i>,<j>,..." */
+	FAKE_SERIALIZE_NULL,      /* cannot serialize */
+	FAKE_SERIALIZE_EMPTY      /* "" */
+} FakeSerialize;
+
+typedef struct {
+	GObject       parent;
+	GObject      *root;            /* GtkWidget in GUI tests, else a GObject */
+	FakeSerialize serialize;
+	guint         generation;      /* part of the serialized state */
+	guint         serialize_calls;
+	gboolean      restore_result;  /* what restore() answers */
+	guint         restore_calls;
+	gchar        *restored_state;  /* last restore() state */
+	GPtrArray    *restored_views;  /* last restore() views (borrowed, NULLs kept) */
+	GsurfView    *active_at_restore;
+} FakeLayout;
+typedef struct { GObjectClass parent; } FakeLayoutClass;
+
+static void fake_layout_iface_init(GsurfWindowLayoutInterface *iface);
+GType fake_layout_get_type(void);
+G_DEFINE_TYPE_WITH_CODE(FakeLayout, fake_layout, G_TYPE_OBJECT,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_WINDOW_LAYOUT, fake_layout_iface_init))
+
+static gpointer fake_get_root(GsurfWindowLayout *l) { return ((FakeLayout *)l)->root; }
+static void fake_attach(GsurfWindowLayout *l, GsurfWindow *w) { (void)l; (void)w; }
+static void fake_detach(GsurfWindowLayout *l, GsurfWindow *w) { (void)l; (void)w; }
+static void fake_add(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v) { (void)l; (void)w; (void)v; }
+static void fake_remove(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v) { (void)l; (void)w; (void)v; }
+static void fake_activate(GsurfWindowLayout *l, GsurfWindow *w, GsurfView *v) { (void)l; (void)w; (void)v; }
+
+static gchar *
+fake_serialize(GsurfWindowLayout *layout, GsurfWindow *window,
+               GsurfWindowLayoutIndexFunc map, gpointer user_data)
+{
+	FakeLayout *self = (FakeLayout *)layout;
+	GString *out;
+	guint i;
+
+	self->serialize_calls++;
+	if (self->serialize == FAKE_SERIALIZE_NULL)
+		return NULL;
+	if (self->serialize == FAKE_SERIALIZE_EMPTY)
+		return g_strdup("");
+	out = g_string_new(NULL);
+	g_string_append_printf(out, "g%u:", self->generation);
+	for (i = 0; i < gsurf_window_get_n_views(window); i++)
+		g_string_append_printf(out, "%s%d", i > 0 ? "," : "",
+			map(gsurf_window_get_nth_view(window, i), user_data));
+	return g_string_free(out, FALSE);
+}
+
+static gboolean
+fake_restore(GsurfWindowLayout *layout, GsurfWindow *window, const gchar *state,
+             GsurfView **views, guint n_views)
+{
+	FakeLayout *self = (FakeLayout *)layout;
+	guint i;
+
+	self->restore_calls++;
+	g_free(self->restored_state);
+	self->restored_state = g_strdup(state);
+	g_ptr_array_set_size(self->restored_views, 0);
+	for (i = 0; i < n_views; i++)
+		g_ptr_array_add(self->restored_views, views[i]);
+	self->active_at_restore = gsurf_window_get_active_view(window);
+	/* Like a real layout, rearranging changes what is on screen. */
+	gsurf_window_layout_notify_visible(window);
+	return self->restore_result;
+}
+
+static void
+fake_layout_iface_init(GsurfWindowLayoutInterface *iface)
+{
+	iface->get_root = fake_get_root;
+	iface->attach = fake_attach;
+	iface->detach = fake_detach;
+	iface->add_view = fake_add;
+	iface->remove_view = fake_remove;
+	iface->activate_view = fake_activate;
+	iface->serialize = fake_serialize;
+	iface->restore = fake_restore;
+}
+
+static void
+fake_layout_finalize(GObject *object)
+{
+	FakeLayout *self = (FakeLayout *)object;
+
+	g_clear_object(&self->root);
+	g_free(self->restored_state);
+	g_ptr_array_unref(self->restored_views);
+	G_OBJECT_CLASS(fake_layout_parent_class)->finalize(object);
+}
+
+static void
+fake_layout_class_init(FakeLayoutClass *klass)
+{
+	G_OBJECT_CLASS(klass)->finalize = fake_layout_finalize;
+}
+
+static void
+fake_layout_init(FakeLayout *self)
+{
+	self->restore_result = TRUE;
+	self->restored_views = g_ptr_array_new();
+}
+
+/* A fake layout whose root is @root (owned; a floating GtkWidget is
+ * sunk), installed in @window. Returns a borrowed pointer: the window
+ * keeps the layout alive until it is disposed. */
+static FakeLayout *
+install_fake_layout(GsurfWindow *window, GObject *root)
+{
+	FakeLayout *layout = g_object_new(fake_layout_get_type(), NULL);
+
+	layout->root = g_object_ref_sink(root);
+	g_assert_true(gsurf_window_set_layout(window, GSURF_WINDOW_LAYOUT(layout)));
+	g_object_unref(layout);
+	return layout;
+}
+
+/* Run pending idles (the coalesced layout save), bounded. */
+static void
+drain_idles(void)
+{
+	guint i;
+
+	for (i = 0; i < 100 && g_main_context_iteration(NULL, FALSE); i++)
+		;
+}
 
 /* A headless tab in @window showing @uri. */
 static GsurfView *
@@ -387,6 +541,132 @@ test_save_triggers(void)
 	/* Unrelated keys are not consumed. */
 	g_assert_false(gsurf_input_handler_handle_key_event(GSURF_INPUT_HANDLER(host.module),
 		NULL, 'x', 0, 0, GSURF_MODE_NORMAL));
+	host_free(&host);
+}
+
+/* ===== headless: window layouts (save side) ===== */
+
+/* A window with a layout saves `layout:`: the layout's state with every
+ * view named by its saved tab index (blank tabs -1). A layout that cannot
+ * serialize, or says nothing, writes no field. visible-views-changed
+ * saves once per burst (an idle), not while inactive, and deactivation
+ * drops a pending save. */
+static void
+test_save_layout(void)
+{
+	g_autofree gchar *yaml = NULL;
+	Host host;
+	Saved saved = { 0 };
+	FakeLayout *layout;
+	GsurfView *a;
+
+	host_init(&host, g_object_new(test_window_get_type(), NULL));
+	yaml = section(&host, FALSE, NULL);
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	layout = install_fake_layout(host.window, g_object_new(G_TYPE_OBJECT, NULL));
+	a = add_view(host.window, NULL, NULL, "https://a.example/");
+	add_view(host.window, a, NULL, "about:blank");
+	add_view(host.window, NULL, NULL, "https://b.example/");
+	add_view(host.window, a, NULL, "https://c.example/");
+	drain_idles();
+
+	/* 1. Indices are the saved ones: the blank tab is -1 and the tabs
+	 *    after it close up, as `parent` numbers them. */
+	layout->generation = 1;
+	g_assert_true(press_save(&host));
+	saved_load(&saved, host.file);
+	g_assert_cmpuint(saved_n_tabs(&saved, 0), ==, 3);
+	g_assert_cmpstr(tab_string(saved_window(&saved, 0), "layout"), ==, "g1:0,-1,1,2");
+	g_assert_cmpint(tab_parent(saved_tab(&saved, 0, 2)), ==, 0);
+	g_assert_cmpint(yaml_mapping_get_int_member(saved.root, "version"), ==, 1);
+	saved_clear(&saved);
+
+	/* 2. visible-views-changed saves, coalesced: two emissions, one
+	 *    serialize, once the main loop runs. */
+	layout->generation = 2;
+	layout->serialize_calls = 0;
+	gsurf_window_layout_notify_visible(host.window);
+	gsurf_window_layout_notify_visible(host.window);
+	g_assert_cmpuint(layout->serialize_calls, ==, 0);
+	drain_idles();
+	g_assert_cmpuint(layout->serialize_calls, ==, 1);
+	saved_load(&saved, host.file);
+	g_assert_cmpstr(tab_string(saved_window(&saved, 0), "layout"), ==, "g2:0,-1,1,2");
+	saved_clear(&saved);
+
+	/* 3. Deactivation drops a pending save and the handler. */
+	gsurf_window_layout_notify_visible(host.window);
+	gsurf_module_deactivate(host.module);
+	drain_idles();
+	g_assert_cmpuint(layout->serialize_calls, ==, 1);
+	gsurf_window_layout_notify_visible(host.window);
+	drain_idles();
+	g_assert_cmpuint(layout->serialize_calls, ==, 1);
+	g_assert_true(gsurf_module_activate(host.module));
+
+	/* 4. No state (NULL or ""): no field. */
+	layout->serialize = FAKE_SERIALIZE_NULL;
+	g_assert_true(press_save(&host));
+	saved_load(&saved, host.file);
+	g_assert_false(yaml_mapping_has_member(saved_window(&saved, 0), "layout"));
+	saved_clear(&saved);
+	layout->serialize = FAKE_SERIALIZE_EMPTY;
+	g_assert_true(press_save(&host));
+	saved_load(&saved, host.file);
+	g_assert_false(yaml_mapping_has_member(saved_window(&saved, 0), "layout"));
+	saved_clear(&saved);
+
+	/* 5. No layout: no field, as before. */
+	layout->serialize = FAKE_SERIALIZE_INDICES;
+	g_assert_true(gsurf_window_set_layout(host.window, NULL));
+	drain_idles();
+	g_assert_true(press_save(&host));
+	saved_load(&saved, host.file);
+	g_assert_false(yaml_mapping_has_member(saved_window(&saved, 0), "layout"));
+	saved_clear(&saved);
+
+	host_free(&host);
+}
+
+/* A `layout` that is not a non-empty string is reported when the file is
+ * read (it is read at activation even without auto_restore) and the rest
+ * of the window stays; a string layout with an unknown key next to it is
+ * accepted silently (unknown keys are ignored, which is also how older
+ * gsurf reads `layout`). */
+static void
+test_layout_field_errors(void)
+{
+	g_autofree gchar *yaml = NULL;
+	Host host;
+
+	host_init(&host, g_object_new(test_window_get_type(), NULL));
+	yaml = section(&host, FALSE, NULL);
+	g_assert_true(g_file_set_contents(host.file,
+		"version: 1\n"
+		"windows:\n"
+		"  - tabs:\n      - uri: https://a.example/\n"
+		"    layout: { panes: 2 }\n"
+		"  - tabs:\n      - uri: https://b.example/\n"
+		"    layout: [ 1, 2 ]\n"
+		"  - tabs:\n      - uri: https://c.example/\n"
+		"    layout: ''\n"
+		"  - tabs:\n      - uri: https://d.example/\n"
+		"    layout: ~\n"
+		"  - tabs:\n      - uri: https://e.example/\n"
+		"    layout: 'h(0,1)'\n"
+		"    future_key: 7\n", -1, NULL));
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 0: `layout` is not*");
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 1: `layout` is not*");
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 2: `layout` is not*");
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 3: `layout` is not*");
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_test_assert_expected_messages();
 	host_free(&host);
 }
 
@@ -827,6 +1107,175 @@ test_restore_temporary_initial_and_legacy(void)
 	host_free(&host);
 }
 
+/* ===== GUI: restoring a window layout ===== */
+
+/* Four saved tabs, the third without a URI (dropped), the last active;
+ * the layout names file indices. */
+#define LAYOUT_FIXTURE \
+	"version: 1\n" \
+	"windows:\n" \
+	"  - active: 3\n" \
+	"    tabs:\n" \
+	"      - uri: http://127.0.0.1:9/l0\n" \
+	"      - uri: http://127.0.0.1:9/l1\n" \
+	"        parent: 0\n" \
+	"      - container: lost\n" \
+	"      - uri: http://127.0.0.1:9/l3\n" \
+	"    layout: 'v(3,h(0,1))'\n"
+
+/* A real window (main.c's startup view in it) with a fake layout whose
+ * root is a real widget, installed before the module activates (as
+ * wmux, priority -10, does before session). */
+static FakeLayout *
+gui_layout_host_init(Host *host)
+{
+	gui_host_init(host, NULL);
+	return install_fake_layout(host->window,
+		G_OBJECT(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0)));
+}
+
+/* Round trip: restore() gets the saved string and the views by file
+ * index (NULL for the dropped tab), once, after the tabs exist and the
+ * active tab is set; saving again maps the views to the new indices. */
+static void
+test_restore_layout(void)
+{
+	g_autofree gchar *yaml = NULL;
+	Host host;
+	Saved saved = { 0 };
+	FakeLayout *layout;
+	GsurfView *v[3];
+	guint i;
+
+	if (!gsurf_webkit_test_init())
+		return;
+	layout = gui_layout_host_init(&host);
+	g_assert_true(g_file_set_contents(host.file, LAYOUT_FIXTURE, -1, NULL));
+	yaml = section(&host, TRUE, NULL);
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 0 tab 2 has no `uri`*");
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_test_assert_expected_messages();
+
+	g_assert_cmpuint(gsurf_window_get_n_views(host.window), ==, 3);
+	for (i = 0; i < 3; i++)
+		v[i] = gsurf_window_get_nth_view(host.window, i);
+	g_assert_cmpstr(uri_of(v[2]), ==, "http://127.0.0.1:9/l3");
+	g_assert_cmpuint(layout->restore_calls, ==, 1);
+	g_assert_cmpstr(layout->restored_state, ==, "v(3,h(0,1))");
+	g_assert_cmpuint(layout->restored_views->len, ==, 4);
+	g_assert_true(g_ptr_array_index(layout->restored_views, 0) == v[0]);
+	g_assert_true(g_ptr_array_index(layout->restored_views, 1) == v[1]);
+	g_assert_null(g_ptr_array_index(layout->restored_views, 2));
+	g_assert_true(g_ptr_array_index(layout->restored_views, 3) == v[2]);
+	g_assert_true(layout->active_at_restore == v[2]);
+
+	/* Restoring did not save (the layout's visible-views-changed came
+	 * while restoring): the file is still the fixture. */
+	drain_idles();
+	saved_load(&saved, host.file);
+	g_assert_cmpstr(tab_string(saved_window(&saved, 0), "layout"), ==, "v(3,h(0,1))");
+	saved_clear(&saved);
+
+	/* Saving again writes the current arrangement with the new indices. */
+	layout->generation = 7;
+	g_assert_true(press_save(&host));
+	saved_load(&saved, host.file);
+	g_assert_cmpuint(saved_n_tabs(&saved, 0), ==, 3);
+	g_assert_cmpstr(tab_string(saved_window(&saved, 0), "layout"), ==, "g7:0,1,2");
+	saved_clear(&saved);
+	host_free(&host);
+}
+
+/* The layout refuses the string, there is no layout at all, a later
+ * saved window has one, or the file predates layouts: the tabs are
+ * restored either way, with one warning per dropped layout and none for
+ * an old file. */
+static void
+test_restore_layout_fallbacks(void)
+{
+	g_autofree gchar *yaml = NULL;
+	Host host;
+	FakeLayout *layout;
+
+	if (!gsurf_webkit_test_init())
+		return;
+
+	/* 1. restore() returns FALSE. */
+	layout = gui_layout_host_init(&host);
+	layout->restore_result = FALSE;
+	g_assert_true(g_file_set_contents(host.file,
+		"windows:\n  - tabs:\n      - uri: http://127.0.0.1:9/a\n"
+		"      - uri: http://127.0.0.1:9/b\n    layout: 'h(0,5)'\n", -1, NULL));
+	yaml = section(&host, TRUE, NULL);
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING,
+		"*window 0: the window layout cannot restore*");
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_test_assert_expected_messages();
+	g_assert_cmpuint(layout->restore_calls, ==, 1);
+	g_assert_cmpuint(layout->restored_views->len, ==, 2);
+	g_assert_cmpuint(gsurf_window_get_n_views(host.window), ==, 2);
+	host_free(&host);
+
+	/* 2. No layout installed (wmux disabled): warned and dropped. */
+	gui_host_init(&host, NULL);
+	g_assert_true(g_file_set_contents(host.file,
+		"windows:\n  - tabs:\n      - uri: http://127.0.0.1:9/a\n"
+		"    layout: 'h(0)'\n", -1, NULL));
+	g_clear_pointer(&yaml, g_free);
+	yaml = section(&host, TRUE, NULL);
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING,
+		"*window 0: no window layout is installed*");
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_test_assert_expected_messages();
+	g_assert_cmpuint(gsurf_window_get_n_views(host.window), ==, 1);
+	host_free(&host);
+
+	/* 3. A second saved window's layout: its tabs join the first window,
+	 *    its layout is dropped; the first window's still applies. */
+	layout = gui_layout_host_init(&host);
+	g_assert_true(g_file_set_contents(host.file,
+		"windows:\n"
+		"  - tabs:\n      - uri: http://127.0.0.1:9/a\n    layout: first\n"
+		"  - tabs:\n      - uri: http://127.0.0.1:9/b\n    layout: second\n", -1, NULL));
+	g_clear_pointer(&yaml, g_free);
+	yaml = section(&host, TRUE, NULL);
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*window 1: its tabs join*");
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_test_assert_expected_messages();
+	g_assert_cmpuint(layout->restore_calls, ==, 1);
+	g_assert_cmpstr(layout->restored_state, ==, "first");
+	g_assert_cmpuint(layout->restored_views->len, ==, 1);
+	g_assert_cmpuint(gsurf_window_get_n_views(host.window), ==, 2);
+	host_free(&host);
+
+	/* 4. An older file without `layout:`: restore() is not called and
+	 *    nothing is reported. */
+	layout = gui_layout_host_init(&host);
+	g_assert_true(g_file_set_contents(host.file,
+		"version: 1\nwindows:\n  - tabs:\n      - uri: http://127.0.0.1:9/a\n", -1, NULL));
+	g_clear_pointer(&yaml, g_free);
+	yaml = section(&host, TRUE, NULL);
+	if (!host_load(&host, yaml)) {
+		host_free(&host);
+		return;
+	}
+	g_assert_cmpuint(layout->restore_calls, ==, 0);
+	g_assert_cmpuint(gsurf_window_get_n_views(host.window), ==, 1);
+	host_free(&host);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -848,11 +1297,16 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/session/bad-files", test_bad_files);
 	g_test_add_func("/gsurf/session/cli-precedence", test_cli_precedence);
 	g_test_add_func("/gsurf/session/reconfigure", test_reconfigure);
+	g_test_add_func("/gsurf/session/save-layout", test_save_layout);
+	g_test_add_func("/gsurf/session/layout-field-errors", test_layout_field_errors);
 	g_test_add_func("/gsurf/session/webkit/restore-round-trip", test_restore_round_trip);
 	g_test_add_func("/gsurf/session/webkit/restore-replaces-initial",
 		test_restore_replaces_initial);
 	g_test_add_func("/gsurf/session/webkit/restore-temporary-and-legacy",
 		test_restore_temporary_initial_and_legacy);
+	g_test_add_func("/gsurf/session/webkit/restore-layout", test_restore_layout);
+	g_test_add_func("/gsurf/session/webkit/restore-layout-fallbacks",
+		test_restore_layout_fallbacks);
 	result = g_test_run();
 	gsurf_test_rmtree(home);
 	return result;
