@@ -5,13 +5,15 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * A GtkLabel packed below the view area showing the active view's URI
- * and load progress. GTK3.
+ * and load progress. Builds against GTK3 and GTK4 through the
+ * module-private modules/include/gsurf-chrome-compat.h.
  */
 
 #include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
 #include <gtk/gtk.h>
+#include "modules/include/gsurf-chrome-compat.h"
 
 #define GSURF_TYPE_STATUS_BAR_MODULE (gsurf_status_bar_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfStatusBarModule, gsurf_status_bar_module,
@@ -137,7 +139,7 @@ gsurf_status_bar_deactivate(GsurfModule *module)
 	}
 	track_view(self, NULL);
 	if (self->label != NULL) {
-		gtk_widget_destroy(self->label);
+		gsurf_chrome_widget_detach(self->label);
 		g_clear_object(&self->label);
 	}
 }

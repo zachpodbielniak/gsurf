@@ -39,6 +39,8 @@ backend compiles per build (=GTK_BACKEND=):
 =gsurf_window_new()= factories and =gsurf_backend_init()=. GTK/WebKit headers
 appear only under =src/backend/<backend>/=.
 
+Modules are compiled per backend too (the module Makefiles receive =GTK_BACKEND=, and =GSURF_BACKEND_GTK3= or =GSURF_BACKEND_GTK4= is defined). The window-chrome modules =chromebar=, =find_bar= and =status_bar= build on both: their GTK calls go through the header-only, module-private =modules/include/gsurf-chrome-compat.h= (static inline wrappers for entry text, box packing, show/hide, detaching a widget from the chrome, and key-press handling: =key-press-event= on GTK3, a capture-phase =GtkEventControllerKey= on GTK4). It lives outside =src/= on purpose, so it is neither installed nor GIR-scanned. The =tabs= module is still GTK3-only while it is being rewritten; a =GTK_BACKEND=gtk4= build skips it (no =tabs.so=). A module that fails to compile fails =make modules=.
+
 * Event flow
 
 #+begin_example

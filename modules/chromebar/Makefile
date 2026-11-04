@@ -5,6 +5,9 @@
 
 MODULE_NAME := $(notdir $(CURDIR))
 SRCS := $(wildcard *.c)
+# The shared, header-only GTK3/GTK4 chrome compat layer: a change to it
+# must rebuild this module.
+HDRS := $(wildcard ../include/*.h)
 CC ?= gcc
 
 # libgsurf link flags. Empty for STATIC=1 builds, where the binary is
@@ -13,7 +16,7 @@ LIBGSURF_LINK ?= -L$(LIBDIR) -lgsurf
 
 all: $(OUTDIR)/$(MODULE_NAME).so
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS) $(LIBGSURF_LINK)
 
