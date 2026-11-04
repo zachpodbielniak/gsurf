@@ -352,6 +352,10 @@ typedef enum {
 	GSURF_ACTION_DARK_MODE_TOGGLE_SITE,
 	/* Form autofill (form_autofill module) */
 	GSURF_ACTION_FORM_AUTOFILL,
+	/* Panes (a GsurfWindowLayout module such as wmux): split the pane
+	 * showing the view (or the active pane) */
+	GSURF_ACTION_PANE_SPLIT_RIGHT,
+	GSURF_ACTION_PANE_SPLIT_DOWN,
 	GSURF_ACTION_LAST
 } GsurfAction;
 
