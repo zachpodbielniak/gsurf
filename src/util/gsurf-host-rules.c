@@ -7,6 +7,8 @@
 
 #include "util/gsurf-host-rules.h"
 
+#include <yaml-glib.h>
+
 #include <json-glib/json-glib.h>
 #include <string.h>
 
@@ -67,7 +69,7 @@ gsurf_host_rules_new(void)
 
 gboolean
 gsurf_host_rules_add(GsurfHostRules *self, const gchar *pattern,
-                     YamlMapping *data, GError **error)
+                     gpointer data, GError **error)
 {
 	g_autoptr(GError) local = NULL;
 	GRegex *regex;
@@ -101,9 +103,10 @@ gsurf_host_rules_add(GsurfHostRules *self, const gchar *pattern,
 }
 
 gboolean
-gsurf_host_rules_load(GsurfHostRules *self, YamlNode *node,
+gsurf_host_rules_load(GsurfHostRules *self, gpointer node_ptr,
                       const gchar *match_key, GError **error)
 {
+	YamlNode *node = node_ptr;
 	YamlSequence *seq;
 	guint i, n;
 
@@ -175,7 +178,7 @@ gsurf_host_rules_get_pattern(GsurfHostRules *self, guint index)
 	return ((HostRule *)g_ptr_array_index(self->rules, index))->pattern;
 }
 
-YamlMapping *
+gpointer
 gsurf_host_rules_get_data(GsurfHostRules *self, guint index)
 {
 	g_return_val_if_fail(GSURF_IS_HOST_RULES(self), NULL);
@@ -208,7 +211,7 @@ gsurf_host_rules_matches(GsurfHostRules *self, const gchar *host)
 	return gsurf_host_rules_find(self, host) >= 0;
 }
 
-YamlMapping *
+gpointer
 gsurf_host_rules_lookup(GsurfHostRules *self, const gchar *host)
 {
 	gint index = gsurf_host_rules_find(self, host);

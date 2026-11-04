@@ -11,13 +11,16 @@
  * (containers' host assignment, hardening exemptions, dark_mode site
  * overrides, form_autofill exclusions) and hand it to the page or a
  * web-process extension as JSON or a #GVariant.
+ *
+ * Like the rest of the public API (see gsurf_config_get_module_node()),
+ * YAML objects are passed as gpointer so this header does not require
+ * yaml-glib: "data" is a YamlMapping*, "node" a YamlNode*.
  */
 
 #ifndef GSURF_HOST_RULES_H
 #define GSURF_HOST_RULES_H
 
 #include <glib-object.h>
-#include <yaml-glib.h>
 
 G_BEGIN_DECLS
 
@@ -53,7 +56,8 @@ GsurfHostRules *gsurf_host_rules_new(void);
  * gsurf_host_rules_add:
  * @self: a #GsurfHostRules
  * @pattern: a regular expression matched against the bare host
- * @data: (nullable): per-rule settings; a reference is taken
+ * @data: (nullable) (type gpointer): per-rule settings (a YamlMapping*);
+ *   a reference is taken
  * @error: return location for a #GError
  *
  * Appends one rule. Patterns are compiled case-insensitively and are not
@@ -65,12 +69,12 @@ GsurfHostRules *gsurf_host_rules_new(void);
  * Returns: %TRUE on success, %FALSE with @error set for a bad pattern
  */
 gboolean gsurf_host_rules_add(GsurfHostRules *self, const gchar *pattern,
-                              YamlMapping *data, GError **error);
+                              gpointer data, GError **error);
 
 /**
  * gsurf_host_rules_load:
  * @self: a #GsurfHostRules
- * @node: (nullable): a YAML sequence of rules
+ * @node: (nullable) (type gpointer): a YamlNode* holding a sequence of rules
  * @match_key: the member naming the pattern in mapping elements (e.g. "match")
  * @error: return location for a #GError
  *
@@ -83,7 +87,7 @@ gboolean gsurf_host_rules_add(GsurfHostRules *self, const gchar *pattern,
  *
  * Returns: %TRUE on success
  */
-gboolean gsurf_host_rules_load(GsurfHostRules *self, YamlNode *node,
+gboolean gsurf_host_rules_load(GsurfHostRules *self, gpointer node,
                                const gchar *match_key, GError **error);
 
 /**
@@ -116,9 +120,10 @@ const gchar *gsurf_host_rules_get_pattern(GsurfHostRules *self, guint index);
  * @self: a #GsurfHostRules
  * @index: a rule index
  *
- * Returns: (transfer none) (nullable): the data of rule @index
+ * Returns: (transfer none) (nullable) (type gpointer): the data
+ *   (YamlMapping*) of rule @index
  */
-YamlMapping *gsurf_host_rules_get_data(GsurfHostRules *self, guint index);
+gpointer gsurf_host_rules_get_data(GsurfHostRules *self, guint index);
 
 /**
  * gsurf_host_rules_find:
@@ -144,21 +149,24 @@ gboolean gsurf_host_rules_matches(GsurfHostRules *self, const gchar *host);
  * @self: a #GsurfHostRules
  * @host: (nullable): a bare host name
  *
- * Returns: (transfer none) (nullable): the data of the first matching
- *   rule, or %NULL when nothing matches or that rule has no data
+ * Returns: (transfer none) (nullable) (type gpointer): the data
+ *   (YamlMapping*) of the first matching rule, or %NULL when nothing
+ *   matches or that rule has no data
  */
-YamlMapping *gsurf_host_rules_lookup(GsurfHostRules *self, const gchar *host);
+gpointer gsurf_host_rules_lookup(GsurfHostRules *self, const gchar *host);
 
 /**
- * gsurf_host_rules_lookup_all:
+ * gsurf_host_rules_lookup_all: (skip)
  * @self: a #GsurfHostRules
  * @host: (nullable): a bare host name
  *
  * Collects the data of every matching rule, in rule order, for callers
- * that merge settings (later rules override earlier ones).
+ * that merge settings (later rules override earlier ones). Not
+ * introspectable (an array of raw YAML pointers); bindings can iterate
+ * with gsurf_host_rules_get_n_rules() and gsurf_host_rules_get_data().
  *
- * Returns: (transfer container) (element-type YamlMapping): matching rule
- *   data; rules without data are skipped
+ * Returns: (transfer container) (element-type gpointer): matching rule
+ *   data (YamlMapping*); rules without data are skipped
  */
 GPtrArray *gsurf_host_rules_lookup_all(GsurfHostRules *self, const gchar *host);
 

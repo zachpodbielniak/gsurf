@@ -6,6 +6,8 @@
  */
 
 #include <gsurf.h>
+#include <yaml-glib.h>
+#include <json-glib/json-glib.h>
 #include <glib/gstdio.h>
 #include <string.h>
 #include <sys/stat.h>

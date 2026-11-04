@@ -7,12 +7,12 @@
 
 #include "backend/webkit/gsurf-webkit-protocol.h"
 #include "backend/webkit/gsurf-webkit-content.h"
+#include "backend/webkit/gsurf-webkit-session.h"
+#include "backend/webkit/gsurf-webkit-common.h"
 
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk3/gsurf-webkit2-view.h"
 #include "module/gsurf-module-manager.h"
-#include "boxed/gsurf-hit-test.h"
-#include "boxed/gsurf-menu-item.h"
 
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
@@ -22,6 +22,7 @@ struct _GsurfWebkit2View
 	GsurfView parent_instance;
 
 	WebKitWebView *webview; /* the native GtkWidget; we hold a ref */
+	GHashTable    *message_handlers; /* "world\x1fname" already registered */
 };
 
 G_DEFINE_FINAL_TYPE(GsurfWebkit2View, gsurf_webkit2_view, GSURF_TYPE_VIEW)
@@ -51,93 +52,11 @@ on_load_changed(WebKitWebView *wv, WebKitLoadEvent event, gpointer user_data)
 	gsurf_view_emit_load_changed(GSURF_VIEW(self), (GsurfLoadEvent)event);
 }
 
+/* Let permission-handler modules decide (geolocation, notifications). */
 static gboolean
 on_permission_request(WebKitWebView *wv, WebKitPermissionRequest *req, gpointer user_data)
 {
-	GsurfWebkit2View *self = user_data;
-	const gchar *type = "other";
-	GsurfPermissionVerdict v;
-
-	if (WEBKIT_IS_GEOLOCATION_PERMISSION_REQUEST(req))
-		type = "geolocation";
-	else if (WEBKIT_IS_NOTIFICATION_PERMISSION_REQUEST(req))
-		type = "notification";
-
-	v = gsurf_module_manager_dispatch_permission(gsurf_module_manager_get_default(),
-		GSURF_VIEW(self), type, NULL);
-	if (v == GSURF_PERMISSION_ALLOW) {
-		webkit_permission_request_allow(req);
-		return TRUE;
-	}
-	if (v == GSURF_PERMISSION_DENY) {
-		webkit_permission_request_deny(req);
-		return TRUE;
-	}
-	return FALSE; /* PROMPT: leave to the engine default */
-}
-
-static gboolean
-on_download_decide_destination(WebKitDownload *download, const gchar *suggested, gpointer user_data)
-{
-	WebKitURIRequest *req = webkit_download_get_request(download);
-	const gchar *uri = req ? webkit_uri_request_get_uri(req) : NULL;
-	g_autofree gchar *path = gsurf_module_manager_dispatch_decide_destination(
-		gsurf_module_manager_get_default(), uri, suggested);
-	g_autofree gchar *file_uri = NULL;
-
-	if (path == NULL)
-		return FALSE;
-
-	file_uri = g_filename_to_uri(path, NULL, NULL);
-	if (file_uri != NULL)
-		webkit_download_set_destination(download, file_uri);
-	return file_uri != NULL;
-}
-
-static void
-on_download_started(WebKitWebContext *context, WebKitDownload *download, gpointer user_data)
-{
-	g_signal_connect(download, "decide-destination",
-		G_CALLBACK(on_download_decide_destination), user_data);
-}
-
-/* A context-menu item contributed by a module: run its shell command. */
-static void
-on_menu_action_activate(GSimpleAction *action, GVariant *param, gpointer user_data)
-{
-	const gchar *command = g_object_get_data(G_OBJECT(action), "gsurf-command");
-	g_autoptr(GError) error = NULL;
-
-	if (command != NULL && !g_spawn_command_line_async(command, &error))
-		g_warning("gsurf context-menu: %s", error ? error->message : "spawn failed");
-}
-
-/* Build a GsurfHitTest from a WebKit hit-test result. */
-static GsurfHitTest *
-hit_test_from_webkit(WebKitHitTestResult *r)
-{
-	GsurfHitTest *ht = gsurf_hit_test_new();
-	guint ctx = 0;
-
-	if (webkit_hit_test_result_context_is_link(r)) {
-		ctx |= GSURF_HIT_TEST_LINK;
-		gsurf_hit_test_set_link_uri(ht, webkit_hit_test_result_get_link_uri(r));
-		gsurf_hit_test_set_link_label(ht, webkit_hit_test_result_get_link_label(r));
-	}
-	if (webkit_hit_test_result_context_is_image(r)) {
-		ctx |= GSURF_HIT_TEST_IMAGE;
-		gsurf_hit_test_set_image_uri(ht, webkit_hit_test_result_get_image_uri(r));
-	}
-	if (webkit_hit_test_result_context_is_media(r)) {
-		ctx |= GSURF_HIT_TEST_MEDIA;
-		gsurf_hit_test_set_media_uri(ht, webkit_hit_test_result_get_media_uri(r));
-	}
-	if (webkit_hit_test_result_context_is_editable(r))
-		ctx |= GSURF_HIT_TEST_EDITABLE;
-	if (webkit_hit_test_result_context_is_scrollbar(r))
-		ctx |= GSURF_HIT_TEST_SCROLLBAR;
-	gsurf_hit_test_set_context(ht, ctx);
-	return ht;
+	return gsurf_webkit_common_handle_permission(GSURF_VIEW(user_data), req);
 }
 
 /* Let context-menu-provider modules contribute entries to the menu. */
@@ -145,43 +64,9 @@ static gboolean
 on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu, GdkEvent *event,
                 WebKitHitTestResult *hit_result, gpointer user_data)
 {
-	GsurfHitTest *hit;
-	GPtrArray *items;
-	guint i;
-
 	if (gsurf_kiosk_is_enabled())
 		return TRUE;
-	hit = hit_test_from_webkit(hit_result);
-	items = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_menu_item_free);
-
-	gsurf_module_manager_dispatch_populate_menu(gsurf_module_manager_get_default(),
-		hit, items);
-
-	if (items->len > 0)
-		webkit_context_menu_append(menu, webkit_context_menu_item_new_separator());
-
-	for (i = 0; i < items->len; i++) {
-		GsurfMenuItem *mi = g_ptr_array_index(items, i);
-		g_autofree gchar *action_name = NULL;
-		GSimpleAction *act;
-
-		if (gsurf_menu_item_get_is_separator(mi)) {
-			webkit_context_menu_append(menu, webkit_context_menu_item_new_separator());
-			continue;
-		}
-		action_name = g_strdup_printf("gsurf-menu-%u", i);
-		act = g_simple_action_new(action_name, NULL);
-		g_object_set_data_full(G_OBJECT(act), "gsurf-command",
-			g_strdup(gsurf_menu_item_get_arg(mi)), g_free);
-		g_signal_connect(act, "activate", G_CALLBACK(on_menu_action_activate), NULL);
-		webkit_context_menu_append(menu,
-			webkit_context_menu_item_new_from_gaction(G_ACTION(act),
-				gsurf_menu_item_get_label(mi), NULL));
-		g_object_unref(act);
-	}
-
-	g_ptr_array_unref(items);
-	gsurf_hit_test_free(hit);
+	gsurf_webkit_common_populate_menu(menu, hit_result);
 	return FALSE;   /* keep the (augmented) menu */
 }
 
@@ -189,17 +74,7 @@ static gboolean
 on_load_failed_tls(WebKitWebView *wv, gchar *failing_uri, GTlsCertificate *cert,
                    GTlsCertificateFlags errors, gpointer user_data)
 {
-	g_autoptr(GUri) parsed = g_uri_parse(failing_uri, G_URI_FLAGS_NONE, NULL);
-	const gchar *host = parsed ? g_uri_get_host(parsed) : NULL;
-
-	if (gsurf_module_manager_dispatch_verify_cert(gsurf_module_manager_get_default(),
-			host, errors) == GSURF_TLS_PROCEED) {
-		webkit_web_context_allow_tls_certificate_for_host(
-			webkit_web_view_get_context(wv), cert, host);
-		webkit_web_view_load_uri(wv, failing_uri);
-		return TRUE;
-	}
-	return FALSE;
+	return gsurf_webkit_common_handle_tls_error(wv, failing_uri, cert, errors);
 }
 
 static void
@@ -636,10 +511,7 @@ static void
 on_mouse_target_changed(WebKitWebView *wv, WebKitHitTestResult *hit,
                         guint modifiers, gpointer user_data)
 {
-	GsurfWebkit2View *self = user_data;
-	const gchar *uri = webkit_hit_test_result_context_is_link(hit)
-		? webkit_hit_test_result_get_link_uri(hit) : NULL;
-	gsurf_view_set_hovered_uri(GSURF_VIEW(self), uri);
+	gsurf_webkit_common_mouse_target(GSURF_VIEW(user_data), hit);
 }
 
 static void
@@ -653,14 +525,7 @@ on_notify_favicon(WebKitWebView *wv, GParamSpec *pspec, gpointer user_data)
 static GtkWidget *
 on_create(WebKitWebView *wv, WebKitNavigationAction *action, gpointer user_data)
 {
-	GsurfWebkit2View *self = user_data;
-	WebKitURIRequest *req = webkit_navigation_action_get_request(action);
-	const gchar *uri = req ? webkit_uri_request_get_uri(req) : NULL;
-	GsurfView *newview = gsurf_view_emit_create_view(GSURF_VIEW(self), uri);
-
-	if (newview != NULL)
-		return GTK_WIDGET(gsurf_view_get_native_widget(newview));
-	return NULL;
+	return gsurf_webkit_common_create(GSURF_VIEW(user_data), action);
 }
 
 /* Content script (document-start, all frames): reports whether an
@@ -684,42 +549,136 @@ on_focus_message(WebKitUserContentManager *ucm, WebKitJavascriptResult *result, 
 	gsurf_view_set_editing(GSURF_VIEW(self), jsc_value_to_boolean(value));
 }
 
-/* Apply the storage/network/TLS/cookie settings from the active config to
- * the view's (shared) web context. */
-static void
-gsurf_webkit2_view_apply_context_config(GsurfWebkit2View *self)
-{
-	GsurfConfig *cfg = gsurf_config_get_default();
-	WebKitWebContext *ctx = webkit_web_view_get_context(self->webview);
+/* --- Script worlds and messages --- */
 
-	if (cfg == NULL)
+/* One registered module message handler: which view to notify and the
+ * handler name to report (the signal callback does not receive it). */
+typedef struct {
+	GsurfWebkit2View *self;
+	gchar            *name;
+} MessageClosure;
+
+static void
+message_closure_free(gpointer data, GClosure *closure)
+{
+	MessageClosure *mc = data;
+
+	(void)closure;
+	g_free(mc->name);
+	g_free(mc);
+}
+
+/* Deliver a module's script message as GsurfView::script-message. */
+static void
+on_module_script_message(WebKitUserContentManager *ucm, WebKitJavascriptResult *result,
+                         gpointer user_data)
+{
+	MessageClosure *mc = user_data;
+	JSCValue *value = webkit_javascript_result_get_js_value(result);
+	g_autofree gchar *json = jsc_value_to_json(value, 0);
+
+	(void)ucm;
+	gsurf_view_emit_script_message(GSURF_VIEW(mc->self), mc->name, json);
+}
+
+static void
+gsurf_webkit2_view_register_script_message(GsurfView *view, const gchar *name,
+                                           const gchar *world)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
+	g_autofree gchar *key = g_strdup_printf("%s\x1f%s", world != NULL ? world : "", name);
+	g_autofree gchar *detailed = g_strconcat("script-message-received::", name, NULL);
+	MessageClosure *mc;
+	gboolean ok;
+
+	if (g_hash_table_contains(self->message_handlers, key))
 		return;
 
-	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
-	webkit_web_context_set_tls_errors_policy(ctx,
-		cfg->tls_strict ? WEBKIT_TLS_ERRORS_POLICY_FAIL : WEBKIT_TLS_ERRORS_POLICY_IGNORE);
-	webkit_web_context_set_cache_model(ctx,
-		cfg->enable_disk_cache ? WEBKIT_CACHE_MODEL_WEB_BROWSER
-		                       : WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
+	ok = (world != NULL)
+		? webkit_user_content_manager_register_script_message_handler_in_world(ucm, name, world)
+		: webkit_user_content_manager_register_script_message_handler(ucm, name);
+	if (!ok) {
+		g_warning("gsurf: script message handler '%s' is already taken", name);
+		return;
+	}
+	g_hash_table_add(self->message_handlers, g_steal_pointer(&key));
 
-	if (!cfg->ephemeral && cfg->cookie_jar != NULL && *cfg->cookie_jar != '\0') {
-		WebKitCookieManager *cm = webkit_web_context_get_cookie_manager(ctx);
-		g_autofree gchar *dir = g_path_get_dirname(cfg->cookie_jar);
-		g_mkdir_with_parents(dir, 0755);
-		webkit_cookie_manager_set_persistent_storage(cm, cfg->cookie_jar,
-			WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+	mc = g_new0(MessageClosure, 1);
+	mc->self = self;
+	mc->name = g_strdup(name);
+	/* Disconnected in dispose with g_signal_handlers_disconnect_by_func. */
+	g_signal_connect_data(ucm, detailed, G_CALLBACK(on_module_script_message), mc,
+		message_closure_free, 0);
+}
+
+static void
+gsurf_webkit2_view_add_user_script_in_world(GsurfView *view, const gchar *source,
+                                            gboolean at_end, const gchar *const *allow,
+                                            const gchar *world)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	WebKitUserContentManager *ucm = webkit_web_view_get_user_content_manager(self->webview);
+	WebKitUserScript *script;
+
+	script = webkit_user_script_new_for_world(source, WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+		at_end ? WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_END
+		       : WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+		world, (const gchar * const *)allow, NULL);
+	webkit_user_content_manager_add_script(ucm, script);
+	webkit_user_script_unref(script);
+}
+
+static void
+gsurf_webkit2_view_run_javascript_in_world_async(GsurfView *view, const gchar *script,
+                                                 const gchar *world, GCancellable *cancellable,
+                                                 GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+
+	/* Same finish as the main-world call: evaluate_javascript_finish. */
+	webkit_web_view_evaluate_javascript(self->webview, script, -1, world, NULL,
+		cancellable, callback, user_data);
+}
+
+static gpointer
+gsurf_webkit2_view_get_favicon(GsurfView *view)
+{
+	return webkit_web_view_get_favicon(GSURF_WEBKIT2_VIEW(view)->webview);
+}
+
+/* Build the native web view inside the view's container. A popup is a
+ * related view of its opener (same context and web process, so
+ * window.opener works) but keeps its own settings and user content: the
+ * related-view default would share them, mixing per-site settings and
+ * duplicating every injected script between the two views. */
+static GtkWidget *
+create_native_view(GsurfWebkit2View *self)
+{
+	GsurfView *view = GSURF_VIEW(self);
+	GsurfView *opener = gsurf_view_get_opener(view);
+	g_autoptr(WebKitUserContentManager) ucm = webkit_user_content_manager_new();
+	g_autoptr(WebKitSettings) settings = webkit_settings_new();
+	WebKitWebContext *ctx;
+
+	if (gsurf_view_get_related(view) && opener != NULL &&
+	    WEBKIT_IS_WEB_VIEW(gsurf_view_get_native_widget(opener))) {
+		return g_object_new(WEBKIT_TYPE_WEB_VIEW,
+			"related-view", gsurf_view_get_native_widget(opener),
+			"user-content-manager", ucm,
+			"settings", settings,
+			NULL);
 	}
 
-	if (g_strcmp0(cfg->proxy_mode, "none") == 0) {
-		webkit_web_context_set_network_proxy_settings(ctx,
-			WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, NULL);
-	} else if (g_strcmp0(cfg->proxy_mode, "custom") == 0 &&
-	           cfg->proxy_uri != NULL && *cfg->proxy_uri != '\0') {
-		WebKitNetworkProxySettings *ps = webkit_network_proxy_settings_new(cfg->proxy_uri, NULL);
-		webkit_web_context_set_network_proxy_settings(ctx, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, ps);
-		webkit_network_proxy_settings_free(ps);
-	}
-	G_GNUC_END_IGNORE_DEPRECATIONS
+	/* Web-process extensions must be wired before the context launches
+	 * its first web process. */
+	ctx = gsurf_webkit_session_get_context(gsurf_view_get_session(view));
+	gsurf_webkit_content_attach_context(ctx);
+	return g_object_new(WEBKIT_TYPE_WEB_VIEW,
+		"web-context", ctx,
+		"user-content-manager", ucm,
+		"settings", settings,
+		NULL);
 }
 
 /* --- GObject lifecycle --- */
@@ -732,12 +691,11 @@ gsurf_webkit2_view_constructed(GObject *object)
 	WebKitUserScript *tracker;
 	GtkWidget *widget;
 
+	/* The base class resolves the container and acquires its session. */
 	G_OBJECT_CLASS(gsurf_webkit2_view_parent_class)->constructed(object);
 
-	/* Web-process extensions must be wired before the context launches
-	 * its first web process. */
-	gsurf_webkit_content_attach_context(webkit_web_context_get_default());
-	widget = webkit_web_view_new();
+	gsurf_webkit_session_prepare_default();
+	widget = create_native_view(self);
 	gsurf_webkit_protocol_attach(WEBKIT_WEB_VIEW(widget));
 	self->webview = WEBKIT_WEB_VIEW(g_object_ref_sink(widget));
 	if (gsurf_kiosk_is_enabled())
@@ -770,8 +728,7 @@ gsurf_webkit2_view_constructed(GObject *object)
 		G_CALLBACK(on_permission_request), self);
 	g_signal_connect(self->webview, "load-failed-with-tls-errors",
 		G_CALLBACK(on_load_failed_tls), self);
-	g_signal_connect(webkit_web_view_get_context(self->webview), "download-started",
-		G_CALLBACK(on_download_started), self);
+	gsurf_webkit_session_track_downloads(self->webview);
 	g_signal_connect(self->webview, "mouse-target-changed",
 		G_CALLBACK(on_mouse_target_changed), self);
 	g_signal_connect(self->webview, "notify::favicon",
@@ -780,9 +737,6 @@ gsurf_webkit2_view_constructed(GObject *object)
 		G_CALLBACK(on_create), self);
 	g_signal_connect(self->webview, "context-menu",
 		G_CALLBACK(on_context_menu), self);
-
-	/* Apply storage/cookie/network/TLS config from the active config. */
-	gsurf_webkit2_view_apply_context_config(self);
 
 	/* Let script-injector modules add user scripts/styles to this view. */
 	gsurf_module_manager_dispatch_inject_scripts(
@@ -800,11 +754,15 @@ gsurf_webkit2_view_dispose(GObject *object)
 		 * Neither may keep callbacks into a disposed library wrapper. */
 		g_signal_handlers_disconnect_by_data(
 			webkit_web_view_get_user_content_manager(self->webview), self);
-		g_signal_handlers_disconnect_by_data(
-			webkit_web_view_get_context(self->webview), self);
+		/* Module message closures carry their own data; match the
+		 * function only (the content manager belongs to this view). */
+		g_signal_handlers_disconnect_matched(
+			webkit_web_view_get_user_content_manager(self->webview),
+			G_SIGNAL_MATCH_FUNC, 0, 0, NULL, on_module_script_message, NULL);
 		g_signal_handlers_disconnect_by_data(self->webview, self);
 		g_clear_object(&self->webview);
 	}
+	g_clear_pointer(&self->message_handlers, g_hash_table_unref);
 
 	G_OBJECT_CLASS(gsurf_webkit2_view_parent_class)->dispose(object);
 }
@@ -814,6 +772,11 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS(klass);
 	GsurfViewClass *view_class = GSURF_VIEW_CLASS(klass);
+
+	/* The base class acquires a view's container session before this
+	 * class's constructed() runs, so the session factory must already be
+	 * installed when the first instance is built. */
+	gsurf_webkit_session_install();
 
 	object_class->constructed = gsurf_webkit2_view_constructed;
 	object_class->dispose = gsurf_webkit2_view_dispose;
@@ -850,11 +813,16 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->find_previous = gsurf_webkit2_view_find_previous;
 	view_class->set_cookie_accept_policy = gsurf_webkit2_view_set_cookie_accept_policy;
 	view_class->set_proxy = gsurf_webkit2_view_set_proxy;
+	view_class->register_script_message = gsurf_webkit2_view_register_script_message;
+	view_class->add_user_script_in_world = gsurf_webkit2_view_add_user_script_in_world;
+	view_class->run_javascript_in_world_async = gsurf_webkit2_view_run_javascript_in_world_async;
+	view_class->get_favicon = gsurf_webkit2_view_get_favicon;
 }
 
 static void
 gsurf_webkit2_view_init(GsurfWebkit2View *self)
 {
+	self->message_handlers = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, NULL);
 }
 
 GsurfView *

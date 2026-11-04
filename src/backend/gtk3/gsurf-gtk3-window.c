@@ -17,6 +17,7 @@ struct _GsurfGtk3Window
 
 	GtkWidget *window;  /* GtkWindow toplevel */
 	GtkWidget *vbox;    /* content box (chrome from modules goes here) */
+	GtkWidget *hbox;    /* side panels + the view stack */
 	GtkWidget *stack;   /* GtkStack of view widgets */
 };
 
@@ -117,7 +118,10 @@ gsurf_gtk3_window_realize(GsurfWindow *window)
 
 	gtk_stack_set_transition_type(GTK_STACK(self->stack),
 		GTK_STACK_TRANSITION_TYPE_NONE);
-	gtk_box_pack_start(GTK_BOX(self->vbox), self->stack, TRUE, TRUE, 0);
+	/* vbox: [top chrome] hbox [bottom chrome]; hbox: [left] stack [right]. */
+	self->hbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_box_pack_start(GTK_BOX(self->hbox), self->stack, TRUE, TRUE, 0);
+	gtk_box_pack_start(GTK_BOX(self->vbox), self->hbox, TRUE, TRUE, 0);
 	gtk_container_add(GTK_CONTAINER(self->window), self->vbox);
 
 	gtk_window_set_default_size(GTK_WINDOW(self->window),
@@ -415,6 +419,23 @@ gsurf_gtk3_window_add_chrome_widget(GsurfWindow *window, gpointer widget, gboole
 	gtk_widget_show_all(w);
 }
 
+static void
+gsurf_gtk3_window_add_side_widget(GsurfWindow *window, gpointer widget, GsurfChromeEdge edge)
+{
+	GsurfGtk3Window *self = GSURF_GTK3_WINDOW(window);
+	GtkWidget *w = widget;
+
+	if (w == NULL || self->hbox == NULL)
+		return;
+	if (edge == GSURF_CHROME_EDGE_LEFT) {
+		gtk_box_pack_start(GTK_BOX(self->hbox), w, FALSE, FALSE, 0);
+		gtk_box_reorder_child(GTK_BOX(self->hbox), w, 0);
+	} else {
+		gtk_box_pack_end(GTK_BOX(self->hbox), w, FALSE, FALSE, 0);
+	}
+	gtk_widget_show_all(w);
+}
+
 /* --- GObject lifecycle --- */
 
 static void
@@ -449,6 +470,7 @@ gsurf_gtk3_window_class_init(GsurfGtk3WindowClass *klass)
 	window_class->get_native_widget = gsurf_gtk3_window_get_native_widget;
 	window_class->add_chrome_widget = gsurf_gtk3_window_add_chrome_widget;
 	window_class->show_keybind_help = gsurf_gtk3_window_show_keybind_help;
+	window_class->add_side_widget = gsurf_gtk3_window_add_side_widget;
 }
 
 static void

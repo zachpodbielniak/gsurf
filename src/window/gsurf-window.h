@@ -61,7 +61,11 @@ struct _GsurfWindowClass
 	/* Overlay listing currently active keybindings (the `?` help menu). */
 	void     (*show_keybind_help) (GsurfWindow *self, GPtrArray *entries);
 
-	gpointer padding[7];
+	/* Chrome: pack a native widget beside the view area (side panels such
+	 * as the tree tab sidebar). */
+	void     (*add_side_widget)   (GsurfWindow *self, gpointer widget, GsurfChromeEdge edge);
+
+	gpointer padding[6];
 };
 
 /* --- View management (handled by the abstract base) --- */
@@ -76,6 +80,39 @@ struct _GsurfWindowClass
  */
 void        gsurf_window_add_view(GsurfWindow *self, GsurfView *view);
 void        gsurf_window_remove_view(GsurfWindow *self, GsurfView *view);
+
+/**
+ * gsurf_window_insert_view:
+ * @self: a #GsurfWindow
+ * @view: (transfer none): the view to add
+ * @index: position in the view list; values past the end append
+ *
+ * Like gsurf_window_add_view() but places @view at @index (the tab tree
+ * puts a child right after its parent's subtree). The native stack has
+ * no visible order, so only the list order changes.
+ */
+void        gsurf_window_insert_view(GsurfWindow *self, GsurfView *view, guint index);
+
+/**
+ * gsurf_window_move_view:
+ * @self: a #GsurfWindow
+ * @view: a view owned by @self
+ * @index: its new position; values past the end move it last
+ *
+ * Reorders the view list and emits #GsurfWindow::view-moved. Moving a
+ * view to where it already is does nothing.
+ */
+void        gsurf_window_move_view(GsurfWindow *self, GsurfView *view, guint index);
+
+/**
+ * gsurf_window_get_view_index:
+ * @self: a #GsurfWindow
+ * @view: a view
+ *
+ * Returns: the position of @view in the list, or -1 if @self does not
+ *   own it
+ */
+gint        gsurf_window_get_view_index(GsurfWindow *self, GsurfView *view);
 /**
  * gsurf_window_set_active_view:
  * @self: a #GsurfWindow
@@ -136,6 +173,19 @@ void        gsurf_window_add_top_widget(GsurfWindow *self, gpointer widget);
  * No-op while kiosk mode is enabled so the page fills the window.
  */
 void        gsurf_window_add_bottom_widget(GsurfWindow *self, gpointer widget);
+
+/**
+ * gsurf_window_add_side_widget:
+ * @self: a #GsurfWindow
+ * @widget: a native widget (a #GtkWidget as gpointer)
+ * @edge: which side of the view area
+ *
+ * Packs a side panel beside the view area, between the top and bottom
+ * chrome. No-op while kiosk mode is enabled, and on backends without
+ * native chrome (libregnum).
+ */
+void        gsurf_window_add_side_widget(GsurfWindow *self, gpointer widget,
+                                         GsurfChromeEdge edge);
 
 /**
  * gsurf_window_show_keybind_help:

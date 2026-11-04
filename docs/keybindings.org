@@ -117,6 +117,8 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
 
+Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Kiosk mode refuses =container-new-temp= and =container-reopen-next= like every action that opens a view.
+
 * Modal / vim navigation
 
 The =modal= module (enabled by default) provides vim-style navigation. It is
