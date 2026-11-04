@@ -280,7 +280,9 @@ GIR_FILE := $(GIR_NAMESPACE)-$(GIR_VERSION).gir
 TYPELIB_FILE := $(GIR_NAMESPACE)-$(GIR_VERSION).typelib
 
 # Test framework
-TEST_CFLAGS := $(CFLAGS) $(shell $(PKG_CONFIG) --cflags glib-2.0)
+# gio-unix-2.0: test-pwa uses GDesktopAppInfo; GTK3 pulls the header path in
+# transitively, GTK4 does not.
+TEST_CFLAGS := $(CFLAGS) $(shell $(PKG_CONFIG) --cflags glib-2.0 gio-unix-2.0)
 TEST_LDFLAGS := $(LDFLAGS) -L$(OUTDIR) -lgsurf -Wl,-rpath,$(OUTDIR)
 
 # Module flags (absolute include paths for out-of-tree compilation).

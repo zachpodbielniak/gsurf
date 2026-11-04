@@ -214,7 +214,11 @@ test_filters_enforced(void)
 		g_test_skip("adblock.so not built");
 		return;
 	}
+#ifdef GSURF_BACKEND_GTK3
 	g_assert_true(gtk_init_check(NULL, NULL));
+#else
+	g_assert_true(gtk_init_check());
+#endif
 
 	/* Keep compiled rulesets out of the user's cache. */
 	cache = g_dir_make_tmp("gsurf-adblock-cache-XXXXXX", &error);
