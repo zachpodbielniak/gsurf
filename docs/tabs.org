@@ -96,7 +96,7 @@ A tab in a container (=gsurf_view_get_container_id()=, see =GsurfContainerRegist
 
 * The strip
 
-The strip shows one flat button per tab in window order (titles cut to 24 characters) with a close button; the active tab uses =active_color=. Clicking a tab activates it. It is shown when the window has more than one tab, or always with =show_single: true=, unless the sidebar is shown and =sidebar_hides_strip= is set.
+The strip shows one flat button per tab in window order (titles cut to 24 characters) with a close button; the active tab uses =active_color=. Clicking a tab activates it. It is shown when the window has more than one tab, or always with =show_single: true=, unless the sidebar is shown and =sidebar_hides_strip= is set. =strip: false= turns the strip off entirely, for a sidebar-only setup: the sidebar toggle then switches between the tree and no tab chrome at all, and the keyboard keys (=Ctrl+Tab= and friends) keep working.
 
 * Configuration
 
@@ -106,6 +106,7 @@ Under =modules.tabs= (all optional; =data/default-config.yaml= spells out the de
 |-----------------------+--------------------------+---------|
 | =enabled=             | =true=                   | Load the module. |
 | =position=            | =top=                    | Strip position: =top= or =bottom=. |
+| =strip=               | =true=                   | =false= never shows the strip; the sidebar (=Ctrl+Shift+.=) is then the only tab view. |
 | =show_single=         | =false=                  | Show the strip with a single tab. |
 | =bg_color=            | =#181825=                | Strip and sidebar background. |
 | =active_color=        | =#313244=                | Background of the active tab and row. |

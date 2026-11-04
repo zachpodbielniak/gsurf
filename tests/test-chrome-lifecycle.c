@@ -1255,6 +1255,31 @@ test_tabs_sidebar_tree(void)
 	g_assert_cmpint(row_indent(c.window, gg), ==, 0);
 	g_assert_cmpstr(twisty_of(c.window, c.first), ==, "");
 
+	/* 12. strip: false never shows the strip, with the sidebar shown or
+	 *     hidden, even with show_single; the sidebar still toggles. */
+	configure_tabs(module,
+		"modules:\n  tabs:\n    enabled: true\n"
+		"    strip: false\n    show_single: true\n");
+	gsurf_module_deactivate(module);
+	g_assert_true(gsurf_module_activate(module));
+	strip = only_child(c.window);
+	sidebar = side_child(c.window);
+	g_assert_false(gtk_widget_get_visible(strip));
+	g_assert_false(gtk_widget_get_visible(sidebar));
+	g_assert_true(tabs_action(module, c.first, GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
+	g_assert_true(gtk_widget_get_visible(sidebar));
+	g_assert_false(gtk_widget_get_visible(strip));
+	g_assert_true(tabs_action(module, c.first, GSURF_ACTION_TAB_SIDEBAR_TOGGLE));
+	g_assert_false(gtk_widget_get_visible(sidebar));
+	g_assert_false(gtk_widget_get_visible(strip));
+
+	/* 13. Reconfiguring back to defaults brings the strip back. */
+	configure_tabs(module, "modules:\n  tabs:\n    enabled: true\n");
+	gsurf_module_deactivate(module);
+	g_assert_true(gsurf_module_activate(module));
+	strip = only_child(c.window);
+	g_assert_true(gtk_widget_get_visible(strip));
+
 	gsurf_module_deactivate(module);
 	g_object_unref(c1);
 	g_object_unref(g1);

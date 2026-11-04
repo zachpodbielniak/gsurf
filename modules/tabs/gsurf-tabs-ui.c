@@ -576,9 +576,14 @@ gsurf_tabs_ui_update_visibility(GsurfTabsModule *self)
 {
 	guint n;
 
+	/* The strip shows only when it is enabled (strip: false turns it
+	 * off for good, leaving the sidebar as the only tab view), there is
+	 * more than one tab (or show_single), and the sidebar is not hiding
+	 * it. */
 	if (self->bar != NULL && self->window != NULL) {
 		n = gsurf_window_get_n_views(self->window);
 		gtk_widget_set_visible(self->bar,
+			self->strip &&
 			(n > 1 || self->show_single) &&
 			!(self->sidebar_shown && self->sidebar_hides_strip));
 	}
