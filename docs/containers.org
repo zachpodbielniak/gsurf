@@ -144,6 +144,10 @@ The MCP server (=modules/mcp=, see [[file:mcp.org][mcp.org]]) exposes containers
 - =list_views= returns, per view, =id= (stable), =opener_id= (=0= = none) and =container= (the container id, =null= = default).
 - =open_view= takes an optional =container=: a container id, =temporary= or =default=. Without it the view is placed by the policy above.
 
+* Sessions
+
+The =session= module saves each tab's container: the id of a persistent container, nothing for the default container, and =temporary:<n>= for temporary ones, where tabs that shared a temporary container share =<n>=. On restore every group gets one fresh temporary container, persistent containers are requested explicitly (an undefined one falls back to the default container with a warning) and each tab's opener is restored. See [[file:configuration.org][configuration.org]], "Session".
+
 * Tests
 
 =tests/test-containers.c= (headless, the real =containers.so=) covers configuration parsing, id derivation and validation, every placement branch, reconfiguring (removed and in-use containers, back to defaults, disabling, deactivate/activate), bad input and the host-assignment decisions (top-level vs. iframe, popups, the loop guard, kiosk). =tests/test-containers-module-webkit.c= (=make test-gui=, both backends) loads a loopback server as two hosts, =127.0.0.1= and =localhost= (assigned to "Media"), and checks that a typed address is reopened in Media in place with the cookie in Media's jar, that a script navigation of the main frame moves while the old tab stays as the opener, that an iframe of the assigned host does not move, and both actions.

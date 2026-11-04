@@ -416,7 +416,7 @@ modules:
   session:
     enabled: false
     auto_restore: false
-    file: "~/.local/share/gsurf/session"
+    file: "~/.local/share/gsurf/session.yaml"   # YAML, 0600; see docs/configuration.org
     key_save: "Ctrl+Shift+s"
 
   # --- AI modules (require the AI=1 build flag; deferred / not yet built) ---
