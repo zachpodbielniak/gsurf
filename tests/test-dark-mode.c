@@ -11,7 +11,8 @@
  * (load, save, permissions, malformed input), the toggles through the
  * action, key and keybind-help hooks, and script injection into a
  * recording headless GsurfView (worlds, live updates, on-demand Dark
- * Reader, view and module lifetimes). Every test case runs with its own
+ * Reader, view and module lifetimes), and the toggles module forwarding
+ * its legacy dark_mode key. Every test case runs with its own
  * temporary XDG directories (G_TEST_OPTION_ISOLATE_DIRS).
  */
 
@@ -996,6 +997,52 @@ test_disabled_module_is_inert(void)
 		GSURF_ACTION_DARK_MODE_TOGGLE_SITE));
 }
 
+/* The toggles module's legacy dark_mode key is forwarded, through the
+ * process-wide manager, to dark_mode's global toggle. The only test case
+ * here that loads modules into the default manager. */
+static void
+test_toggles_module_forwards(void)
+{
+	g_autofree gchar *dark_so = module_so_path("dark_mode");
+	g_autofree gchar *toggles_so = module_so_path("toggles");
+	g_autoptr(GsurfConfig) config = config_for(
+		"  toggles:\n"
+		"    enabled: true\n"
+		"    keys:\n"
+		"      dark_mode: \"Ctrl+Alt+F5\"\n");
+	g_autoptr(TestView) view = new_view("https://fwd.example/");
+	g_autoptr(GError) error = NULL;
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	GsurfModule *dark, *toggles;
+	gboolean on = FALSE;
+
+	if (!g_file_test(toggles_so, G_FILE_TEST_EXISTS)) {
+		g_test_skip("toggles.so not built");
+		return;
+	}
+	gsurf_module_manager_set_config(mgr, config);
+	dark = gsurf_module_manager_load_module(mgr, dark_so, &error);
+	g_assert_no_error(error);
+	toggles = gsurf_module_manager_load_module(mgr, toggles_so, &error);
+	g_assert_no_error(error);
+	g_assert_nonnull(dark);
+	g_assert_nonnull(toggles);
+	gsurf_module_manager_activate_all(mgr);
+
+	g_assert_true(gsurf_input_handler_handle_key_event(GSURF_INPUT_HANDLER(toggles),
+		GSURF_VIEW(view), 0xffc2 /* F5 */, 0, GSURF_MOD_CTRL | GSURF_MOD_ALT,
+		GSURF_MODE_NORMAL));
+	g_object_get(dark, "global-on", &on, NULL);
+	g_assert_false(on);
+
+	/* With dark_mode disabled the key is not consumed. */
+	gsurf_module_deactivate(dark);
+	g_assert_false(gsurf_input_handler_handle_key_event(GSURF_INPUT_HANDLER(toggles),
+		GSURF_VIEW(view), 0xffc2, 0, GSURF_MOD_CTRL | GSURF_MOD_ALT, GSURF_MODE_NORMAL));
+	g_object_get(dark, "global-on", &on, NULL);
+	g_assert_false(on);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1019,5 +1066,6 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/dark-mode/inject-preloads-dark-reader",
 		test_inject_preloads_dark_reader);
 	g_test_add_func("/gsurf/dark-mode/disabled-module", test_disabled_module_is_inert);
+	g_test_add_func("/gsurf/dark-mode/toggles-module-forwards", test_toggles_module_forwards);
 	return g_test_run();
 }

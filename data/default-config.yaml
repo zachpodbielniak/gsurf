@@ -175,7 +175,8 @@ modules:
       images: "Ctrl+Shift+m"
       caret_browsing: "Ctrl+i"
       strict_tls: "Ctrl+Shift+t"
-      dark_mode: "Ctrl+Shift+d"
+      # dark_mode: "Ctrl+Alt+d"     # forwarded to dark_mode's global toggle;
+      #                             # dark_mode.key_toggle already binds it
       geolocation: "Ctrl+Shift+g"
       webgl: "Ctrl+Shift+w"
 

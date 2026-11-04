@@ -65,7 +65,7 @@ Configs written before per-site rules keep working:
 | =mode: auto= (also: no =mode= key)      | =native= with =color-scheme: light dark=: form controls and scrollbars follow the system preference; the page's =prefers-color-scheme= rules are not rewritten. This is the module's historical default. |
 | =mode: light=                           | =off=                                                                                              |
 
-=auto=, =light= and =dark= are accepted inside site rules too. The old =key_toggle: "Ctrl+Shift+d"= default is gone. An explicit =key_toggle= from an old config is still honoured; if it is =Ctrl+Shift+d= it competes with the bookmarks module, so move it to another key.
+=auto=, =light= and =dark= are accepted inside site rules too. The old =key_toggle: "Ctrl+Shift+d"= default is gone. An explicit =key_toggle= from an old config is still honoured; if it is =Ctrl+Shift+d= it competes with the bookmarks module, so move it to another key. The toggles module's =keys.dark_mode= key, which used to do nothing, now triggers =dark-mode-toggle=; it is commented out in the default config because =key_toggle= already binds the same action.
 
 ** Validation
 
@@ -175,7 +175,7 @@ The module exposes read-only GObject properties used by the tests and handy for 
 
 * Tests
 
-- =tests/test-dark-mode.c= (headless, the real =dark_mode.so=): defaults, the legacy mapping, every key and each validation warning, the rules JSON, reconfiguration back to defaults, the state file (load, normalization, bad entries, loose permissions, malformed file kept as =.bad=, unwritable path), both toggles through the action, key and keybind-help hooks, injection into a recording headless view (world, message handler, live updates, on-demand Dark Reader, weak view tracking, a view outliving the module).
+- =tests/test-dark-mode.c= (headless, the real =dark_mode.so=): defaults, the legacy mapping, every key and each validation warning, the rules JSON, reconfiguration back to defaults, the state file (load, normalization, bad entries, loose permissions, malformed file kept as =.bad=, unwritable path), both toggles through the action, key and keybind-help hooks, injection into a recording headless view (world, message handler, live updates, on-demand Dark Reader, weak view tracking, a view outliving the module), and the toggles module forwarding its =dark_mode= key.
 - =tests/test-dark-mode-webkit.c= (=make test-gui=, both backends): a loopback server under the host names =127.0.0.1= and =localhost=; computed =filter= and =color-scheme= per host rule, the page's own dark theme in native mode, =off= leaving the page untouched, the page world not seeing the engine, =decide()= evaluated in the world, Dark Reader preloaded and on demand, a cross-origin child frame following its top page, and the toggles (per-site flipping every open view of the host and persisting 0600, global, and a navigation in a view created before a toggle).
 
 * Vendored Dark Reader
