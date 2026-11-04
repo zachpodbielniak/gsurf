@@ -164,6 +164,32 @@ GsurfView *gsurf_view_new_full(GsurfView *opener, const gchar *container_id,
  */
 GsurfWindow *gsurf_window_new(void);
 
+/**
+ * gsurf_window_reopen_view:
+ * @window: the #GsurfWindow holding @view
+ * @view: the view to reopen
+ * @container_id: (nullable): the container to reopen it in: an id,
+ *   #GSURF_CONTAINER_TEMPORARY (a new temporary container) or
+ *   #GSURF_CONTAINER_DEFAULT; %NULL means #GSURF_CONTAINER_DEFAULT
+ *
+ * Reopens @view's page in another container. WebKit fixes a view's
+ * session when it is created, so this makes a new view (on the default
+ * backend, with the default config's settings) with @view's opener and
+ * the requested container, puts it at @view's place in @window, makes
+ * it the active view, loads @view's URI in it (its first URI if nothing
+ * has loaded yet, else the configured new-view URI) and then removes
+ * @view. The container registry's resolver (the containers module) has
+ * the final say, as for every new view. The window emits
+ * #GsurfWindow::view-added for the new view, then
+ * #GsurfWindow::view-replaced, then #GsurfWindow::view-removed for
+ * @view.
+ *
+ * Returns: (transfer none) (nullable): the new view, owned by @window,
+ *   or %NULL when @view is not in @window or no view could be created
+ */
+GsurfView *gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view,
+                                    const gchar *container_id);
+
 G_END_DECLS
 
 #endif /* GSURF_BACKEND_H */

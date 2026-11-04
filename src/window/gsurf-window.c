@@ -28,6 +28,7 @@ enum {
 	SIG_KEY_PRESS,
 	SIG_BUTTON_PRESS,
 	SIG_VIEW_MOVED,
+	SIG_VIEW_REPLACED,
 	N_SIGNALS
 };
 
@@ -300,6 +301,22 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 		"view-moved", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 3, GSURF_TYPE_VIEW, G_TYPE_UINT, G_TYPE_UINT);
+
+	/**
+	 * GsurfWindow::view-replaced:
+	 * @window: the window
+	 * @old_view: the view being replaced, still in the window
+	 * @new_view: its replacement, already in the window
+	 *
+	 * Emitted by gsurf_window_reopen_view() between adding @new_view
+	 * (#GsurfWindow::view-added) and removing @old_view
+	 * (#GsurfWindow::view-removed), so chrome can hand @old_view's place
+	 * (for example its children in a tab tree) to @new_view.
+	 */
+	signals[SIG_VIEW_REPLACED] = g_signal_new(
+		"view-replaced", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 2, GSURF_TYPE_VIEW, GSURF_TYPE_VIEW);
 }
 
 static void

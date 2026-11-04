@@ -102,7 +102,7 @@ A =GsurfView= emits these GObject signals; a host that parents the raw view
   container and keeps =window.opener= working; =gsurf_view_get_opener()= then
   links the two (a tab tree or buffer tree can use it).
 
-Views also carry an identity for hosts that keep their own list (cmacs keeps one per buffer): =gsurf_view_get_id()= (stable, never reused; =gsurf_view_lookup()= maps it back), =gsurf_view_get_opener()= / =gsurf_view_get_opener_id()=, and =gsurf_view_get_container_id()= with =gsurf_container_registry_lookup()= for the container's name and colour. A host that creates views itself should pass the opener (and, if it wants, a container id) to =gsurf_view_new_full()=.
+Views also carry an identity for hosts that keep their own list (cmacs keeps one per buffer): =gsurf_view_get_id()= (stable, never reused; =gsurf_view_lookup()= maps it back), =gsurf_view_get_opener()= / =gsurf_view_get_opener_id()=, and =gsurf_view_get_container_id()= with =gsurf_container_registry_lookup()= for the container's name and colour. A host that creates views itself should pass the opener (and, if it wants, a container id) to =gsurf_view_new_full()=. To move a page to another container, =gsurf_window_reopen_view()= does the whole replacement on a =GsurfWindow=; a host with its own view list (one buffer per view) should instead create the new view with =gsurf_view_new_full(gsurf_view_get_opener(old), container_id, uri, FALSE)= and swap it into the buffer itself. =gsurf_container_registry_has_resolver()= says whether a container policy (the =containers= module) is installed, i.e. whether offering container choices makes sense.
 
 * Downloads and permissions (host dispatch)
 

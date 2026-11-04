@@ -6,6 +6,8 @@
  */
 
 #include "core/gsurf-backend.h"
+#include "config/gsurf-config.h"
+#include "core/gsurf-container-registry.h"
 
 /*
  * Exactly one GTK toolkit may be linked (GTK3 and GTK4 export the same gtk_*
@@ -267,4 +269,50 @@ GsurfWindow *
 gsurf_window_new(void)
 {
 	return gsurf_window_new_for_backend(gsurf_backend_get_default_type());
+}
+
+GsurfView *
+gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *container_id)
+{
+	GsurfConfig *config = gsurf_config_get_default();
+	g_autoptr(GsurfView) old = NULL;
+	g_autoptr(GsurfView) fresh = NULL;
+	const gchar *uri;
+	gint index;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(window), NULL);
+	g_return_val_if_fail(GSURF_IS_VIEW(view), NULL);
+
+	index = gsurf_window_get_view_index(window, view);
+	if (index < 0)
+		return NULL;
+
+	/* 1. What to load: the current URI, else the first URI the view was
+	 *    created for (a tab still loading it), else a new-tab page. */
+	uri = gsurf_view_get_uri(view);
+	if (uri == NULL || *uri == '\0')
+		uri = gsurf_view_get_initial_uri(view);
+	if (uri == NULL || *uri == '\0')
+		uri = (config != NULL && config->new_view_uri != NULL)
+			? config->new_view_uri : "about:blank";
+
+	/* 2. Hold the old view: its opener and URI must outlive the new
+	 *    view's construction, and removal drops the window's reference. */
+	old = g_object_ref(view);
+	fresh = gsurf_view_new_full(gsurf_view_get_opener(old),
+		(container_id != NULL && *container_id != '\0') ? container_id
+		                                                : GSURF_CONTAINER_DEFAULT,
+		uri, FALSE);
+	if (fresh == NULL)
+		return NULL;
+	if (config != NULL && config->settings != NULL)
+		gsurf_view_apply_settings(fresh, config->settings);
+
+	/* 3. Same place, active, loading; then the old view goes. */
+	gsurf_window_insert_view(window, fresh, (guint)index);
+	gsurf_window_set_active_view(window, fresh);
+	gsurf_view_load_uri(fresh, uri);
+	g_signal_emit_by_name(window, "view-replaced", old, fresh);
+	gsurf_window_remove_view(window, old);
+	return fresh;
 }

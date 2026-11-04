@@ -367,9 +367,12 @@ test_resolve(void)
 		g_assert_null(gsurf_view_get_session(dflt));
 	}
 
-	/* A resolver sees the opener, request and URI hint and decides. */
+	/* A resolver sees the opener, request and URI hint and decides.
+	 * has_resolver() tells chrome whether containers are in use. */
+	g_assert_false(gsurf_container_registry_has_resolver(registry));
 	gsurf_container_registry_set_resolver(registry, test_resolver, &replaced,
 		resolver_state_freed);
+	g_assert_true(gsurf_container_registry_has_resolver(registry));
 	gsurf_container_registry_set_resolver(registry, test_resolver, &state,
 		resolver_state_freed);
 	g_assert_true(replaced.freed);
@@ -417,6 +420,7 @@ test_resolve(void)
 	}
 
 	gsurf_container_registry_set_resolver(registry, NULL, NULL, NULL);
+	g_assert_false(gsurf_container_registry_has_resolver(registry));
 	g_assert_true(state.freed);
 	g_free(state.last_requested);
 	g_free(state.last_uri);
