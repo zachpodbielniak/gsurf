@@ -45,11 +45,12 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 * Tier 3 — nice-to-have
 
 =spacesearch=, =inspector=, =dark_mode=, =status_bar=, =geolocation=,
+=containers= (=GsurfNavigationHook= + =GsurfInputHandler= + =GsurfActionHandler=; see [[file:containers.org][containers.org]]),
 =session=, and =proxy_switch= are implemented. =dark_mode= has native, filter and Dark Reader (vendored) modes with per-site rules and global/per-site toggles; see [[file:dark-mode.org][Dark mode]]. =webgl_toggle= and
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 30 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
+All 31 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
 
 * AI modules (deferred)
 

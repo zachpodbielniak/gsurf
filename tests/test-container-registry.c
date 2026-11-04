@@ -143,7 +143,7 @@ test_validate_id(void)
 	static const gchar *const good[] = { "media", "Work_2", "a-b", "x" };
 	static const gchar *const bad[] = {
 		"", "has space", "../escape", "slash/inside", "dot.name",
-		"temporary", "tmp-3", "ünïcode",
+		"temporary", "tmp-3", "default", "ünïcode",
 		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", /* 65 */
 	};
 	guint i;
@@ -359,6 +359,14 @@ test_resolve(void)
 		g_assert_null(gsurf_view_get_container_id(unknown));
 	}
 
+	/* "default" asks for the default container explicitly, silently. */
+	{
+		g_autoptr(GsurfView) dflt = new_view(NULL, GSURF_CONTAINER_DEFAULT, NULL, FALSE);
+
+		g_assert_null(gsurf_view_get_container_id(dflt));
+		g_assert_null(gsurf_view_get_session(dflt));
+	}
+
 	/* A resolver sees the opener, request and URI hint and decides. */
 	gsurf_container_registry_set_resolver(registry, test_resolver, &replaced,
 		resolver_state_freed);
@@ -376,6 +384,14 @@ test_resolve(void)
 		g_assert_cmpstr(state.last_uri, ==, "https://example.com/");
 		g_assert_cmpstr(gsurf_view_get_container_id(child), ==, "res-work");
 	}
+	/* A resolver may name the default container with the token too. */
+	state.answer = GSURF_CONTAINER_DEFAULT;
+	{
+		g_autoptr(GsurfView) dflt = new_view(opener, NULL, NULL, FALSE);
+
+		g_assert_null(gsurf_view_get_container_id(dflt));
+	}
+	state.answer = "res-work";
 
 	/* A related popup always shares its opener's container: the resolver
 	 * is not even consulted. */

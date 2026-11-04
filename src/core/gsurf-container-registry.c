@@ -363,6 +363,12 @@ gsurf_container_validate_id(const gchar *id, GError **error)
 			"container id '%s' is reserved for temporary containers", id);
 		return FALSE;
 	}
+	/* "default" names the engine's default session in requests. */
+	if (g_strcmp0(id, GSURF_CONTAINER_DEFAULT) == 0) {
+		g_set_error(error, GSURF_CONTAINER_ERROR, GSURF_CONTAINER_ERROR_INVALID_ID,
+			"container id '%s' is reserved for the default container", id);
+		return FALSE;
+	}
 	return TRUE;
 }
 
@@ -534,7 +540,8 @@ gsurf_container_registry_resolve(GsurfContainerRegistry *self, GsurfView *opener
 	else
 		chosen = g_strdup(requested);
 
-	if (chosen == NULL || *chosen == '\0')
+	if (chosen == NULL || *chosen == '\0' ||
+	    g_strcmp0(chosen, GSURF_CONTAINER_DEFAULT) == 0)
 		return NULL;
 
 	/* 3. "temporary" means a brand-new temporary container. */

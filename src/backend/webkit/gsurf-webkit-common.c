@@ -204,3 +204,26 @@ gsurf_webkit_common_create(GsurfView *view, WebKitNavigationAction *action)
 		return GTK_WIDGET(gsurf_view_get_native_widget(newview));
 	return NULL;
 }
+
+/* --- main-frame response policy --- */
+
+gboolean
+gsurf_webkit_common_decide_response(GsurfView *view, WebKitPolicyDecision *decision)
+{
+	WebKitResponsePolicyDecision *response = WEBKIT_RESPONSE_POLICY_DECISION(decision);
+	const gchar *uri;
+
+	/* Only top-level documents the engine will show: sub-resources,
+	 * iframe documents and downloads are none of the hooks' business. */
+	if (!webkit_response_policy_decision_is_main_frame_main_resource(response) ||
+	    !webkit_response_policy_decision_is_mime_type_supported(response))
+		return FALSE;
+
+	uri = webkit_uri_request_get_uri(webkit_response_policy_decision_get_request(response));
+	if (gsurf_module_manager_dispatch_main_response(gsurf_module_manager_get_default(),
+			view, uri) != GSURF_POLICY_IGNORE)
+		return FALSE;
+
+	webkit_policy_decision_ignore(decision);
+	return TRUE;
+}

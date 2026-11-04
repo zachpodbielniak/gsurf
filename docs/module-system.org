@@ -58,7 +58,7 @@ from the directory). Add an =enabled:= block under =modules:= in
 | =GsurfKeybindProvider= | =list_keybinds=                           | =?= help overlay; queried at display time     | additive          |
 | =GsurfActionHandler=   | =handle_action=                           | a core keybind action with no built-in implementation (open-prompt → chromebar, find → find_bar, tab-* → tabs, follow-hints → modal) | first TRUE wins |
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
-| =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed= | navigation lifecycle (history, homepage) | =before=: veto    |
+| =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed=, =decide_main_response= | navigation lifecycle (history, homepage, containers); =before_navigate= also fires for iframe navigations and popup requests, =decide_main_response= only for the main frame's displayable response | =before=, =decide_main_response=: veto |
 
 More interfaces (request-filter, download-handler, status-provider,
 script-injector, permission-handler, cert-handler, context-menu-provider,

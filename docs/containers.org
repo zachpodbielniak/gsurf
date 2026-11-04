@@ -1,0 +1,153 @@
+#+TITLE: Containers
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+A /container/ is a separate browsing identity: its own cookies, local storage, IndexedDB, cache and HSTS state. Two tabs in different containers can be logged in to the same site as different users, and a site in one container cannot see what you did in another. gsurf's containers cover what Firefox's Multi-Account Containers and Temporary Containers extensions do.
+
+There are three kinds:
+
+| Kind       | Id               | Data                                                     | Lifetime                                       |
+|------------+------------------+----------------------------------------------------------+------------------------------------------------|
+| default    | none (=NULL=)    | the engine's default session and the =cookie_jar:= file  | the whole run; what gsurf used before containers |
+| persistent | e.g. =media=     | =$XDG_DATA_HOME/gsurf/containers/<id>/= (0700), cache in =$XDG_CACHE_HOME/gsurf/containers/<id>/= | defined by the config, kept on disk between runs |
+| temporary  | =tmp-1=, =tmp-2=, … | in memory only (ephemeral session)                     | removed =temp_cleanup_delay= seconds after its last tab closes |
+
+The mechanism (sessions, isolation, the registry) is core: =GsurfContainerRegistry= in =src/core/= (see [[file:architecture.org][architecture.org]], "Containers"). The *policy* — which container a tab uses — is the =containers= module described here. With the module disabled every tab uses the default container, exactly as before, unless something asks for a container explicitly (the MCP =open_view= tool, session restore, an embedding host).
+
+WebKit cannot move a web view to another session after it is created. Every container change therefore opens a new tab and (where described below) closes the old one.
+
+* Configuration
+
+#+begin_src yaml
+modules:
+  containers:
+    enabled: false
+    new_tab: temporary          # temporary | default | <container id>
+    inherit_opener: true        # links and new tabs opened from a tab stay in its container
+    temp_cleanup_delay: 30      # seconds after a temporary container's last tab closes
+    temp_color: "#89b4fa"       # colour of temporary containers ("" = none)
+    containers:
+      - name: Media             # display name
+        # id: media             # optional; default derived from the name
+        color: "#f9e2af"        # CSS colour, shown by the tabs sidebar
+        hosts: ['(^|\.)youtube\.com$', '(^|\.)twitch\.tv$']
+      - name: Work
+        hosts: ['(^|\.)corp\.example$']
+    key_new_temp: "Ctrl+Alt+t"
+    key_reopen_next: "Ctrl+Alt+c"
+#+end_src
+
+** Keys
+
+| Key                  | Default        | Meaning |
+|----------------------+----------------+---------|
+| =enabled=            | =false=        | Turns the policy on. A disabled module defines no container and installs no policy. |
+| =new_tab=            | =temporary=    | Container of a new tab that no other rule places (see "Placement"): =temporary= (a fresh temporary container per tab), =default= (the default container), or the id of a container from =containers=. An empty or unknown value is reported and =temporary= is used. |
+| =inherit_opener=     | =true=         | A tab opened from another tab (a link opened in a new tab, a hint, a reopened tab) goes into its opener's container unless a host rule says otherwise. With =false= such tabs follow =new_tab=. |
+| =temp_cleanup_delay= | =30=           | Seconds a temporary container survives after its last tab closes, so closing and reopening a tab (=tab-reopen=) within that time keeps its cookies. =0= removes it right after the last tab. Negative or huge values are reported and the default is used. |
+| =temp_color=         | =#89b4fa=      | Colour given to temporary containers made by this module. =""= gives none. |
+| =containers=         | =[]=           | The persistent containers, in order. The order is also the =container-reopen-next= cycle and the order of host rules. |
+| =key_new_temp=       | =Ctrl+Alt+t=   | Key for =container-new-temp=. =""= or =null= unbinds it. |
+| =key_reopen_next=    | =Ctrl+Alt+c=   | Key for =container-reopen-next=. =""= or =null= unbinds it. |
+
+Each element of =containers= is a mapping:
+
+| Member  | Required | Meaning |
+|---------+----------+---------|
+| =name=  | yes (or =id=) | Display name (tooltips, the tabs sidebar). |
+| =id=    | no       | Stable id; it names the data directory, so changing it starts an empty profile. Default: the name with ASCII letters lowercased, digits, =_= and =-= kept and every other character (spaces, punctuation, each non-ASCII character) replaced by =-=: =Media= → =media=, =Work Stuff= → =work-stuff=. |
+| =color= | no       | CSS colour string. |
+| =hosts= | no       | Regular expressions matched case-insensitively against the bare host (no scheme, port or path) of a URL, as in every =GsurfHostRules= list: write =(^|\.)example\.com$= for a domain and its subdomains. The first matching rule over all containers, in config order, wins. |
+
+An id must be 1-64 characters of =[A-Za-z0-9_-]= and may not be =temporary=, =default= or start with =tmp-= (those are reserved). Container names derived to such an id (a container named "Temporary" or "Default") need an explicit =id=.
+
+** Errors
+
+Every problem is reported on stderr as a warning naming the entry, and the module keeps working with the valid parts:
+
+- an entry that is not a mapping, has no name, an invalid id or a duplicate id is skipped;
+- a host pattern that is empty or not a valid regular expression is skipped (the container and its other patterns stay);
+- =hosts= or =containers= that is not a list is ignored;
+- an unknown or empty =new_tab= falls back to =temporary=; a bad =temp_cleanup_delay= to =30=.
+
+** Reconfiguring
+
+=configure()= replaces the whole configuration, including going back to the defaults for omitted keys. Containers the old configuration defined and the new one does not are removed from the registry; one that still has open tabs cannot be removed, so it stays (without host rules; only tabs opened from its remaining tabs join it) and is removed when its last tab closes. A container that stays in the configuration keeps its session and tabs; only its name and colour change. Setting =enabled: false= removes the placement policy and every container the module defined (again, in-use ones once their tabs close). Data on disk is never deleted.
+
+* Placement
+
+The module installs the registry's resolver, which places every new tab when it is created. In order, the first that applies wins:
+
+1. *An explicit request.* Whoever creates the tab may ask for a container: =temporary= (a fresh temporary container in =temp_color=), =default=, or a container id. =container-new-temp=, =container-reopen-next=, host reassignment, session restore, the MCP =open_view= tool with =container= and embedders use this. An unknown id falls back to the default container with a warning.
+2. *A host rule* matching the host of the first URL the tab will load (the URL of a link opened in a new tab, a typed address, the startup URL).
+3. *The opener's container*, with =inherit_opener: true=, when the tab was opened from another tab.
+4. *The =new_tab= policy*.
+
+Popups (=window.open=, =target=_blank= links that WebKit opens as related views) never reach the policy: WebKit requires a popup to share its opener's session, so a popup is always in its opener's container. This keeps =window.opener= and login popups (OAuth) working.
+
+The very first tab at startup is placed the same way (with the startup URL as its hint), so with the default =new_tab: temporary= gsurf starts in a temporary container.
+
+* Host assignment
+
+When a tab navigates its main frame to a host assigned (by =hosts=) to another container, the navigation is cancelled and the URL is opened in a new tab in that container:
+
+- The new tab takes the old tab's *place*. If the old tab had nothing to lose — it never left a blank page (=about:blank=, =new_view_uri= or =homepage=) and has no back history — it is closed and the new tab gets its position and its opener. Otherwise the old tab stays where it is, and the new tab opens right after it with the old tab as its opener (so it appears as its child in the tab tree).
+- The new tab becomes the active tab.
+- Leaving an assigned host for an unassigned one never moves a tab: a tab stays in its container until it navigates to a host assigned elsewhere.
+
+** When it happens
+
+WebKit asks for a navigation decision for iframe navigations as well as top-level ones and does not say which is which. The module therefore acts at two points:
+
+1. *Before the request* (=GsurfNavigationHook::before_navigate=) for loads the tab requested itself through =gsurf_view_load_uri()= — a typed address, a bookmark, the omnibar, the homepage, a session restore. The engine already shows the target URL as the tab's URL for these, which an iframe navigation never does. Nothing is sent to the assigned host from the wrong container.
+2. *At the main-frame response* (=GsurfNavigationHook::decide_main_response=, which the backends call only for the main frame's displayable response) for everything else: clicked links, script navigations (=location.href = …=), form submissions, and the end of a redirect chain. The host is then the final host after redirects.
+
+Iframes are never moved: an embedded YouTube player on another site loads in that site's tab and container. Downloads are never moved either.
+
+** Limits
+
+- At the main-frame response the request has already been sent, with the old container's cookies, and the server's =Set-Cookie= headers of that one response may already be stored in the old container. Typed addresses, bookmarks and the like (point 1 above) do not have this leak. A site whose isolation matters should be opened through the address bar or a bookmark, or in its container directly (middle click / =open-new-view= on a link places the new tab by its host rule before anything loads).
+- Popups stay in their opener's container, so a =target=_blank= link to an assigned host opened as a popup is not moved. Open it with a middle click or =open-new-view= (a new, unrelated tab placed by its host rule) instead.
+- *Loop guard.* A tab opened by this module (host assignment, =container-new-temp=, =container-reopen-next=) finishes its first load in the container it was opened in, even if redirects end on a host assigned elsewhere; otherwise a redirect chain X → Y → X across two containers would open tabs forever. The same holds for any tab created for a given host with an explicit container (=container-reopen-next=, the MCP =open_view= tool, session restore): its first load of that host is not moved. After the first load commits, the tab is assigned like any other.
+- One reassignment per tab at a time: further navigations of a tab whose reopen is pending are cancelled until it ran.
+- Kiosk mode never opens tabs: host assignment and both actions are off there (placement still applies to the single kiosk view).
+
+* Temporary containers
+
+A temporary container is created for each tab placed by =new_tab: temporary= and by =container-new-temp=; tabs opened from it (=inherit_opener=) share it. Its session is ephemeral: nothing is written to disk. It is removed =temp_cleanup_delay= seconds after its last tab closes (or once the delay passed if no tab ever used it); until then a tab that asks for its id explicitly can still join it. Ids are =tmp-1=, =tmp-2=, … and are never reused within a run.
+
+* Actions and keys
+
+| Action                  | Default key  | What it does |
+|-------------------------+--------------+--------------|
+| =container-new-temp=    | =Ctrl+Alt+t= | Opens a new active tab, last in the window, in a fresh temporary container, loading =new_view_uri=. |
+| =container-reopen-next= | =Ctrl+Alt+c= | Reopens the current page in the next container of the cycle /default → each persistent container in config order → a new temporary container → default/, in the same place with the same opener, and closes the old tab. The new tab keeps its first load in that container even if a host rule would assign the page elsewhere. |
+
+The keys are read by the module (=key_new_temp=, =key_reopen_next=); the action names can also be bound in the core =keybinds:= table, e.g. ="Ctrl+Alt+t": container-new-temp=. Both appear in the =?= overlay. Kiosk mode refuses both.
+
+* Data locations
+
+| What                         | Where |
+|------------------------------+-------|
+| persistent container profile | =$XDG_DATA_HOME/gsurf/containers/<id>/= (0700): cookies in =cookies.sqlite=, local storage, IndexedDB, … |
+| persistent container cache   | =$XDG_CACHE_HOME/gsurf/containers/<id>/= (0700) |
+| default container            | the engine default, with cookies in the =cookie_jar:= file |
+| temporary containers         | memory only |
+
+Removing a container from the configuration keeps its directories; delete them by hand to forget its data.
+
+* MCP
+
+The MCP server (=modules/mcp=, see [[file:mcp.org][mcp.org]]) exposes containers:
+
+- =list_views= returns, per view, =id= (stable), =opener_id= (=0= = none) and =container= (the container id, =null= = default).
+- =open_view= takes an optional =container=: a container id, =temporary= or =default=. Without it the view is placed by the policy above.
+
+* Sessions
+
+The =session= module saves each tab's container: the id of a persistent container, nothing for the default container, and =temporary:<n>= for temporary ones, where tabs that shared a temporary container share =<n>=. On restore every group gets one fresh temporary container, persistent containers are requested explicitly (an undefined one falls back to the default container with a warning) and each tab's opener is restored. See [[file:configuration.org][configuration.org]], "Session".
+
+* Tests
+
+=tests/test-containers.c= (headless, the real =containers.so=) covers configuration parsing, id derivation and validation, every placement branch, reconfiguring (removed and in-use containers, back to defaults, disabling, deactivate/activate), bad input and the host-assignment decisions (top-level vs. iframe, popups, the loop guard, kiosk). =tests/test-containers-module-webkit.c= (=make test-gui=, both backends) loads a loopback server as two hosts, =127.0.0.1= and =localhost= (assigned to "Media"), and checks that a typed address is reopened in Media in place with the cookie in Media's jar, that a script navigation of the main frame moves while the old tab stays as the opener, that an iframe of the assigned host does not move, and both actions.

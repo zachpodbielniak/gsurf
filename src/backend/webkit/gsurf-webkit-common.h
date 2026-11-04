@@ -41,6 +41,14 @@ gboolean gsurf_webkit_common_handle_tls_error(WebKitWebView *webview,
 gboolean gsurf_webkit_common_handle_permission(GsurfView *view,
                                                WebKitPermissionRequest *request);
 
+/* A RESPONSE policy decision: when it is the main frame's main resource
+ * and displayable, ask navigation-hook modules
+ * (gsurf_module_manager_dispatch_main_response()). Returns %TRUE when a
+ * module vetoed it and the decision was ignored; %FALSE leaves the
+ * decision to the caller (and WebKit's default handler). */
+gboolean gsurf_webkit_common_decide_response(GsurfView *view,
+                                             WebKitPolicyDecision *decision);
+
 /* Track the hovered link for a #GsurfView. */
 void gsurf_webkit_common_mouse_target(GsurfView *view, WebKitHitTestResult *hit);
 

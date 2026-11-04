@@ -208,6 +208,19 @@ gboolean            gsurf_module_manager_dispatch_mouse_event(GsurfModuleManager
                                                               guint button, guint state);
 gchar              *gsurf_module_manager_dispatch_rewrite_uri(GsurfModuleManager *self, const gchar *input);
 GsurfPolicyDecision gsurf_module_manager_dispatch_before_navigate(GsurfModuleManager *self, GsurfView *view, const gchar *uri);
+/**
+ * gsurf_module_manager_dispatch_main_response:
+ * @self: a #GsurfModuleManager
+ * @view: the view whose main frame received a displayable response
+ * @uri: the response URI
+ *
+ * Asks active #GsurfNavigationHook modules, in priority order, whether
+ * the main frame may display the response; the first non-USE verdict
+ * wins. Called by the WebKit backends from the response policy decision.
+ *
+ * Returns: the verdict
+ */
+GsurfPolicyDecision gsurf_module_manager_dispatch_main_response(GsurfModuleManager *self, GsurfView *view, const gchar *uri);
 void                gsurf_module_manager_dispatch_after_navigate(GsurfModuleManager *self, GsurfView *view, const gchar *uri);
 void                gsurf_module_manager_dispatch_load_changed(GsurfModuleManager *self, GsurfView *view, GsurfLoadEvent event);
 void                gsurf_module_manager_dispatch_inject_scripts(GsurfModuleManager *self, GsurfView *view, const gchar *uri);
