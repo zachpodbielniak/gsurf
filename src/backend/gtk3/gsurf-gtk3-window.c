@@ -160,20 +160,26 @@ on_set_focus(GtkWindow *toplevel, GtkWidget *focus, gpointer user_data)
 	}
 }
 
-/* Per-view event routing, done once per widget: the widget keeps its
- * handlers when it moves between the stack and a layout. (Focus is
- * followed on the toplevel, see on_set_focus().) */
+/* Per-view event routing, done once per (widget, window): the widget
+ * keeps its handlers when it moves between the stack and a layout, so
+ * wiring it again would emit every press twice. (Focus is followed on
+ * the toplevel, see on_set_focus().) */
 static void
 gsurf_gtk3_window_wire_view(GsurfGtk3Window *self, GtkWidget *widget)
 {
 	/* Route mouse buttons (incl. side history buttons) through the window
-	 * so mousebind config + input modules can act on them. Connect once. */
-	if (g_object_get_data(G_OBJECT(widget), "gsurf-btn-wired") == NULL) {
-		g_object_set_data(G_OBJECT(widget), "gsurf-btn-wired", GINT_TO_POINTER(1));
-		gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
-		g_signal_connect(widget, "button-press-event",
-			G_CALLBACK(on_view_button_press_event), self);
-	}
+	 * so mousebind config + input modules can act on them. The handler
+	 * dies with the window (g_signal_connect_object), so a view that
+	 * outlives its window is wired again by the next one; a view moving
+	 * from a live window stops reporting to it. */
+	if (g_signal_handler_find(widget, G_SIGNAL_MATCH_FUNC | G_SIGNAL_MATCH_DATA,
+			0, 0, NULL, on_view_button_press_event, self) != 0)
+		return;
+	g_signal_handlers_disconnect_matched(widget, G_SIGNAL_MATCH_FUNC,
+		0, 0, NULL, on_view_button_press_event, NULL);
+	gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
+	g_signal_connect_object(widget, "button-press-event",
+		G_CALLBACK(on_view_button_press_event), self, 0);
 }
 
 /* --- Vfunc implementations --- */
