@@ -126,6 +126,8 @@ modules:
     key_close: "Ctrl+w"
     key_next: "Ctrl+Tab"
     key_prev: "Ctrl+Shift+Tab"
+    sidebar: false                 # Ctrl+Shift+. shows the tree sidebar
+    on_close_parent: promote
 
   # History log (used by chromebar/omnibar; plain text for dmenu/grep).
   history:

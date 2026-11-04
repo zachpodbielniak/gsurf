@@ -2,28 +2,26 @@
 #
 # Invoked by the top-level `modules` target with OUTDIR, LIBDIR, CFLAGS
 # (module cflags), and LDFLAGS (-shared -fPIC) passed in.
+#
+# The tabs module is three sources built into one tabs.so: the
+# toolkit-neutral tree model (gsurf-tab-tree.c), the module core
+# (gsurf-tabs-module.c) and the strip/sidebar UI (gsurf-tabs-ui.c). The UI
+# builds on GTK3 and GTK4 through the shared chrome compat header.
 
 MODULE_NAME := $(notdir $(CURDIR))
 SRCS := $(wildcard *.c)
+# Local headers plus the shared, header-only GTK3/GTK4 chrome compat
+# layer: a change to any of them must rebuild this module.
+HDRS := $(wildcard *.h) $(wildcard ../include/*.h)
 CC ?= gcc
 
 # libgsurf link flags. Empty for STATIC=1 builds, where the binary is
 # linked --export-dynamic and modules resolve gsurf_* from the executable.
 LIBGSURF_LINK ?= -L$(LIBDIR) -lgsurf
 
-# The tab strip still uses GTK3-only API (GtkContainer, GdkScreen CSS,
-# GtkStyleContext, ...) and is being rewritten separately. Until that
-# lands, a GTK_BACKEND=gtk4 build skips this module entirely (no tabs.so),
-# so the rest of the GTK4 build and its tests can run. Tests that need
-# tabs.so skip when it is missing.
-ifeq ($(GTK_BACKEND),gtk4)
-all:
-	@echo "  tabs: GTK3-only for now (being rewritten); skipped on GTK_BACKEND=gtk4"
-else
 all: $(OUTDIR)/$(MODULE_NAME).so
-endif
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS) $(LIBGSURF_LINK)
 

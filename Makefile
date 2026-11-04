@@ -216,6 +216,9 @@ test: gsurf modules $(TEST_BINS)
 		echo "All tests passed"; \
 	fi
 
+# test-tab-tree compiles the tabs module's tree model in directly.
+$(OBJDIR)/tests/test-tab-tree.o: modules/tabs/gsurf-tab-tree.c modules/tabs/gsurf-tab-tree.h
+
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
 

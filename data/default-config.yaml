@@ -217,18 +217,30 @@ modules:
     key_toggle: "Ctrl+Shift+at"
     per_site: {}
 
+  # Tab strip + tree-style tab sidebar (docs/tabs.org).
   tabs:
     enabled: true
-    position: top                  # top or bottom
-    show_single: false             # hide bar when only one view
+    position: top                  # strip: top or bottom
+    show_single: false             # hide the strip when only one view
     key_new: "Ctrl+t"
     key_close: "Ctrl+w"
     key_next: "Ctrl+Tab"
     key_prev: "Ctrl+Shift+Tab"
     key_reopen: "Ctrl+Shift+t"
-    bg_color: "#181825"
-    active_color: "#313244"
-    fg_color: "#cdd6f4"
+    bg_color: "#181825"            # strip/sidebar background (CSS colour)
+    active_color: "#313244"        # active tab background
+    fg_color: "#cdd6f4"            # tab text
+    sidebar: false                 # tree sidebar shown at startup
+    sidebar_position: left         # left or right
+    sidebar_width: 240             # px (60-2000)
+    sidebar_hides_strip: true      # hide the strip while the sidebar shows
+    indent: 14                     # px per tree level (0-64)
+    max_depth: 8                   # deepest drawn indentation (0-64)
+    on_close_parent: promote       # promote | close_children
+    key_sidebar: "Ctrl+Shift+greater"     # == Ctrl+Shift+period (Ctrl+Shift+.)
+    key_collapse: "Ctrl+Shift+bracketleft"
+    key_move_up: "Ctrl+Shift+Page_Up"
+    key_move_down: "Ctrl+Shift+Page_Down"
 
   find_bar:
     enabled: true

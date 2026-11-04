@@ -72,7 +72,7 @@ new view, and =Escape= cancels. Configure the keys/colors under
 In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf_config_load_from_data()=, as demonstrated by =data/sensible-config.c=. Supply the complete modules block: this loader replaces the retained modules mapping rather than merging individual options. Restart the browser with the rebuilt modal module to apply the change.
 
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
-(new/close/next/prev), and =toggles= adds the =Ctrl+Shift+...= setting toggles.
+(new/close/next/prev) and =Ctrl+Shift+t= (reopen), plus the tree sidebar keys: =Ctrl+Shift+.= (=tab-sidebar-toggle=), =Ctrl+Shift+[= (=tab-tree-collapse=) and =Ctrl+Shift+Page_Up= / =Ctrl+Shift+Page_Down= (=tab-move-up= / =tab-move-down=, moving the tab with its subtree). None of the tree keys overlaps a default binding; see [[file:tabs.org][tabs.org]]. =toggles= adds the =Ctrl+Shift+...= setting toggles.
 
 =dark_mode= binds =Ctrl+Alt+d= (=dark-mode-toggle=, everything on/off) and =Ctrl+Alt+Shift+d= (=dark-mode-toggle-site=, the current site, remembered across restarts); set =modules.dark_mode.key_toggle= / =key_toggle_site= to change or unbind them (see [[file:dark-mode.org][Dark mode]]). =Ctrl+Shift+d= belongs to the bookmarks module. The toggles module's legacy =keys.dark_mode= entry forwards to =dark-mode-toggle=.
 
@@ -119,7 +119,7 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
 
-Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Kiosk mode refuses =container-new-temp= and =container-reopen-next= like every action that opens a view.
+Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=, default keys =Ctrl+Shift+.=, =Ctrl+Shift+[=, =Ctrl+Shift+Page_Up= / =Page_Down=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Kiosk mode refuses =container-new-temp= and =container-reopen-next= like every action that opens a view.
 
 * Modal / vim navigation
 
