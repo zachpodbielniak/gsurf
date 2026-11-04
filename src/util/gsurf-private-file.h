@@ -36,7 +36,9 @@ gboolean gsurf_private_mkdir(const gchar *path, GError **error);
  * @error: return location for a #GError
  *
  * Atomically replaces @path with @contents at mode 0600, creating the
- * parent directory 0700 first.
+ * parent directory 0700 first. An existing file with looser permissions
+ * is made 0600 before it is replaced (the replacement would otherwise
+ * inherit its mode).
  *
  * Returns: %TRUE on success
  */

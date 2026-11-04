@@ -44,7 +44,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 * Tier 3 — nice-to-have
 
 =spacesearch=, =inspector=, =dark_mode=, =status_bar=, =geolocation=,
-=session=, and =proxy_switch= are implemented. =webgl_toggle= and
+=session=, and =proxy_switch= are implemented. =dark_mode= has native, filter and Dark Reader (vendored) modes with per-site rules and global/per-site toggles; see [[file:dark-mode.org][Dark mode]]. =webgl_toggle= and
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
