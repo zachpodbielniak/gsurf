@@ -2,12 +2,16 @@
 /*
  * test-tab-tree.c - the tabs module's tree model and its configuration
  *
- * Compiles the toolkit-neutral model (modules/tabs/gsurf-tab-tree.c)
+ * Part 1 compiles the toolkit-neutral model (modules/tabs/gsurf-tab-tree.c)
  * straight into the test and checks the rules in docs/tabs.org: placement
  * after the opener's last descendant, nesting, promote vs close_children,
  * collapse and expansion on activation, moving subtrees, max_depth,
  * orphaned openers, rebuilding from the window order alone, and a
  * randomized stress run against the structural invariants.
+ *
+ * Part 2 loads the real tabs.so (no window, no display) and checks its
+ * configuration through the keys it reports: defaults, custom keys, a
+ * second configure() returning to the defaults, and bad values.
  */
 #include <gsurf.h>
 #include <glib.h>
@@ -472,6 +476,153 @@ test_stress(void)
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/* Module configuration (real tabs.so, no window)                      */
+/* ------------------------------------------------------------------ */
+
+static gchar *
+tabs_so_path(void)
+{
+	g_autofree gchar *exe = g_file_read_link("/proc/self/exe", NULL);
+	g_autofree gchar *dir = g_path_get_dirname(exe);
+
+	return g_build_filename(dir, "modules", "tabs.so", NULL);
+}
+
+/* The key the module reports for @action, or NULL. */
+static const gchar *
+key_for(GsurfModule *module, const gchar *action, GPtrArray *entries)
+{
+	guint i;
+
+	g_ptr_array_set_size(entries, 0);
+	gsurf_keybind_provider_list_keybinds(GSURF_KEYBIND_PROVIDER(module), entries);
+	for (i = 0; i < entries->len; i++) {
+		GsurfKeybindHelp *row = g_ptr_array_index(entries, i);
+
+		if (g_strcmp0(gsurf_keybind_help_get_action(row), action) == 0)
+			return gsurf_keybind_help_get_key(row);
+	}
+	return NULL;
+}
+
+static void
+configure_with(GsurfModule *module, const gchar *yaml)
+{
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, NULL));
+	gsurf_module_configure(module, config);
+}
+
+static void
+test_module_config(void)
+{
+	g_autofree gchar *path = tabs_so_path();
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfModuleManager) manager = NULL;
+	g_autoptr(GPtrArray) entries = NULL;
+	GsurfModule *module;
+
+	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+		g_test_skip("tabs.so not built");
+		return;
+	}
+	manager = gsurf_module_manager_new();
+	module = gsurf_module_manager_load_module(manager, path, &error);
+	g_assert_no_error(error);
+	g_assert_nonnull(module);
+	entries = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_keybind_help_free);
+
+	/* Defaults, before and without any tabs: block. */
+	g_assert_cmpstr(key_for(module, "tab-sidebar-toggle", entries), ==, "Ctrl+Shift+greater");
+	g_assert_cmpstr(key_for(module, "tab-tree-collapse", entries), ==, "Ctrl+Shift+bracketleft");
+	g_assert_cmpstr(key_for(module, "tab-move-up", entries), ==, "Ctrl+Shift+Page_Up");
+	g_assert_cmpstr(key_for(module, "tab-move-down", entries), ==, "Ctrl+Shift+Page_Down");
+	g_assert_cmpstr(key_for(module, "tab-new", entries), ==, "Ctrl+t");
+
+	/* Custom keys; an empty key unbinds. */
+	configure_with(module,
+		"modules:\n  tabs:\n    enabled: true\n"
+		"    key_sidebar: \"Ctrl+Shift+period\"\n"
+		"    key_collapse: \"\"\n"
+		"    key_move_up: \"Alt+Up\"\n");
+	g_assert_cmpstr(key_for(module, "tab-sidebar-toggle", entries), ==, "Ctrl+Shift+period");
+	g_assert_null(key_for(module, "tab-tree-collapse", entries));
+	g_assert_cmpstr(key_for(module, "tab-move-up", entries), ==, "Alt+Up");
+
+	/* A second configure() without the keys restores the defaults. */
+	configure_with(module, "modules:\n  tabs:\n    enabled: true\n");
+	g_assert_cmpstr(key_for(module, "tab-sidebar-toggle", entries), ==, "Ctrl+Shift+greater");
+	g_assert_cmpstr(key_for(module, "tab-tree-collapse", entries), ==, "Ctrl+Shift+bracketleft");
+	g_assert_cmpstr(key_for(module, "tab-move-up", entries), ==, "Ctrl+Shift+Page_Up");
+	configure_with(module, "modules: {}\n");
+	g_assert_cmpstr(key_for(module, "tab-new", entries), ==, "Ctrl+t");
+
+	/* The shipped default config parses without a warning (warnings are
+	 * fatal here) and spells out the defaults. */
+	{
+		g_autofree gchar *exe = g_file_read_link("/proc/self/exe", NULL);
+		g_autofree gchar *dir = g_path_get_dirname(exe);
+		g_autofree gchar *file = g_build_filename(dir, "..", "..", "data",
+			"default-config.yaml", NULL);
+		g_autofree gchar *yaml = NULL;
+
+		if (g_file_get_contents(file, &yaml, NULL, NULL)) {
+			configure_with(module, yaml);
+			g_assert_cmpstr(key_for(module, "tab-sidebar-toggle", entries), ==,
+				"Ctrl+Shift+greater");
+			g_assert_cmpstr(key_for(module, "tab-move-down", entries), ==,
+				"Ctrl+Shift+Page_Down");
+		}
+	}
+
+	/* Activation without a window is a no-op, and so is deactivation. */
+	g_assert_true(gsurf_module_activate(module));
+	gsurf_module_deactivate(module);
+	gsurf_module_deactivate(module);
+}
+
+/* Bad values warn and keep the defaults; the rest of the block applies. */
+static void
+test_module_bad_config(void)
+{
+	g_autofree gchar *path = tabs_so_path();
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GsurfModuleManager) manager = NULL;
+	g_autoptr(GPtrArray) entries = NULL;
+	GsurfModule *module;
+
+	if (!g_file_test(path, G_FILE_TEST_EXISTS)) {
+		g_test_skip("tabs.so not built");
+		return;
+	}
+	manager = gsurf_module_manager_new();
+	module = gsurf_module_manager_load_module(manager, path, &error);
+	g_assert_no_error(error);
+	entries = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_keybind_help_free);
+
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.position*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.fg_color*not a CSS colour*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.sidebar_position*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.sidebar_width*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.indent*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.max_depth*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.on_close_parent*");
+	configure_with(module,
+		"modules:\n  tabs:\n    enabled: true\n"
+		"    position: sideways\n"
+		"    fg_color: \"not-a-colour; } * { color: red\"\n"
+		"    sidebar_position: middle\n"
+		"    sidebar_width: wide\n"
+		"    indent: -3\n"
+		"    max_depth: 1000\n"
+		"    on_close_parent: explode\n"
+		"    key_move_down: \"Alt+Down\"\n");
+	g_test_assert_expected_messages();
+	g_assert_cmpstr(key_for(module, "tab-move-down", entries), ==, "Alt+Down");
+}
+
 int
 main(int argc, char **argv)
 {
@@ -487,5 +638,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/tab-tree/orphan", test_orphaned_opener);
 	g_test_add_func("/gsurf/tab-tree/rebuild", test_rebuild_from_window_order);
 	g_test_add_func("/gsurf/tab-tree/stress", test_stress);
+	g_test_add_func("/gsurf/tabs/config", test_module_config);
+	g_test_add_func("/gsurf/tabs/bad-config", test_module_bad_config);
 	return g_test_run();
 }

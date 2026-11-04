@@ -41,7 +41,7 @@ Working today:
 - Module system: =GsurfModule= base, =GsurfModuleManager= (GModule loading,
   interface auto-detection, priority hook dispatch), 8 hook interfaces.
 - *29 modules* covering the common surf patches + an MCP server — search engines,
-  history, homepage, vim modal navigation, tabs, an address bar, adblock,
+  history, homepage, vim modal navigation, tabs (strip + tree sidebar), an address bar, adblock,
   cookie policy, toggles, find, downloads, userscripts, site styles, per-URI
   params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,
   playexternal, dark mode, status bar, inspector, geolocation/notification

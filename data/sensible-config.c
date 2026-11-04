@@ -57,6 +57,8 @@ static const char *SENSIBLE_MODULES_YAML =
 "    key_close: \"Ctrl+w\"\n"
 "    key_next: \"Ctrl+Tab\"\n"
 "    key_prev: \"Ctrl+Shift+Tab\"\n"
+"    sidebar: false\n"
+"    on_close_parent: promote\n"
 "  history:\n"
 "    enabled: true\n"
 "    log_titles: true\n"

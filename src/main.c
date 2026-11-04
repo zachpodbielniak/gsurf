@@ -127,7 +127,7 @@ static const GsurfBuiltinModule builtin_modules[] = {
 	{ "site_styles",    "Per-URI user CSS stylesheets (surf styles[])" },
 	{ "spacesearch",    "Leading space in the bar forces a search" },
 	{ "status_bar",     "Bottom status bar: URI, load progress, TLS, mode" },
-	{ "tabs",           "Tab-bar UI over the view stack with new/close/switch keys" },
+	{ "tabs",           "Tab strip and tree-style tab sidebar with new/close/switch/move keys" },
 	{ "toggles",        "Runtime toggle keybinds for JS, images, TLS, dark mode, etc." },
 	{ "uri_params",     "Per-domain web engine setting overrides (surf uriparams[])" },
 	{ "useragent",      "Dynamic and per-domain user-agent switching" },

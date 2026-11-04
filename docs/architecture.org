@@ -33,7 +33,7 @@ The abstract =GsurfView= exposes =load_uri=, =reload=, =go_back/forward=,
 
 Every =GsurfView= gets a process-unique =id= at construction (=gsurf_view_lookup()= finds a live view by it). Construct-only properties record where it came from:
 
-- =opener= — the view it was opened from (link in a new view, link hint, popup), held weakly; =gsurf_view_get_opener_id()= keeps the id after the opener closes. The tabs module builds its tree from this.
+- =opener= — the view it was opened from (link in a new view, link hint, popup), held weakly; =gsurf_view_get_opener_id()= keeps the id after the opener closes. The tabs module builds its tree from this (see [[file:tabs.org][tabs.org]]).
 - =container-id= — the requested container; after construction it reads back the container the registry chose (=NULL= = default).
 - =related= — an engine popup that shares its opener's web process and session. WebKit requires a popup to live in its opener's session, so a related view is always placed in the opener's container.
 - =initial-uri= — the URI the creator is about to load, a placement hint only.
@@ -68,7 +68,7 @@ backend compiles per build (=GTK_BACKEND=):
 =gsurf_window_new()= factories and =gsurf_backend_init()=. GTK/WebKit headers
 appear only under =src/backend/<backend>/=.
 
-Modules are compiled per backend too (the module Makefiles receive =GTK_BACKEND=, and =GSURF_BACKEND_GTK3= or =GSURF_BACKEND_GTK4= is defined). The window-chrome modules =chromebar=, =find_bar= and =status_bar= build on both: their GTK calls go through the header-only, module-private =modules/include/gsurf-chrome-compat.h= (static inline wrappers for entry text, box packing, show/hide, detaching a widget from the chrome, and key-press handling: =key-press-event= on GTK3, a capture-phase =GtkEventControllerKey= on GTK4). It lives outside =src/= on purpose, so it is neither installed nor GIR-scanned. The =tabs= module is still GTK3-only while it is being rewritten; a =GTK_BACKEND=gtk4= build skips it (no =tabs.so=). A module that fails to compile fails =make modules=.
+Modules are compiled per backend too (the module Makefiles receive =GTK_BACKEND=, and =GSURF_BACKEND_GTK3= or =GSURF_BACKEND_GTK4= is defined). The window-chrome modules =chromebar=, =find_bar=, =status_bar= and =tabs= build on both: their GTK calls go through the header-only, module-private =modules/include/gsurf-chrome-compat.h= (static inline wrappers for entry text, box packing, show/hide, detaching a widget from the chrome, CSS classes and providers, native favicons, clicks, and key-press handling: =key-press-event= on GTK3, a capture-phase =GtkEventControllerKey= on GTK4). It lives outside =src/= on purpose, so it is neither installed nor GIR-scanned. A module that fails to compile fails =make modules=.
 
 ** Window order and side chrome
 
