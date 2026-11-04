@@ -60,7 +60,7 @@ network:
   proxy:
     mode: default              # default | none | custom
     uri: ""
-  do_not_track: true
+  do_not_track: false          # DNT: 1 header; sent only while the hardening module is enabled
 
 # ===== Window =====
 window:
@@ -228,5 +228,6 @@ modules:
   # --- Opt-in extras (left disabled here) ---
   # omnibar, externalpipe, userscripts, site_styles, uri_params, useragent,
   # cert_manager, containers, session, proxy_switch, spacesearch, form_autofill (profiles
-  # in a chmod 600 ~/.config/gsurf/autofill.yaml), and the MCP server
+  # in a chmod 600 ~/.config/gsurf/autofill.yaml), hardening (LibreWolf-style
+  # privacy; see docs/hardening.org), and the MCP server
   # (mcp, requires building with MCP=1) — see data/default-config.yaml.

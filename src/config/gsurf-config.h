@@ -70,7 +70,7 @@ struct _GsurfConfig
 	gboolean  enable_disk_cache;
 	gchar    *proxy_mode;       /* "default" | "none" | "custom" */
 	gchar    *proxy_uri;
-	gboolean  do_not_track;
+	gboolean  do_not_track;     /* send DNT: 1 (enforced by the hardening module) */
 	gboolean  tls_strict;
 	gboolean  ephemeral;        /* private browsing (no persistent storage) */
 

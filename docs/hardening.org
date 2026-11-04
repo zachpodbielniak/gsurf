@@ -1,0 +1,189 @@
+#+title: Privacy hardening (hardening module)
+#+description: LibreWolf-style privacy protections for gsurf, with per-site exemptions
+#+author: Zach Podbielniak
+
+* Overview
+
+The =hardening= module brings the network-level privacy defaults of LibreWolf to gsurf: https-only browsing, tracking-parameter stripping, cross-origin Referer trimming, Global Privacy Control, no prefetching or hyperlink-auditing pings, third-party cookie blocking, intelligent tracking prevention and WebRTC off. Each per-site protection can be switched off for chosen sites with =exempt:= rules, the way LibreWolf's site exceptions work: a rule matches the host of the *top-level page*, and every request that page makes inherits the exception.
+
+The module is off by default (=enabled: false=). Turning it on with no other options gives the LibreWolf-like defaults listed below.
+
+WebKitGTK has no WebExtensions runtime and no Firefox-style preference tree, so each protection is enforced by whichever part of the engine can do it:
+
+| Layer                                        | Where                                              | Protections                                                       |
+|----------------------------------------------+----------------------------------------------------+-------------------------------------------------------------------|
+| Web-process extension (=send-request=)       | =modules/hardening/webext/gsurf-hardening-webext.c= | =https_only=, =strip_params=, =referer=, =gpc= / =dnt= headers, ping and prefetch cancelling |
+| Web-process extension (=window-object-cleared=) | same                                            | =navigator.globalPrivacyControl= (=gpc=)                          |
+| =GsurfSettingProvider= (every navigation)    | =modules/hardening/gsurf-hardening-module.c=        | =webrtc=, =no_prefetch= (the DNS-prefetch setting)                |
+| Container registry session policy            | =gsurf_container_registry_set_policy()=            | =third_party_cookies=, =itp= (default session and every container) |
+
+All decisions (the upgrade, parameter stripping, Referer trimming, local-host detection, exemption lookup) live in one GLib-only file, =modules/hardening/gsurf-hardening-rules.c=, compiled into the module, into the web-process extension and into the unit test, so the UI process, the web process and the tests can never disagree.
+
+* Quick start
+
+#+begin_src yaml
+modules:
+  hardening:
+    enabled: true
+#+end_src
+
+That is the whole configuration for the LibreWolf-like defaults. A fuller example, with the default values spelled out and two site exceptions:
+
+#+begin_src yaml
+modules:
+  hardening:
+    enabled: true
+    https_only: true            # upgrade http:// navigations and subresources
+    https_only_local: false     # also upgrade localhost / LAN / private IPs
+    strip_params: [utm_*, fbclid, gclid, dclid, mc_eid, igshid, _hsenc, yclid, msclkid]
+    referer: trim_cross_origin  # off | trim_cross_origin | strip_cross_origin
+    gpc: true                   # Sec-GPC: 1 + navigator.globalPrivacyControl = true
+    dnt: false                  # DNT: 1 (absent: follows network.do_not_track)
+    no_prefetch: true           # DNS prefetching off; cancel prefetches and <a ping>
+    third_party_cookies: block  # allow | block | block_all
+    itp: true                   # WebKit intelligent tracking prevention
+    webrtc: false               # false forces WebRTC off
+    exempt:
+      - match: '^(localhost|127\.0\.0\.1|.*\.lan)$'
+        skip: [https_only]
+      - match: '(^|\.)mybank\.example$'
+        skip: [referer, strip_params]
+#+end_src
+
+* Options
+
+| Key                     | Default             | Kind     | Effect                                                                                       |
+|-------------------------+---------------------+----------+----------------------------------------------------------------------------------------------|
+| =enabled=               | =false=             | –        | Turns the module on. While off it changes nothing.                                           |
+| =https_only=            | =true=              | per site | Rewrites =http://= requests to =https://= before they are sent.                              |
+| =https_only_local=      | =false=             | –        | Also upgrade local hosts (see [[*Local hosts and https-only][Local hosts]]).                 |
+| =strip_params=          | the list above      | per site | Glob names of query parameters to remove from every request. =[]= strips nothing.           |
+| =referer=               | =trim_cross_origin= | per site | =off=, =trim_cross_origin= (origin only to other origins) or =strip_cross_origin= (no Referer to other origins). |
+| =gpc=                   | =true=              | per site | Sends =Sec-GPC: 1= and makes =navigator.globalPrivacyControl= =true=.                        |
+| =dnt=                   | =network.do_not_track= | per site | Sends =DNT: 1=.                                                                          |
+| =no_prefetch=           | =true=              | per site | Cancels hyperlink-auditing pings and link prefetches; DNS-prefetch setting off.              |
+| =third_party_cookies=   | =block=             | session  | =allow=, =block= (no third-party cookies) or =block_all= (no cookies). =true= / =false= mean =block= / =allow=. |
+| =itp=                   | =true=              | session  | WebKit's intelligent tracking prevention.                                                    |
+| =webrtc=                | =false=             | per site | =false= forces WebRTC off; =true= leaves the core =webkit.webrtc= setting alone.            |
+| =exempt=                | none                | –        | Site exceptions; see [[*Exemptions][Exemptions]].                                            |
+| =web_process_extension= | next to the module  | –        | Override the path of =gsurf-hardening-webext.so= (packaging, tests).                         |
+
+"Per site" options can be exempted for chosen sites; "session" options apply to whole browsing sessions (the default session and every container) and cannot vary by site.
+
+Bad values never stop gsurf: an unknown =referer= or =third_party_cookies= value falls back to the default with a warning on stderr, a =strip_params= that is not a list falls back to the default list, and a list element that is not a name is skipped with a warning.
+
+* Exemptions
+
+=exempt:= is a list of host rules (the same format as every other per-host list in gsurf, see =GsurfHostRules=). Each rule is either a bare pattern or a mapping:
+
+#+begin_src yaml
+exempt:
+  - match: '(^|\.)meet\.example$'   # case-insensitive regex on the host
+    skip: [webrtc]                  # features switched off for that site
+  - '^intranet\.corp$'              # no skip: a full site exception
+#+end_src
+
+- *What is matched.* The pattern is matched against the bare host (no scheme, no port) of the *top-level page*, not of the individual request. A page on an exempt host keeps its exemption for every subresource, iframe and redirect it loads, even when those go to other, non-exempt hosts; and a non-exempt page gets every protection even for requests that go to an exempt host. This is how LibreWolf's site exceptions behave, and it is the only model that keeps a site working (its CDNs and APIs live on other hosts) without leaking the exemption to third parties that the site embeds.
+- *Patterns* are PCRE, compiled case-insensitively and not anchored implicitly: write =(^|\.)example\.com$= for a domain and its subdomains.
+- *skip names* are the per-site options: =https_only=, =strip_params=, =referer=, =gpc=, =dnt=, =no_prefetch=, =webrtc=, plus =all=. A single name may be written without brackets (=skip: gpc=).
+- *A rule without =skip:=* exempts the site from every per-site feature. An empty list (=skip: []=) exempts it from nothing and is reported.
+- *Several matching rules* combine: the site skips the union of their lists.
+- *Validation.* An unknown skip name is reported on stderr and ignored. =third_party_cookies= and =itp= are reported as session-wide and ignored. A pattern that is not a valid regular expression rejects the whole =exempt:= list (with a warning) rather than leaving half of it in force; the other options still apply.
+
+How the top-level host is known:
+
+| Enforcement point                    | Top-level host                                                                                       |
+|--------------------------------------+------------------------------------------------------------------------------------------------------|
+| =send-request=, top-level document   | the request's own host (WebKit has already set the page URI to it), also for each of its redirects  |
+| =send-request=, any other request    | the host of the page URI of the web page that issued it                                              |
+| =window-object-cleared= (GPC script) | the host of the page URI, for the main frame and every iframe                                        |
+| setting provider (WebRTC, prefetch)  | the host of the URI the view is about to load                                                        |
+
+* How each protection is enforced
+
+** https-only
+
+The extension rewrites the request URI in =send-request=: scheme =https=, the same host, path, query and fragment; an explicit =:80= is dropped, any other explicit port kept (Firefox's HTTPS-Only mode does the same). Top-level documents, iframes and subresources are all upgraded. If the server does not speak TLS the load fails; that is the point of https-only, and an exemption is the way out.
+
+A redirect from =https://h/x= to =http://h/x= would be upgraded straight back to itself and loop until WebKit gives up; the extension cancels such a redirect at once (Firefox refuses the same downgrade). A redirect to any /other/ =http://= URI is simply upgraded and followed.
+
+** Local hosts and https-only
+
+An upgrade to a host that has no TLS just breaks it, and local services (routers, NAS boxes, development servers) rarely have certificates. So unless =https_only_local: true=, these hosts are never upgraded:
+
+- =localhost= and anything under =.localhost=;
+- single-label names (=router=, =nas=);
+- names under =.local=, =.lan=, =.internal= and =.home.arpa=;
+- IP literals that are unspecified (=0.0.0.0=, =::=), loopback (=127/8=, =::1=), link-local (=169.254/16=, =fe80::/10=), private (=10/8=, =172.16/12=, =192.168/16=), shared CGNAT space (=100.64/10=) or IPv6 unique-local (=fc00::/7=).
+
+This is a built-in, not an exemption: it applies only to https-only, and only to the request's own host (a public page's =http://192.168.1.1/= subresource is not upgraded either, since it could not be).
+
+** Tracking parameters
+
+Every request URI (top-level, iframe, subresource) loses the query parameters whose percent-decoded name matches one of the =strip_params= globs (=*= and =?= wildcards, case-insensitive). The remaining parameters keep their order and exact encoding, the fragment is kept, and a query left empty loses its =?=. Stripping runs after the https upgrade, on the final URI. The =adblock= module's =$removeparam= filters do the same job driven by filter lists; the two compose.
+
+** Referer
+
+WebKit's own default policy is =strict-origin-when-cross-origin=, but a page can loosen it (=<meta name="referrer" content="unsafe-url">=, =Referrer-Policy= headers, =referrerpolicy= attributes). The extension enforces the configured policy on the =Referer= header of every request, whatever the page asked for, like LibreWolf's =network.http.referer.XOriginTrimmingPolicy = 2=:
+
+- same-origin requests (same scheme, host and port) always keep the full Referer;
+- =trim_cross_origin= sends only the referring origin, =scheme://host[:port]/=;
+- =strip_cross_origin= sends no Referer at all;
+- a Referer that cannot be parsed is dropped on cross-origin requests.
+
+The JavaScript =document.referrer= of the target page is computed by WebKit and is not rewritten. With =itp: true= WebKit additionally trims cross-site Referer headers to the origin on its own.
+
+** Global Privacy Control and Do Not Track
+
+=gpc= adds =Sec-GPC: 1= to every request of a non-exempt page and, at =window-object-cleared= (before the document's own scripts run, in every frame), defines =navigator.globalPrivacyControl= on =Navigator.prototype= as a read-only =true=. Recent WebKit releases have a native getter that answers =false=; the definition replaces it. Exempt pages see the engine's own value and send no header.
+
+=dnt= adds =DNT: 1=. When the module's =dnt= key is absent it follows the core =network.do_not_track= key, which defaults to =false= (it was parsed but unused before this module; WebKit has no DNT switch of its own, so the header is only ever sent while the hardening module is enabled). Do Not Track is deprecated and is itself a fingerprinting bit, which is why both default to off; GPC is its legally recognized successor.
+
+** Prefetching and pings
+
+- *DNS prefetching* does not exist any more in WebKitGTK: since 2.48 =webkit_settings_set_enable_dns_prefetching()= is deprecated and "does nothing" (enabling it only logs a warning), so it is always off. The setting provider still forces =GsurfSettings.dns_prefetch= to =false=, which also keeps the GTK3 and LRG backends from logging that warning on every navigation when =webkit.dns_prefetch: true= is configured.
+- *Hyperlink-auditing pings* (=<a ping>=) are cancelled in =send-request=; they are recognized by their =Ping-To= header or =text/ping= body. The engine switch for them, =webkit_settings_set_enable_hyperlink_auditing()=, is deprecated (2.50) and has become a no-op that logs a warning on every call, which is why the core never calls it; the =hyperlink_auditing= field is still set to =false= so any backend that honours it agrees.
+- *Link prefetches* are cancelled when they carry =Purpose: prefetch= or =Sec-Purpose: prefetch=. Current WebKitGTK does not implement =<link rel=prefetch>= at all, so in practice there is nothing to cancel.
+- =<link rel=preconnect>= hints (where the engine acts on them) open connections without a request ever reaching =send-request=; they cannot be blocked (see [[*What WebKit cannot do][limits]]).
+
+** Third-party cookies and ITP
+
+=third_party_cookies= and =itp= become the container registry's session policy (=gsurf_container_registry_set_policy()=): it is applied to the default session immediately and to every container session (persistent or temporary) as it is created, so all containers are covered. When the module is disabled or reconfigured, or exits, WebKit's own defaults are restored (ITP off, third-party cookies blocked). The =cookie_policy= module changes the cookie policy of the current session interactively; whichever acts last wins for that session.
+
+** WebRTC
+
+The setting provider sets =GsurfSettings.webrtc= to =false= at the start of every navigation of a non-exempt page. The module runs with a high priority value (1000), after every default-priority setting provider, so a =uri_params= rule cannot turn WebRTC back on; use an exemption (=skip: [webrtc]=) for a video-call site.
+
+* When changes take effect
+
+- The setting provider and the session policy follow a reconfigure immediately (the next navigation, and every session).
+- The web-process extension receives its policy once, when a web process starts. The module registers it in =configure()=, before the first view exists. After a reconfigure, already running web processes keep the policy they started with; new web processes (new containers, a restart) get the new one.
+
+* What WebKit cannot do
+
+LibreWolf changes hundreds of Firefox preferences. Many have no equivalent in WebKitGTK's API, and some do not apply because WebKitGTK simply lacks the feature:
+
+| LibreWolf / Firefox                                      | gsurf with hardening                                                                                     |
+|----------------------------------------------------------+----------------------------------------------------------------------------------------------------------|
+| HTTPS-Only mode, local exceptions                        | =https_only= (+ built-in local hosts, =https_only_local=)                                                |
+| Query parameter stripping                                | =strip_params= (on every request, not only top-level navigations)                                        |
+| =XOriginTrimmingPolicy = 2=                              | =referer: trim_cross_origin=                                                                             |
+| Global Privacy Control                                   | =gpc=                                                                                                    |
+| No DNS prefetch, no =<a ping>=, no link prefetch         | =no_prefetch=                                                                                            |
+| Total Cookie Protection (dFPI)                           | =third_party_cookies: block= + =itp=; full per-site storage partitioning: use containers               |
+| WebRTC IP-leak protection                                | =webrtc: false= disables WebRTC altogether (WebKitGTK has no switch to filter ICE host candidates)                          |
+| Site exceptions                                          | =exempt:= (by top-level host)                                                                            |
+| =privacy.resistFingerprinting= (letterboxing, spoofed timezone, canvas / audio noise, font restrictions, reduced timer precision) | *not possible*: WebKitGTK exposes no API for any of it. A uniform user agent is available through the =useragent= module. |
+| Disable IPv6 (=network.dns.disableIPv6=)                 | *not possible* in WebKit; libsoup uses the system resolver. Disable IPv6 at the OS level if needed.      |
+| HTTP/3 and TLS 0-RTT off                                 | *not applicable*: WebKitGTK's libsoup network stack speaks HTTP/1.1 and HTTP/2 only and sends no TLS early data. |
+| Speculative connections / =rel=preconnect= off           | *not possible*: they never reach =send-request=.                                                         |
+| DNS over HTTPS                                           | *not possible* in WebKit; configure the system resolver.                                                 |
+| Safe Browsing, telemetry, studies, Pocket off            | *not applicable*: WebKitGTK has none of them.                                                            |
+| OCSP / CRLite hardening                                  | *not applicable*: certificate validation is GnuTLS via glib-networking; see =tls.strict= and =cert_manager=. |
+| WebGL off                                                | core =webkit.webgl: false= (already the default)                                                         |
+| Disk cache / history retention                           | core =storage:= keys, =ephemeral=, temporary containers                                                  |
+
+* Tests
+
+- =tests/test-hardening.c= (=make test=) compiles =gsurf-hardening-rules.c= in and covers parameter stripping, Referer trimming, the upgrade and downgrade-loop decisions, local hosts, speculative-request detection, exemption matching and the policy #GVariant; then it loads the real =hardening.so= and checks defaults, every option, the setting provider (including exemptions), the #GVariant registered for the extension, the session policy (through a fake session backend), =network.do_not_track= inheritance, reconfigure (other options, no section, disabled, enabled again), bad input warnings, a missing extension, and that finalizing the module unregisters the extension and restores the session defaults.
+- =tests/test-hardening-webkit.c= (=make test-gui=, both backends) runs real WebKit against a loopback libsoup server listening for plain HTTP and for HTTPS (the committed TLS fixture, with =tls.strict= off), reachable as =127.0.0.1= and =localhost=. It asserts what the *server* receives: the =http://= page arriving over TLS with its tracking parameters gone, =Sec-GPC= and =DNT=, the cross-origin Referer trimmed and the same-origin one kept, no ping, an upgraded redirect followed and a downgrade loop refused after one request, =navigator.globalPrivacyControl=; and that a page on an exempt top-level host gets every skipped feature untouched (plain http, parameters, full Referer, no GPC/DNT headers, its ping sent) even for requests to the non-exempt host. Separate scenarios check that loopback is not upgraded by default, the =strip_cross_origin= policy, and that a disabled module changes nothing. Each scenario runs in its own subprocess because the extension's policy is fixed per web process.

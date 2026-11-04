@@ -241,6 +241,12 @@ install-modules:
 		$(INSTALL_DATA) $(OUTDIR)/modules/adblock-webext/gsurf-adblock-webext.so \
 			$(DESTDIR)$(MODULEDIR)/adblock-webext/; \
 	fi
+	@# Likewise the hardening web-process extension next to hardening.so.
+	@if [ -f $(OUTDIR)/modules/hardening-webext/gsurf-hardening-webext.so ]; then \
+		$(MKDIR_P) $(DESTDIR)$(MODULEDIR)/hardening-webext; \
+		$(INSTALL_DATA) $(OUTDIR)/modules/hardening-webext/gsurf-hardening-webext.so \
+			$(DESTDIR)$(MODULEDIR)/hardening-webext/; \
+	fi
 
 install-gsurf-mcp: gsurf-mcp
 	$(MKDIR_P) $(DESTDIR)$(BINDIR)

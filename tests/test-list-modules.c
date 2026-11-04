@@ -14,6 +14,7 @@ test_list_modules_sorted(void)
 	g_autofree gchar *stdout_buf = NULL;
 	g_auto(GStrv) lines = NULL;
 	gchar *previous;
+	gboolean hardening = FALSE;
 	gint count;
 	gint i;
 
@@ -58,10 +59,12 @@ test_list_modules_sorted(void)
 			g_assert_cmpstr(previous, <, name);
 		g_free(previous);
 		previous = g_strdup(name);
+		hardening |= g_str_equal(name, "hardening");
 		count++;
 	}
 	g_free(previous);
 	g_assert_cmpint(count, >=, 10);
+	g_assert_true(hardening);
 }
 
 int

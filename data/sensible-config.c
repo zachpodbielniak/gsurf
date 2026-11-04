@@ -175,7 +175,7 @@ gsurf_config_init(void)
 	config->proxy_mode = g_strdup("default");      /* default | none | custom */
 	g_free(config->proxy_uri);
 	config->proxy_uri = g_strdup("");
-	config->do_not_track = TRUE;
+	config->do_not_track = FALSE;                  /* DNT header, via the hardening module */
 
 	/* ===== Window ===== */
 	g_free(config->window_title);
