@@ -219,6 +219,13 @@ test: gsurf modules $(TEST_BINS)
 # test-tab-tree compiles the tabs module's tree model in directly.
 $(OBJDIR)/tests/test-tab-tree.o: modules/tabs/gsurf-tab-tree.c modules/tabs/gsurf-tab-tree.h
 
+# The wmux model tests compile the module's toolkit-neutral core in
+# (layout, command language, keys, binding tables).
+WMUX_MODEL_FILES := $(foreach part,layout command keys bindings,\
+	modules/wmux/gsurf-wmux-$(part).c modules/wmux/gsurf-wmux-$(part).h)
+$(OBJDIR)/tests/test-wmux-layout.o $(OBJDIR)/tests/test-wmux-command.o \
+$(OBJDIR)/tests/test-wmux-keys.o $(OBJDIR)/tests/test-wmux-bindings.o: $(WMUX_MODEL_FILES)
+
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
 
