@@ -225,6 +225,10 @@ WMUX_MODEL_FILES := $(foreach part,layout command keys bindings,\
 	modules/wmux/gsurf-wmux-$(part).c modules/wmux/gsurf-wmux-$(part).h)
 $(OBJDIR)/tests/test-wmux-layout.o $(OBJDIR)/tests/test-wmux-command.o \
 $(OBJDIR)/tests/test-wmux-keys.o $(OBJDIR)/tests/test-wmux-bindings.o: $(WMUX_MODEL_FILES)
+# The module tests read the module's struct (private header); the GUI test
+# also compiles the layout model in to inspect the panes.
+$(OBJDIR)/tests/test-wmux.o $(OBJDIR)/tests/test-wmux-webkit.o \
+$(OBJDIR)/tests/test-wmux-docs.o: $(WMUX_MODEL_FILES) $(wildcard modules/wmux/*.h)
 
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
@@ -243,7 +247,7 @@ tests: test
 # Forces GTK onto Xvfb's X display, so running it from a Wayland session
 # never opens test windows on the user's desktop.
 .PHONY: test-gui
-test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit
+test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	unset WAYLAND_DISPLAY; export GDK_BACKEND=x11; \
@@ -286,6 +290,9 @@ test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-
 	echo "Running window view routing / layout tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-window-layout-webkit || exit $$?; \
+	echo "Running wmux pane multiplexer tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-wmux-webkit || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \

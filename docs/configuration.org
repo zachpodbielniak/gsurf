@@ -73,6 +73,10 @@ reads its own options from its section (=gsurf_config_get_module_node=).
 
 The =tabs= section configures the tab strip and the tree sidebar (=position=, =strip=, =show_single=, the =bg_color= / =active_color= / =fg_color= / =visible_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
 
+* wmux
+
+=modules.wmux= (off by default) splits the window into tmux-style panes: =prefix= (=C-b=), =prefix_timeout=, =repeat_time=, =display_panes_time=, the =bindings= / =root_bindings= overrides (key: command in the wmux command language, =""= unbinds) and =repeatable= keys, =split_ratio=, =on_pane_kill= (=close_tab= | =keep_tab=), =on_tab_close= (=close_pane= | =keep_pane=), =confirm_kill=, =mouse=, =remember_layout=, =min_pane_pct=, =gap=, the border options (=border_width=, =active_border_width=, =border_color=, =active_border_color=, =container_colors=, =inactive_opacity=, =active_brighten=) and the status line (=status=, =status_position=, =status_bg=, =status_fg=, =status_current_fg=, =window_name_max=). Bad values warn and keep their default; a bad binding warns and is skipped. [[file:wmux.org][wmux.org]] has the full reference, the tmux key mapping and a cookbook.
+
 * Containers
 
 =modules.containers= turns on per-host and temporary containers (separate cookie jars and storage per tab): =new_tab=, =inherit_opener=, =temp_cleanup_delay=, =temp_color=, the =containers:= list (=name=, =id=, =color=, =hosts=) and =key_new_temp= / =key_reopen_next=. The full reference, placement order and host assignment rules are in [[file:containers.org][containers.org]].

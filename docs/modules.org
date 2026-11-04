@@ -42,6 +42,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =notifications= | notifications     | implemented |
 | =form_autofill= | (new; autofill)   | implemented (off by default; see [[file:form-autofill.org][form-autofill.org]]) |
 | =mcp=         | (new; AI control)   | implemented (=MCP=1=) |
+| =wmux=        | tmux(1) panes and windows | implemented (=GsurfWindowLayout= + =GsurfInputHandler= + =GsurfActionHandler=; off by default; see [[file:wmux.org][wmux.org]]) |
 
 * Tier 3 — nice-to-have
 
@@ -51,7 +52,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 32 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
+All 33 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
 
 * AI modules (deferred)
 

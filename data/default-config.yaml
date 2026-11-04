@@ -487,4 +487,40 @@ modules:
     file: "~/.local/share/gsurf/session.yaml"   # YAML, 0600; see docs/configuration.org
     key_save: "Ctrl+Shift+s"
 
+  # wmux: tmux-style panes, windows and a status line in one browser
+  # window (docs/wmux.org). Opt in with enabled: true; C-h/j/k/l then move
+  # between panes (C-l no longer opens the address bar: use o or rebind).
+  wmux:
+    enabled: false
+    prefix: "C-b"                  # tmux ("C-a") or gsurf ("Ctrl+a") notation
+    prefix_timeout: 0              # ms to wait after the prefix; 0 = wait forever
+    repeat_time: 500               # ms a repeatable key works without the prefix
+    display_panes_time: 1000       # ms the pane numbers (C-b q) stay (100-60000)
+    bindings: {}                   # prefix table overrides: key: command ("" unbinds)
+    #   "|": "split-window -h"     # e.g. vim-style splits
+    #   "g": "split-window -h https://github.com"
+    root_bindings: {}              # no-prefix table overrides (default C-h/j/k/l)
+    repeatable: []                 # more prefix keys that repeat
+    split_ratio: 50                # % of the old pane a new pane gets (1-99)
+    on_pane_kill: close_tab        # close_tab | keep_tab
+    on_tab_close: close_pane       # close_pane | keep_pane
+    confirm_kill: true             # x and & ask y/n first
+    mouse: true                    # drag the gaps between panes to resize
+    remember_layout: true          # the session module saves the layout
+    min_pane_pct: 10               # smallest pane, % of the window (0-50)
+    gap: 2                         # px between panes (0-64)
+    border_width: 1                # px, inactive panes (0-32)
+    active_border_width: 2         # px, the active pane (0-32)
+    border_color: "#45475a"        # panes in the default container
+    active_border_color: "#89b4fa" # the active pane in the default container
+    container_colors: true         # borders in the tab's container colour
+    inactive_opacity: 0.55         # border alpha of inactive panes (0-1)
+    active_brighten: 0.25          # container colour mixed toward white (0-1)
+    status: true                   # the status line
+    status_position: bottom        # bottom | top
+    status_bg: "#181825"
+    status_fg: "#cdd6f4"
+    status_current_fg: "#89b4fa"   # the current window's entry
+    window_name_max: 20            # characters of a window name (1-200)
+
   # --- AI modules (require the AI=1 build flag; deferred / not yet built) ---

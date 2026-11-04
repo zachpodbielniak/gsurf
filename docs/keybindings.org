@@ -76,6 +76,39 @@ In a C config, set =hint_font_size= in the embedded module YAML passed to =gsurf
 The =tabs= module adds =Ctrl+t= / =Ctrl+w= / =Ctrl+Tab= / =Ctrl+Shift+Tab=
 (new/close/next/prev) and =Ctrl+Shift+t= (reopen), plus the tree sidebar keys: =Ctrl+Shift+.= (=tab-sidebar-toggle=), =Ctrl+Shift+[= (=tab-tree-collapse=) and =Ctrl+Shift+Page_Up= / =Ctrl+Shift+Page_Down= (=tab-move-up= / =tab-move-down=, moving the tab with its subtree). None of the tree keys overlaps a default binding; see [[file:tabs.org][tabs.org]]. =toggles= adds the =Ctrl+Shift+...= setting toggles.
 
+The =wmux= module (off by default; [[file:wmux.org][wmux.org]]) adds tmux's keys. It runs before =modal= (priority -10), so its keys win. The prefix (=C-b=) sets the window's key grab, so the key after it reaches wmux even while you type in a page or the address bar.
+
+Root table (no prefix; these replace the core =Ctrl+h/j/k/l= meanings while wmux is enabled, so =Ctrl+l= no longer opens the address bar: use =o= or rebind):
+
+| Key   | Command          |
+|-------+------------------|
+| =C-h= | =select-pane -L= |
+| =C-j= | =select-pane -D= |
+| =C-k= | =select-pane -U= |
+| =C-l= | =select-pane -R= |
+
+Prefix table (=C-b= then the key; =r= marks a repeatable key, which works again without the prefix for =repeat_time= ms):
+
+| Key                            | Command                                   |
+|--------------------------------+-------------------------------------------|
+| =%= / ="=                      | =split-window -h= / =-v= (a new tab in a new pane) |
+| =C-%= / =C-"=                  | the same with =-c=: duplicate the page     |
+| =o= / =;=                      | next pane / last pane                     |
+| =Up= =Down= =Left= =Right= (r) | =select-pane= in that direction           |
+| =C-arrows= (r) / =M-arrows= (r) | =resize-pane= by 1% / 5%                 |
+| =x= / =z= / =q=                | kill pane (asks) / zoom / pane numbers    |
+| ={= / =}=                      | swap with the previous / next pane        |
+| =C-o= / =M-o=                  | rotate the panes up / down                |
+| =Space= / =M-1= ... =M-5= / =E= | next preset / a preset / spread evenly   |
+| =!=                            | break the pane into its own window        |
+| =c= =n= =p= =l=                | new / next / previous / last window       |
+| =0= ... =9=                    | select window N                           |
+| =w= / =&= / =,=                | choose a window or pane / kill window (asks) / rename |
+| =:= / =?=                      | command prompt / list the keys            |
+| =C-b=                          | =send-prefix=: the next =C-b= reaches the page |
+
+The full table with every command is in [[file:wmux.org][wmux.org]]; both tables are configurable (=bindings:=, =root_bindings:=).
+
 =dark_mode= binds =Ctrl+Alt+d= (=dark-mode-toggle=, everything on/off) and =Ctrl+Alt+Shift+d= (=dark-mode-toggle-site=, the current site, remembered across restarts); set =modules.dark_mode.key_toggle= / =key_toggle_site= to change or unbind them (see [[file:dark-mode.org][Dark mode]]). =Ctrl+Shift+d= belongs to the bookmarks module. The toggles module's legacy =keys.dark_mode= entry forwards to =dark-mode-toggle=.
 
 The =containers= module (disabled by default) adds =Ctrl+Alt+t= (=container-new-temp=: a new tab in a temporary container) and =Ctrl+Alt+c= (=container-reopen-next=: reopen the tab in the next container), configurable as =key_new_temp= / =key_reopen_next=; see [[file:containers.org][containers.org]].
