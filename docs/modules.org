@@ -48,7 +48,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 29 modules build with =make= (the =mcp= module requires =MCP=1=).
+All 29 modules build with =make= (the =mcp= module requires =MCP=1=). With =GTK_BACKEND=gtk4= every module except =tabs= builds; =tabs= is GTK3-only while it is being rewritten, and the GTK4 build skips it.
 
 * AI modules (deferred)
 
@@ -95,8 +95,12 @@ The downloads module treats the suggested name as a filename: it strips director
 
 * Chrome module lifetime
 
-The GTK3 =chromebar= and =status_bar= modules disconnect their window and view signals and destroy their widgets on deactivation. Reactivation creates one new widget. Disposal performs the same idempotent cleanup, including when an embedding host retains a window, view, or native widget after releasing its module manager. Modules retain their native widgets until cleanup so destroying the host container first does not leave dangling widget pointers.
+The =chromebar=, =find_bar= and =status_bar= modules build and behave the same on GTK3 and GTK4. They share the header-only, module-private =modules/include/gsurf-chrome-compat.h=, which maps each GTK call to the GTK3 API or to its non-deprecated GTK4 equivalent (for example =gtk_editable_get_text()= for entry text, since a GTK4 =GtkSearchEntry= is not a =GtkEntry=, and =gtk_widget_set_visible()= instead of show/hide).
+
+On deactivation each module disconnects its window and view signals and its key handler, and detaches its widget from the window chrome: =gtk_widget_destroy()= on GTK3; on GTK4 =gtk_box_remove()= (or =gtk_widget_unparent()= for a non-box parent), and nothing when the host container is already gone. Reactivation creates one new widget. Disposal performs the same idempotent cleanup, including when an embedding host retains a window, view, or native widget after releasing its module manager. Modules retain their native widgets until cleanup (=find_bar= retains both its bar and its search entry, because GTK3 destroys a container's children with it) so destroying the host container first does not leave dangling widget pointers.
+
+Key handling in the address bar and find bar runs before the entry's own: a =key-press-event= handler on GTK3, a =GtkEventControllerKey= in the capture phase on GTK4 (so it also precedes the entry's inner =GtkText=). Escape in the address bar restores the page URI and returns focus to the page; Enter loads the input. In the find bar, Enter confirms the search and returns focus to the page (where =n= / =N= step), Shift+Enter steps backwards without activating, and Escape clears the query and highlight and hides the bar. On GTK3 the hidden find bar sets no-show-all so the window's startup show-all does not reveal it; GTK4 has no show-all, so it is simply hidden.
 
 Switching tabs refreshes the status bar from the new view's current load progress. Removing the last view clears both the address and status text.
 
-The regression suite =tests/test-chrome-lifecycle.c= loads the real shared modules with model-only views and GTK containers, without launching a web process or making network requests. It is skipped by default; run =GSURF_TEST_GUI=1 ./build/release/test-chrome-lifecycle= with a display after =make test= to check tab state, deactivation, reactivation, retained widgets, and repeated disposal.
+The regression suite =tests/test-chrome-lifecycle.c= loads the real shared modules with model-only views and a GTK box standing in for the window chrome, without launching a web process or making network requests, on both backends. It covers tab state, deactivation (twice), reactivation, retained widgets, repeated disposal, the host container dying first, and the address-bar and find-bar keys (delivered as =key-press-event= on GTK3 and through the module's named key controller on GTK4). It needs a display and is skipped by =make test= unless =GSURF_TEST_GUI= is set; =make test-gui= runs it under Xvfb, or run =GSURF_TEST_GUI=1 ./build/release/test-chrome-lifecycle= with a display (it presents no window). The =tabs= module is not covered here; it is being rewritten.

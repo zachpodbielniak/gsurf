@@ -8,13 +8,15 @@
  * (URI-handler-rewritten) input in the active view; the bar tracks the
  * active view's URI. Focus it with the open-prompt keybind (o) or the
  * configured key (Ctrl+l); Escape restores the URI and returns focus to
- * the page, as does loading a URI with Enter. GTK3.
+ * the page, as does loading a URI with Enter. Builds against GTK3 and
+ * GTK4 through the module-private modules/include/gsurf-chrome-compat.h.
  */
 
 #include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
 #include <gtk/gtk.h>
+#include "modules/include/gsurf-chrome-compat.h"
 
 #define GSURF_TYPE_CHROMEBAR_MODULE (gsurf_chromebar_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfChromebarModule, gsurf_chromebar_module,
@@ -53,7 +55,7 @@ sync_entry_text(GsurfChromebarModule *self)
 	const gchar *uri = self->tracked != NULL ? gsurf_view_get_uri(self->tracked) : NULL;
 
 	if (self->entry != NULL)
-		gtk_entry_set_text(GTK_ENTRY(self->entry), uri ? uri : "");
+		gsurf_chrome_editable_set_text(self->entry, uri);
 }
 
 static void
@@ -62,8 +64,8 @@ on_view_uri_changed(GsurfView *view, const gchar *uri, gpointer user_data)
 	GsurfChromebarModule *self = user_data;
 
 	/* Don't clobber what the user is typing; Escape restores it. */
-	if (self->entry != NULL && !gtk_widget_has_focus(self->entry))
-		gtk_entry_set_text(GTK_ENTRY(self->entry), uri ? uri : "");
+	if (self->entry != NULL && !gsurf_chrome_widget_has_focus(self->entry))
+		gsurf_chrome_editable_set_text(self->entry, uri);
 }
 
 /* Put the cursor in the bar with its text selected, ready to replace. */
@@ -91,7 +93,7 @@ track_view(GsurfChromebarModule *self, GsurfView *view)
 			G_CALLBACK(on_view_uri_changed), self);
 		on_view_uri_changed(view, gsurf_view_get_uri(view), self);
 	} else if (self->entry != NULL) {
-		gtk_entry_set_text(GTK_ENTRY(self->entry), "");
+		gsurf_chrome_editable_set_text(self->entry, NULL);
 	}
 }
 
@@ -99,7 +101,7 @@ static void
 on_entry_activate(GtkEntry *entry, gpointer user_data)
 {
 	GsurfView *view = active_view();
-	const gchar *text = gtk_entry_get_text(entry);
+	const gchar *text = gsurf_chrome_editable_get_text(GTK_WIDGET(entry));
 	g_autofree gchar *rewritten = NULL;
 
 	if (view == NULL || text == NULL || *text == '\0')
@@ -111,14 +113,16 @@ on_entry_activate(GtkEntry *entry, gpointer user_data)
 	gsurf_view_focus(view);
 }
 
-/* Escape abandons the edit: restore the URI and return to the page. */
+/* Escape abandons the edit: restore the URI and return to the page.
+ * Every other key is left to the entry. */
 static gboolean
-on_entry_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data)
+on_entry_key_press(GtkWidget *widget, guint keyval, GdkModifierType state,
+                   gpointer user_data)
 {
 	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(user_data);
 	GsurfView *view;
 
-	if (event->keyval != GDK_KEY_Escape)
+	if (keyval != GDK_KEY_Escape)
 		return FALSE;
 	sync_entry_text(self);
 	view = active_view();
@@ -214,7 +218,7 @@ gsurf_chromebar_activate(GsurfModule *module)
 	g_object_ref_sink(self->entry);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Enter URL or search...");
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);
-	g_signal_connect(self->entry, "key-press-event", G_CALLBACK(on_entry_key_press), self);
+	gsurf_chrome_connect_key_press(self->entry, on_entry_key_press, self);
 	gsurf_window_add_top_widget(window, self->entry);
 
 	self->window = window;
@@ -256,8 +260,9 @@ gsurf_chromebar_deactivate(GsurfModule *module)
 	}
 	track_view(self, NULL);
 	if (self->entry != NULL) {
+		gsurf_chrome_disconnect_key_press(self->entry, self);
 		g_signal_handlers_disconnect_by_data(self->entry, self);
-		gtk_widget_destroy(self->entry);
+		gsurf_chrome_widget_detach(self->entry);
 		g_clear_object(&self->entry);
 	}
 }
