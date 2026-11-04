@@ -654,6 +654,8 @@ test_module_bad_config(void)
 
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.position*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.fg_color*not a CSS colour*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+		"*tabs.visible_color*not a CSS colour*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.sidebar_position*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.sidebar_width*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.indent*");
@@ -663,6 +665,7 @@ test_module_bad_config(void)
 		"modules:\n  tabs:\n    enabled: true\n"
 		"    position: sideways\n"
 		"    fg_color: \"not-a-colour; } * { color: red\"\n"
+		"    visible_color: 42\n"
 		"    sidebar_position: middle\n"
 		"    sidebar_width: wide\n"
 		"    indent: -3\n"

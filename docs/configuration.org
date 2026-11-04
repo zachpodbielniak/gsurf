@@ -71,7 +71,7 @@ Native settings regressions run with =make test-gui= under Xvfb. On an existing 
 The =modules:= map is parsed by the core for the =enabled:= flag; each module
 reads its own options from its section (=gsurf_config_get_module_node=).
 
-The =tabs= section configures the tab strip and the tree sidebar (=position=, =strip=, =show_single=, the =bg_color= / =active_color= / =fg_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
+The =tabs= section configures the tab strip and the tree sidebar (=position=, =strip=, =show_single=, the =bg_color= / =active_color= / =fg_color= / =visible_color= colours, =sidebar=, =sidebar_position=, =sidebar_width=, =sidebar_hides_strip=, =indent=, =max_depth=, =on_close_parent= and the =key_*= bindings); [[file:tabs.org][tabs.org]] has the full reference with defaults and validation rules.
 
 * Containers
 

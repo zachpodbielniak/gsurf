@@ -56,6 +56,7 @@ struct _GsurfTabsRow
 	gint       twisty_state;
 	gint       visible;
 	gint       active;
+	gint       in_pane;  /* on screen in another pane (a window layout) */
 	gchar     *container_class;
 };
 
@@ -129,10 +130,13 @@ build_css(GsurfTabsModule *self)
 		".gsurf-tab-row button { padding: 0px 4px; min-height: 0px; min-width: 0px; }\n"
 		".gsurf-tab-row-active { background-color: %s; }\n"
 		".gsurf-tab-row-active label { font-weight: bold; }\n"
+		".gsurf-tab-visible { background-color: %s; }\n"
+		".gsurf-tab-row-visible { background-color: %s; }\n"
 		".gsurf-tab-stripe { min-width: 3px; }\n"
 		".gsurf-tab-stripe-on { background-color: %s; }\n",
 		self->bg_color, self->fg_color, self->fg_color,
-		self->active_color, self->active_color, self->fg_color);
+		self->active_color, self->active_color,
+		self->visible_color, self->visible_color, self->fg_color);
 
 	/* Container colours come later, so they win over the plain stripe. */
 	if (self->registry != NULL) {
@@ -162,7 +166,8 @@ build_css(GsurfTabsModule *self)
  * self->menu_tab, the tab the menu was opened on; a tab that closed in
  * the meantime makes them no-ops. */
 static const gchar *const menu_simple_actions[] = {
-	"reload", "duplicate", "toggle-collapse", "close-children", "close", NULL
+	"reload", "duplicate", "split-right", "split-down", "toggle-collapse",
+	"close-children", "close", NULL
 };
 
 static void
@@ -176,6 +181,10 @@ on_menu_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 		gsurf_tabs_reload_tab(self, id);
 	else if (g_strcmp0(name, "duplicate") == 0)
 		gsurf_tabs_duplicate_tab(self, id);
+	else if (g_strcmp0(name, "split-right") == 0)
+		gsurf_tabs_split_tab(self, id, GSURF_ACTION_PANE_SPLIT_RIGHT);
+	else if (g_strcmp0(name, "split-down") == 0)
+		gsurf_tabs_split_tab(self, id, GSURF_ACTION_PANE_SPLIT_DOWN);
 	else if (g_strcmp0(name, "toggle-collapse") == 0)
 		gsurf_tabs_toggle_collapse(self, id);
 	else if (g_strcmp0(name, "close-children") == 0)
@@ -235,6 +244,8 @@ menu_append_container(GMenu *menu, const gchar *label, const gchar *target)
  * The menu for the tab with @id, built fresh on every opening so it only
  * offers what applies:
  *   1. Reload, Duplicate;
+ *   1b. Open in Split Right / Below (only while the window has a layout,
+ *      e.g. wmux, which handles the pane-split actions for the tab);
  *   2. "Reopen in Container" (only while containers are in use, i.e. a
  *      placement policy is installed): Default, each persistent
  *      container in registry order, and a new temporary container;
@@ -255,6 +266,15 @@ menu_model_new(GsurfTabsModule *self, guint64 id)
 	g_menu_append(basic, "Reload Tab", GSURF_TABS_MENU_PREFIX ".reload");
 	g_menu_append(basic, "Duplicate Tab", GSURF_TABS_MENU_PREFIX ".duplicate");
 	g_menu_append_section(menu, NULL, G_MENU_MODEL(basic));
+
+	/* 1b. */
+	if (self->window != NULL && gsurf_window_get_layout(self->window) != NULL) {
+		g_autoptr(GMenu) split = g_menu_new();
+
+		g_menu_append(split, "Open in Split Right", GSURF_TABS_MENU_PREFIX ".split-right");
+		g_menu_append(split, "Open in Split Below", GSURF_TABS_MENU_PREFIX ".split-down");
+		g_menu_append_section(menu, NULL, G_MENU_MODEL(split));
+	}
 
 	/* 2. */
 	if (gsurf_container_registry_has_resolver(registry)) {
@@ -478,6 +498,8 @@ strip_rebuild(GsurfTabsModule *self)
 		gsurf_chrome_widget_add_class(tab, "gsurf-tab");
 		if (view == active)
 			gsurf_chrome_widget_add_class(tab, "gsurf-tab-active");
+		else if (gsurf_tabs_view_in_other_pane(self, view))
+			gsurf_chrome_widget_add_class(tab, "gsurf-tab-visible");
 
 		button = gsurf_chrome_button_new_flat(label);
 		gsurf_tabs_set_widget_id(button, id);
@@ -547,6 +569,7 @@ row_new(GsurfTabsModule *self, guint64 id)
 	row->twisty_state = TWISTY_UNSET;
 	row->visible = -1;
 	row->active = -1;
+	row->in_pane = -1;
 
 	row->box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
 	gtk_widget_set_name(row->box, GSURF_TABS_ROW_BOX_NAME);
@@ -647,7 +670,9 @@ row_update_content(GsurfTabsModule *self, GsurfTabsRow *row)
 }
 
 /* Indentation, twisty, visibility and highlight of one row, touching
- * only what changed since the last sync. */
+ * only what changed since the last sync. The highlight is the active
+ * tab's style, or the "visible" style for a tab a window layout shows in
+ * another pane. */
 static void
 row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 {
@@ -655,6 +680,7 @@ row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 	gint twisty;
 	gint visible;
 	gint is_active;
+	gint in_pane;
 
 	indent = (gint)gsurf_tab_tree_get_display_depth(self->tree, row->id,
 		(guint)self->max_depth) * self->indent;
@@ -685,6 +711,12 @@ row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 	if (is_active != row->active) {
 		gsurf_chrome_widget_set_class(row->row, "gsurf-tab-row-active", is_active);
 		row->active = is_active;
+	}
+
+	in_pane = gsurf_tabs_view_in_other_pane(self, gsurf_view_lookup(row->id)) ? 1 : 0;
+	if (in_pane != row->in_pane) {
+		gsurf_chrome_widget_set_class(row->row, "gsurf-tab-row-visible", in_pane);
+		row->in_pane = in_pane;
 	}
 }
 

@@ -30,6 +30,9 @@ G_DECLARE_FINAL_TYPE(GsurfTabsModule, gsurf_tabs_module, GSURF, TABS_MODULE, Gsu
 #define GSURF_TABS_DEFAULT_BG_COLOR      "#181825"
 #define GSURF_TABS_DEFAULT_ACTIVE_COLOR  "#313244"
 #define GSURF_TABS_DEFAULT_FG_COLOR      "#cdd6f4"
+/* Tabs shown in a pane other than the active one (a window layout such as
+ * wmux): Catppuccin Mocha "base", between bg_color and active_color. */
+#define GSURF_TABS_DEFAULT_VISIBLE_COLOR "#1e1e2e"
 #define GSURF_TABS_DEFAULT_SIDEBAR_WIDTH (240)
 #define GSURF_TABS_DEFAULT_INDENT        (14)
 #define GSURF_TABS_DEFAULT_MAX_DEPTH     (8)
@@ -86,6 +89,7 @@ struct _GsurfTabsModule
 	gchar   *bg_color;            /* validated CSS colours */
 	gchar   *active_color;
 	gchar   *fg_color;
+	gchar   *visible_color;       /* tabs on screen in another pane */
 	gboolean sidebar;             /* initial sidebar state */
 	gboolean sidebar_right;       /* sidebar_position: right */
 	gint     sidebar_width;
@@ -127,12 +131,20 @@ G_GNUC_INTERNAL void      gsurf_tabs_toggle_collapse(GsurfTabsModule *self, guin
 
 /* Context menu operations on the tab with @id (no-ops for a tab that is
  * gone). Reopening goes through gsurf_window_reopen_view(): @container
- * is a container id, "default" or "temporary". */
+ * is a container id, "default" or "temporary". Splitting dispatches
+ * @action (GSURF_ACTION_PANE_SPLIT_RIGHT / _DOWN) with the tab's view to
+ * the module that owns the window layout. */
 G_GNUC_INTERNAL void      gsurf_tabs_reload_tab(GsurfTabsModule *self, guint64 id);
 G_GNUC_INTERNAL void      gsurf_tabs_duplicate_tab(GsurfTabsModule *self, guint64 id);
 G_GNUC_INTERNAL void      gsurf_tabs_close_children(GsurfTabsModule *self, guint64 id);
 G_GNUC_INTERNAL void      gsurf_tabs_reopen_tab(GsurfTabsModule *self, guint64 id,
                                                 const gchar *container);
+G_GNUC_INTERNAL void      gsurf_tabs_split_tab(GsurfTabsModule *self, guint64 id,
+                                               GsurfAction action);
+
+/* Whether the tab @view is on screen in a pane other than the active
+ * one (only ever TRUE while a #GsurfWindowLayout is installed). */
+G_GNUC_INTERNAL gboolean  gsurf_tabs_view_in_other_pane(GsurfTabsModule *self, GsurfView *view);
 
 /* --- UI, used by the core (gsurf-tabs-ui.c) --- */
 

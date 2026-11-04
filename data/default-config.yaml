@@ -231,6 +231,7 @@ modules:
     bg_color: "#181825"            # strip/sidebar background (CSS colour)
     active_color: "#313244"        # active tab background
     fg_color: "#cdd6f4"            # tab text
+    visible_color: "#1e1e2e"       # tabs shown in another pane (wmux)
     sidebar: false                 # tree sidebar shown at startup
     sidebar_position: left         # left or right
     sidebar_width: 240             # px (60-2000)
