@@ -98,3 +98,25 @@ JS (and any =WebKitUserContentManager= script-message handler registered from
 =configure(config)= → (manager reads =enabled=) → =activate()= if enabled →
 hooks dispatched while =is_active= → =deactivate()= on shutdown. Set hook
 priority with =gsurf_module_set_priority()= (lower runs first).
+
+* Shared helpers for modules (src/util/)
+
+Per-site configuration and private state follow one pattern across modules; use these instead of re-implementing them.
+
+** =GsurfHostRules= (=util/gsurf-host-rules.h=)
+
+An ordered list of case-insensitive regular expressions matched against the bare host (=www.example.com=, no scheme or port), each with an optional YAML mapping of settings. Patterns are not anchored implicitly: write =(^|\.)example\.com$= for a domain and its subdomains.
+
+- =gsurf_host_rules_load(rules, node, "match", &error)= reads a YAML list. Each element is either a bare pattern string (a rule with no settings) or a mapping whose =match= member is the pattern; the whole mapping is the rule's data. A bad pattern or element shape fails with =GSURF_HOST_RULES_ERROR=; load into a fresh object and swap it in on success to keep a second =configure()= all-or-nothing.
+- =gsurf_host_rules_find()= / =_matches()= / =_lookup()= return the first match; =_lookup_all()= returns the data of every match in order for modules that merge settings (later rules win).
+- =gsurf_host_rules_to_json()= produces =[{"pattern": …, "data": {…}|null}]= for rules evaluated inside the page. Keep such patterns to the syntax PCRE and JavaScript share (no lookbehind, possessive quantifiers or =(?P<…>)=).
+- =gsurf_host_rules_to_variant()= produces =a(sa{sv})= for web-process extensions: scalars keep their type (=s=, =x=, =d=, =b=), scalar lists become =as=, anything nested travels as JSON text.
+- =gsurf_host_from_uri()= gives the lowercase host of a network URI (or =NULL= for =about:=, =data:=, =file:=, …), the value every lookup takes.
+
+** Private files (=util/gsurf-private-file.h=)
+
+- =gsurf_private_mkdir()= creates directories 0700.
+- =gsurf_private_write()= replaces a file atomically at mode 0600, creating its parent 0700 first.
+- =gsurf_private_file_is_private()= checks a file is a regular file owned by the user with no group/other access, before trusting sensitive data in it (for example autofill card data).
+- =gsurf_expand_home()= expands a leading =~/= in configured paths.
+
