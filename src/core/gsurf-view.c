@@ -862,10 +862,13 @@ gsurf_view_blur_editable(GsurfView *self)
 {
 	g_return_if_fail(GSURF_IS_VIEW(self));
 
-	/* Blurring an <iframe> element in the top document also drops focus
-	 * out of the frame, so the top-level activeElement is enough. */
+	/* Blur the deepest active element of the top document: through open
+	 * shadow roots (document.activeElement is only the shadow host), and
+	 * an <iframe> element, whose blur also drops focus out of the frame. */
 	gsurf_view_run_javascript_async(self,
-		"document.activeElement&&document.activeElement.blur&&document.activeElement.blur()",
+		"(function(){var a=document.activeElement;"
+		"while(a&&a.shadowRoot&&a.shadowRoot.activeElement)a=a.shadowRoot.activeElement;"
+		"if(a&&a.blur)a.blur();})()",
 		NULL, NULL, NULL);
 	gsurf_view_set_editing(self, FALSE);
 }

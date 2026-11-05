@@ -303,23 +303,30 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	gboolean is_escape = (keyval == GDK_KEY_Escape);
 	g_autofree gchar *keystr = NULL;
 	GsurfAction action;
+	gboolean typing;
 
 	/* While the user is typing — a DOM editable element is focused, or the
 	 * modal module is in INSERT passthrough — bare keys must reach the page
 	 * and not be consumed by any module (e.g. find-bar's n/N) or core
 	 * keybind. Modified keys and Escape still pass through (shortcuts; exit
 	 * insert / blur). A key grab (a module waiting for the key after its
-	 * prefix, e.g. wmux's C-b) skips the guard: that key is a command. */
-	if (!gsurf_window_get_key_grab(window) &&
-	    (gsurf_module_manager_get_input_passthrough(mgr) ||
-	     (view != NULL && gsurf_view_get_editing(view))) &&
-	    !has_mod && !is_escape)
+	 * prefix, e.g. wmux's C-b) lets the modules see the key first: that key
+	 * is a command. */
+	typing = (gsurf_module_manager_get_input_passthrough(mgr) ||
+	          (view != NULL && gsurf_view_get_editing(view))) &&
+	         !has_mod && !is_escape;
+	if (typing && !gsurf_window_get_key_grab(window))
 		return FALSE;
 
 	/* Modules (modal keymap, hints, tabs) get first crack. */
 	if (gsurf_module_manager_dispatch_key_event(mgr, view, keyval, keycode,
 			state, GSURF_MODE_NORMAL))
 		return TRUE;
+
+	/* A grab no module claimed the key for must not turn typing into a
+	 * core command (a bare `o` opening the prompt): it goes to the page. */
+	if (typing)
+		return FALSE;
 
 	/* Escape leaves a focused page field (an autofocused search box, a
 	 * clicked input) so the next key is a command again. Core behaviour,

@@ -1,5 +1,5 @@
 /*
- * test-modal.c - Link-hint configuration through the real modal module
+ * test-modal.c - The real modal module: link hints, modes and insert keys
  * Copyright (C) 2026 Zach Podbielniak
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
@@ -14,7 +14,9 @@
  * asynchronously so modal's nested loop follows the real backend contract. */
 typedef struct {
 	GsurfView parent_instance;
-	gchar *script;
+	gchar *script;      /* the last script run */
+	GString *all;       /* every script run, newline separated */
+	const gchar *reply; /* what a script returns ("0" unless set) */
 } HintView;
 typedef GsurfViewClass HintViewClass;
 
@@ -31,8 +33,11 @@ hint_view_run_async(GsurfView *view, const gchar *script,
 
 	g_free(self->script);
 	self->script = g_strdup(script);
+	if (self->all == NULL)
+		self->all = g_string_new(NULL);
+	g_string_append_printf(self->all, "%s\n", script);
 	/* Zero matches leaves modal in normal mode for the next f/F check. */
-	g_task_return_pointer(task, g_strdup("0"), g_free);
+	g_task_return_pointer(task, g_strdup(self->reply != NULL ? self->reply : "0"), g_free);
 }
 
 /* Transfer the result exactly as a real JavaScript backend would. */
@@ -48,6 +53,8 @@ static void
 hint_view_finalize(GObject *object)
 {
 	g_free(((HintView *)object)->script);
+	if (((HintView *)object)->all != NULL)
+		g_string_free(((HintView *)object)->all, TRUE);
 	G_OBJECT_CLASS(hint_view_parent_class)->finalize(object);
 }
 
@@ -197,6 +204,195 @@ test_hint_c_config(void)
 	g_assert_cmpint(g_rmdir(dir), ==, 0);
 }
 
+/* --- modes and insert keys --- */
+
+#define KEY_ESCAPE (0xff1b)
+
+static gboolean
+key(GsurfModule *module, GsurfView *view, guint keyval)
+{
+	return gsurf_input_handler_handle_key_event(GSURF_INPUT_HANDLER(module), view,
+		keyval, 0, 0, GSURF_MODE_NORMAL);
+}
+
+/* INSERT publishes passthrough to the manager (the host drops bare keys). */
+static gboolean
+inserting(void)
+{
+	return gsurf_module_manager_get_input_passthrough(gsurf_module_manager_get_default());
+}
+
+static void
+configure_yaml(GsurfModule *module, const gchar *yaml)
+{
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_true(gsurf_config_load_from_data(config, yaml, -1, &error));
+	g_assert_no_error(error);
+	gsurf_module_configure(module, config);
+}
+
+/* Both default insert keys enter INSERT; Escape leaves it and blurs the
+ * focused field (the blur script ran and the editing state is cleared). */
+static void
+test_insert_keys_default(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	HintView *hv = (HintView *)view;
+	const guint keys[] = { 'i', 'a' };
+	guint i;
+
+	for (i = 0; i < G_N_ELEMENTS(keys); i++) {
+		g_assert_false(inserting());
+		g_assert_true(key(module, view, keys[i]));
+		g_assert_true(inserting());
+		/* In INSERT every bare key belongs to the page. */
+		g_assert_false(key(module, view, 'o'));
+		g_assert_false(key(module, view, 'j'));
+		g_assert_true(inserting());
+		gsurf_view_set_editing(view, TRUE);
+		g_clear_pointer(&hv->script, g_free);
+		g_assert_true(key(module, view, KEY_ESCAPE));
+		g_assert_false(inserting());
+		g_assert_false(gsurf_view_get_editing(view));
+		g_assert_nonnull(hv->script);
+		g_assert_nonnull(strstr(hv->script, ".blur()"));
+		g_assert_nonnull(strstr(hv->script, "shadowRoot"));
+	}
+
+	/* The actions do the same. */
+	g_assert_true(gsurf_action_handler_handle_action(GSURF_ACTION_HANDLER(module), view,
+		GSURF_ACTION_ENTER_INSERT_MODE));
+	g_assert_true(inserting());
+	g_clear_pointer(&hv->script, g_free);
+	g_assert_true(gsurf_action_handler_handle_action(GSURF_ACTION_HANDLER(module), view,
+		GSURF_ACTION_ENTER_NORMAL_MODE));
+	g_assert_false(inserting());
+	g_assert_nonnull(strstr(hv->script, ".blur()"));
+}
+
+/* With a page field focused (NORMAL), bare keys are typing, never
+ * commands or mode switches; Escape blurs and stays in NORMAL. */
+static void
+test_normal_with_field(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	HintView *hv = (HintView *)view;
+	const guint keys[] = { 'o', 'a', 'i', 'f', 'g', 'j' };
+	guint i;
+
+	gsurf_view_set_editing(view, TRUE);
+	for (i = 0; i < G_N_ELEMENTS(keys); i++) {
+		g_assert_false(key(module, view, keys[i]));
+		g_assert_false(inserting());
+	}
+	g_assert_null(hv->script);
+	g_assert_true(key(module, view, KEY_ESCAPE));
+	g_assert_false(gsurf_view_get_editing(view));
+	g_assert_false(inserting());
+	g_assert_nonnull(strstr(hv->script, ".blur()"));
+	/* Unfocused, `a` is a command again. */
+	g_assert_true(key(module, view, 'a'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+}
+
+static void
+test_insert_keys_config(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+
+	/* A list replaces the defaults. */
+	configure_yaml(module, "modules:\n  modal:\n    insert_keys: [i, I]\n");
+	g_assert_false(key(module, view, 'a'));
+	g_assert_false(inserting());
+	g_assert_true(key(module, view, 'I'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+
+	/* A reconfigure without the option keeps them. */
+	configure_yaml(module, "modules:\n  modal:\n    scroll_step: 10\n");
+	g_assert_true(key(module, view, 'I'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+
+	/* A single name is accepted too. */
+	configure_yaml(module, "modules:\n  modal:\n    insert_keys: a\n");
+	g_assert_false(key(module, view, 'I'));
+	g_assert_true(key(module, view, 'a'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+
+	/* Bad values are reported and change nothing. */
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*insert_keys must be a list*");
+	configure_yaml(module, "modules:\n  modal:\n    insert_keys: {x: 1}\n");
+	g_test_assert_expected_messages();
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING, "*insert_keys: entry 1 is not a key name*");
+	configure_yaml(module, "modules:\n  modal:\n    insert_keys: [i, [x]]\n");
+	g_test_assert_expected_messages();
+	g_assert_true(key(module, view, 'a'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+
+	/* An empty list leaves only the action. */
+	configure_yaml(module, "modules:\n  modal:\n    insert_keys: []\n");
+	g_assert_false(key(module, view, 'a'));
+	g_assert_false(key(module, view, 'i'));
+	g_assert_false(inserting());
+}
+
+/* gi focuses the first field (the page script) and enters INSERT only
+ * when there was one. */
+static void
+test_gi(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	HintView *hv = (HintView *)view;
+
+	hv->reply = "none";
+	g_assert_true(key(module, view, 'g'));
+	g_assert_true(key(module, view, 'i'));
+	g_assert_nonnull(strstr(hv->script, "querySelectorAll"));
+	g_assert_nonnull(strstr(hv->script, "focus()"));
+	g_assert_false(inserting());
+
+	hv->reply = "ok";
+	g_assert_true(key(module, view, 'g'));
+	g_assert_true(key(module, view, 'i'));
+	g_assert_true(inserting());
+	g_assert_true(key(module, view, KEY_ESCAPE));
+	g_assert_false(inserting());
+}
+
+/* The help list follows the configured insert keys and lists gi. */
+static void
+test_keybind_list(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GPtrArray) entries = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_keybind_help_free);
+	gboolean seen_i = FALSE, seen_a = FALSE, seen_gi = FALSE;
+	guint i;
+
+	gsurf_keybind_provider_list_keybinds(GSURF_KEYBIND_PROVIDER(module), entries);
+	for (i = 0; i < entries->len; i++) {
+		GsurfKeybindHelp *e = g_ptr_array_index(entries, i);
+		const gchar *k = gsurf_keybind_help_get_key(e);
+
+		seen_i |= g_strcmp0(k, "i") == 0;
+		seen_a |= g_strcmp0(k, "a") == 0;
+		seen_gi |= g_strcmp0(k, "gi") == 0;
+	}
+	g_assert_true(seen_i);
+	g_assert_true(seen_a);
+	g_assert_true(seen_gi);
+}
+
 /* Isolate crispy's cache from the user's real browser configuration. */
 int
 main(int argc, char **argv)
@@ -211,6 +407,11 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/modal/hint-yaml", test_hint_yaml);
 	g_test_add_func("/gsurf/modal/hint-invalid", test_hint_invalid);
 	g_test_add_func("/gsurf/modal/hint-c-config", test_hint_c_config);
+	g_test_add_func("/gsurf/modal/insert-keys-default", test_insert_keys_default);
+	g_test_add_func("/gsurf/modal/normal-with-field", test_normal_with_field);
+	g_test_add_func("/gsurf/modal/insert-keys-config", test_insert_keys_config);
+	g_test_add_func("/gsurf/modal/gi", test_gi);
+	g_test_add_func("/gsurf/modal/keybind-list", test_keybind_list);
 	result = g_test_run();
 	/* The C config compiler may leave more than gsurf/cconfig behind (a
 	 * ccache-wrapped gcc writes $XDG_CACHE_HOME/ccache), so remove the

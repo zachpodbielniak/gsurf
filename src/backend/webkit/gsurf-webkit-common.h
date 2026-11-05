@@ -56,6 +56,21 @@ void gsurf_webkit_common_mouse_target(GsurfView *view, WebKitHitTestResult *hit)
  * popup and return its native widget (or %NULL to block it). */
 GtkWidget *gsurf_webkit_common_create(GsurfView *view, WebKitNavigationAction *action);
 
+/* The focus tracker content script (document start, every frame). Each
+ * frame posts {f: frame token, t: is top frame, e: editable focused} to
+ * the "gsurfFocus" message handler whenever focus moves inside it; see
+ * gsurf_webkit_common_focus_message(). */
+extern const gchar gsurf_webkit_focus_tracker_js[];
+
+/* Fold one "gsurfFocus" message from any frame of @view into its
+ * editing state (gsurf_view_set_editing()). Only one element is focused
+ * at a time, so an editable report from any frame wins; a "not editable"
+ * report clears the state only when it comes from the top frame (focus
+ * is not in a subframe, else the top frame stays silent) or from the
+ * frame that reported the focused field. A late report from a frame
+ * focus has already left can therefore not override the current one. */
+void gsurf_webkit_common_focus_message(GsurfView *view, JSCValue *value);
+
 G_END_DECLS
 
 #endif
