@@ -117,8 +117,8 @@ static const gchar *gsurf_bookmarks_get_description(GsurfModule *m)
 static gchar *
 expand(const gchar *p)
 {
-	return (p && p[0] == '~' && p[1] == '/')
-		? g_build_filename(g_get_home_dir(), p + 2, NULL) : g_strdup(p);
+	/* "~/" and relative paths (against the launch directory). */
+	return gsurf_resolve_path(p);
 }
 
 static void

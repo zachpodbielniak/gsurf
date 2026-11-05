@@ -46,10 +46,14 @@ gsurf about:blank
 | =GSURF_MODULE_PATH=  | Directory to load modules from (overrides default) |
 | =GSURF_CONFIG_C=     | Path to a C config file                            |
 | =XDG_CONFIG_HOME=    | Base for =gsurf/config.yaml= and =config.c=        |
-| =XDG_RUNTIME_DIR=    | Where the MCP module's Unix socket is created      |
+| =XDG_RUNTIME_DIR=    | Holds =gsurf/<pid>-XXXXXX/=, the process's private runtime directory (temporary containers, working directory), and the MCP module's Unix socket |
 | =GSURF_GVFS=         | FreeBSD only: =1= keeps GIO's GVfs module          |
 
 On FreeBSD gsurf sets =GIO_USE_VFS=local= for itself before anything uses GIO (unless =GIO_USE_VFS= is already set or =GSURF_GVFS=1=). With GIO's GVfs client module active, the FreeBSD packages of gvfs 1.58, WebKitGTK 4.1 (2.46) and GLib 2.88 overwrite GTK's type data in any process that shows a =WebKitWebView= -- a minimal GTK program with only a web view too: gsurf showed a blank window and a stream of GTK criticals, and crashed outright with the AT-SPI accessibility bridge loaded. gsurf needs no GVfs mounts (=sftp://=, =smb://=, trash), and accessibility works.
+
+* Working directory
+
+After parsing its options gsurf changes its working directory to its private runtime directory, =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX= (0700, removed at exit). WebKit's helper processes inherit the working directory, and some engine paths write files relative to it, so nothing can land in the directory gsurf was started from. Everything you give relative to that /launch directory/ still resolves against it: the URI argument (=gsurf page.html=), =--config= and =--c-config=, =$GSURF_MODULE_PATH=, relative paths in the config files (=cookie_jar=, =data_dir=, =cache_dir=, module files and directories such as =downloads.dir=), and a relative path typed into the address bar. If the runtime directory cannot be created, gsurf warns and stays where it was started.
 
 * Kiosk and PWA launchers
 

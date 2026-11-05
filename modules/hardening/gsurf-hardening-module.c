@@ -127,7 +127,7 @@ find_webext(GsurfHardeningModule *self)
 	dir = g_path_get_dirname(info.dli_fname);
 	path = g_build_filename(dir, GSURF_HARDENING_WEBEXT_SUBDIR, GSURF_HARDENING_WEBEXT_NAME, NULL);
 	if (!g_path_is_absolute(path)) {
-		g_autofree gchar *cwd = g_get_current_dir();
+		g_autofree gchar *cwd = gsurf_get_launch_dir();
 		gchar *absolute = g_build_filename(cwd, path, NULL);
 
 		g_free(path);
@@ -169,9 +169,8 @@ expand_path(const gchar *path)
 {
 	if (path == NULL || *path == '\0')
 		return NULL;
-	if (path[0] == '~' && (path[1] == '/' || path[1] == '\0'))
-		return g_build_filename(g_get_home_dir(), path + 1, NULL);
-	return g_strdup(path);
+	/* "~", "~/" and relative paths (against the launch directory). */
+	return gsurf_resolve_path(path);
 }
 
 /* `strip_params:` — a sequence of glob names; `[]` strips nothing. */

@@ -77,6 +77,7 @@
 #include "util/gsurf-pwa.h"
 #include "util/gsurf-host-rules.h"
 #include "util/gsurf-private-file.h"
+#include "util/gsurf-runtime-dir.h"
 
 #undef GSURF_INSIDE
 

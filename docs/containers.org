@@ -11,7 +11,7 @@ There are three kinds:
 |------------+------------------+----------------------------------------------------------+------------------------------------------------|
 | default    | none (=NULL=)    | the engine's default session and the =cookie_jar:= file  | the whole run; what gsurf used before containers |
 | persistent | e.g. =media=     | =$XDG_DATA_HOME/gsurf/containers/<id>/= (0700), cache in =$XDG_CACHE_HOME/gsurf/containers/<id>/= | defined by the config, kept on disk between runs |
-| temporary  | =tmp-1=, =tmp-2=, … | in memory only (ephemeral session)                     | removed =temp_cleanup_delay= seconds after its last tab closes |
+| temporary  | =tmp-1=, =tmp-2=, … | private runtime dir (tmpfs), deleted with the container | removed =temp_cleanup_delay= seconds after its last tab closes |
 
 The mechanism (sessions, isolation, the registry) is core: =GsurfContainerRegistry= in =src/core/= (see [[file:architecture.org][architecture.org]], "Containers"). The *policy* — which container a tab uses — is the =containers= module described here. With the module disabled every tab uses the default container, exactly as before, unless something asks for a container explicitly (the MCP =open_view= tool, session restore, an embedding host).
 
@@ -115,7 +115,7 @@ Iframes are never moved: an embedded YouTube player on another site loads in tha
 
 * Temporary containers
 
-A temporary container is created for each tab placed by =new_tab: temporary= and by =container-new-temp=; tabs opened from it (=inherit_opener=) share it. Its session is ephemeral: nothing is written to disk. It is removed =temp_cleanup_delay= seconds after its last tab closes (or once the delay passed if no tab ever used it); until then a tab that asks for its id explicitly can still join it. Ids are =tmp-1=, =tmp-2=, … and are never reused within a run.
+A temporary container is created for each tab placed by =new_tab: temporary= and by =container-new-temp=; tabs opened from it (=inherit_opener=) share it. Its profile (cookies, local storage, IndexedDB with its Blob files, cache) lives in a private directory of this gsurf process, =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/temp/<id>/{data,cache}= (0700; =$XDG_RUNTIME_DIR= is a per-user tmpfs on systemd hosts), and never anywhere else: the directory is deleted when the container is removed, the whole process directory when gsurf exits (also on =SIGINT=, =SIGTERM= and =SIGHUP=), and the directory of a gsurf that crashed or was killed by the next gsurf that starts. Each temporary container has its own directory, so two temporary containers never share storage with each other or with persistent ones, and the hardening module's tracking prevention and cookie policy apply to them as to every session. It is removed =temp_cleanup_delay= seconds after its last tab closes (or once the delay passed if no tab ever used it); until then a tab that asks for its id explicitly can still join it. Ids are =tmp-1=, =tmp-2=, … and are never reused within a run.
 
 * Actions and keys
 
@@ -135,9 +135,13 @@ To pick a specific container for a tab instead of cycling, right-click the tab i
 | persistent container profile | =$XDG_DATA_HOME/gsurf/containers/<id>/= (0700): cookies in =cookies.sqlite=, local storage, IndexedDB, … |
 | persistent container cache   | =$XDG_CACHE_HOME/gsurf/containers/<id>/= (0700) |
 | default container            | the engine default, with cookies in the =cookie_jar:= file |
-| temporary containers         | memory only |
+| temporary containers         | =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/temp/<id>/= (0700), deleted with the container and at exit |
 
 Removing a container from the configuration keeps its directories; delete them by hand to forget its data.
+
+** Why temporary containers are not ephemeral sessions
+
+Up to v0.4.0 temporary containers used WebKit's ephemeral sessions (=webkit_network_session_new_ephemeral()=, =webkit_web_context_new_ephemeral()=). WebKitGTK 2.54 gives such a session no IndexedDB directory, so a Blob stored in IndexedDB was linked to the relative path =1.blob=, i.e. into the directory gsurf was started from (a privacy leak that outlived the session), and every database restarts that counter, so the next blob failed with =EEXIST= (or the store failed outright with "Error preparing Blob/File data to be stored in object store"). A normal session over private directories in the runtime directory stores blobs like a persistent container, and deleting the directory gives the same "nothing survives" guarantee. Only when that directory cannot be made does a temporary container fall back to an ephemeral session (with a warning).
 
 * MCP
 
