@@ -12,7 +12,7 @@
 #include <gsurf.h>
 #include <glib.h>
 #include <glib/gstdio.h>
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
 #include <string.h>
 
 /* Headless view records injected overlay scripts at the public JS boundary. */
