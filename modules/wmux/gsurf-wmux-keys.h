@@ -24,8 +24,8 @@
  *     so a config key naming it is an error and an event with Super held
  *     has no wmux name and passes through.
  *
- * Pure GLib: the keyvals come from <gdk/gdkkeysyms.h>, which is only
- * #defines. Module-private (hidden symbols) and compiled straight into
+ * GLib plus the GDK keyval #defines, taken from <gdk/gdk.h> (GTK 4.24
+ * refuses a direct <gdk/gdkkeysyms.h>). Module-private (hidden symbols) and compiled straight into
  * tests/test-wmux-keys.c.
  */
 

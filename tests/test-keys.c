@@ -8,7 +8,7 @@
 #include <gsurf.h>
 #include <glib.h>
 #include <gdk/gdk.h>
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
 
 static void
 test_to_string(void)

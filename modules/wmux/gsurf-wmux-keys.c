@@ -14,7 +14,7 @@
 #include "gsurf-wmux-keys.h"
 
 #include <string.h>
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
 
 /* GDK modifier bits, hard-coded so this file needs no GDK headers beyond
  * the keysym #defines. The values are identical in GTK3 (gdktypes.h) and
