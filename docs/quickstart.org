@@ -17,6 +17,7 @@ Optional builds:
 #+begin_src sh
 make MCP=1                 # build the MCP server module
 make GTK_BACKEND=gtk4      # WebKitGTK 6.0 / GTK4 (needs webkitgtk-6.0)
+make LRG_BACKEND=1         # add the libregnum/raylib backend (gsurf --lrg)
 make DEBUG=1               # debug symbols, -O0
 make test                  # run the test suite
 sudo make install          # install to /usr/local
@@ -30,6 +31,22 @@ make DEBUG=1 clean all -j
 #+end_src
 
 When =clean= or =clean-all= is combined with other goals, cleaning finishes first and a fresh make invocation runs the remaining goals with the same options and parallelism. Goal order does not matter; =make all clean -j= also cleans first. This coordinates goals within one invocation, not separate make processes sharing a checkout.
+
+** The libregnum (LRG) backend
+
+=LRG_BACKEND=1= adds the libregnum/raylib backend (=gsurf --lrg=) next to the GTK one. It needs graylib, which comes from the bundled =deps/libregnum= submodule (so check out submodules recursively), from a sibling =../libregnum=, or from an explicit =LIBREGNUM_DIR=<path>=:
+
+#+begin_src sh
+git submodule update --init --recursive
+make LRG_BACKEND=1                                  # bundled deps/libregnum
+make LRG_BACKEND=1 LIBREGNUM_DIR=../libregnum       # a libregnum you already built
+#+end_src
+
+- *Only graylib is built.* When graylib's archives are missing, make builds graylib (not all of libregnum) before compiling the LRG sources, since =graylib.h= includes the generated =grl-version.h=. An existing build at =LIBREGNUM_DIR= is used as is and never rebuilt.
+- *Missing graylib is an error.* =LRG_BACKEND=1= with no =graylib.h= at the resolved location stops with a message naming the path, rather than quietly building without the backend.
+- *Switching needs no clean.* The build configuration (backends, =LIBREGNUM_DIR=, compiler flags) is recorded in =build/<mode>/obj/.build-flags=; changing it rebuilds everything once, so =make= and =make LRG_BACKEND=1= can alternate in one tree.
+- *Regression test.* =tests/test-build-config.sh= (run by =make test=, or alone with =make test-build=) checks the graylib build order and flags, the missing-graylib error and the configuration stamp against a stub libregnum under =build/build-config-test/=, without compiling anything.
+- *Extra packages.* On top of the GTK build, raylib needs the X11/GL development headers (Fedora: =mesa-libGL-devel=, =libX11-devel=, =libXrandr-devel=, =libXinerama-devel=, =libXcursor-devel=, =libXi-devel=; plus =wayland-devel=, =libxkbcommon-devel= for graylib's optional Wayland support) and =fontconfig-devel=.
 
 * FreeBSD
 
