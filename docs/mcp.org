@@ -3,10 +3,11 @@
 
 * Overview
 
-The =mcp= module exposes the browser as an [[https://modelcontextprotocol.io][MCP]] server so AI agents can drive
-it. It is built only with =make MCP=1= (requires =libsoup-3.0=, =libdex-1=,
-=libpng= via [[file:../deps/mcp-glib][mcp-glib]]) and is disabled until enabled in config. Every tool
-defaults *off* and must be turned on individually.
+The =mcp= module exposes the browser as an [[https://modelcontextprotocol.io][MCP]] server so AI agents can drive it. It is built only with =make MCP=1= (requires =libsoup-3.0=, =libdex-1=, =libpng= via [[file:../deps/mcp-glib][mcp-glib]]) and is disabled until enabled in config. Every tool defaults *off* and must be turned on individually.
+
+Since 0.4.4 the server reaches everything the 0.4.0–0.4.3 features added: views by stable id, the tab tree (children, re-parenting, collapse, grouping by wmux window), containers (listing with host rules, reopening in place, temporary containers), the =wmux= pane multiplexer (status, windows, panes with geometry, any command of its command language, and convenience tools for splits, selection, zoom, layouts, windows and the drag-a-tab-onto-a-pane drop), the =modal= input modes, and any keybind action by name (=run_action=), so features added later are reachable too.
+
+The module never links against =wmux=, =tabs= or =modal=. It goes through public core seams only (see "Core seams"), so a different window layout or tab tree implementing the same interfaces is driven the same way.
 
 * Enabling
 
@@ -23,34 +24,451 @@ modules:
       navigate: true
       get_page_text: true
       list_views: true
+      get_tab_tree: true
+      wmux_status: true
+      list_panes: true
+      split_pane: true
+      wmux_command: true            # any wmux command line
+      # run_action: true            # any keybind action; enable deliberately
       # execute_javascript: true    # powerful; enable deliberately
 #+end_src
 
-On activation the module prints the socket path it is listening on.
+On activation the module prints the socket path it is listening on. =data/default-config.yaml= lists every tool (all =false=). A reconfigure (=configure()= again) applies the new flags to the next session and to in-process calls at once.
 
-* Tools
+* Concepts
 
-| Tool                  | Args                  | Description                                  |
-|-----------------------+-----------------------+----------------------------------------------|
-| =navigate=            | =uri=                 | Load a URI in the active view                |
-| =get_current_uri=     | —                     | Current URI                                  |
-| =get_title=           | —                     | Current page title                           |
-| =go_back= / =go_forward= | —                  | History navigation                           |
-| =reload=              | =bypass_cache?=       | Reload the active view                       |
-| =stop=                | —                     | Stop loading                                 |
-| =get_page_text=       | —                     | Rendered =innerText= of the page             |
-| =get_page_html=       | —                     | Full serialized HTML                         |
-| =get_links=           | —                     | JSON array of ={text, href}=                 |
-| =execute_javascript=  | =code=                | Run JS in the page, return the result        |
-| =scroll=              | =direction=           | up / down / top / bottom                     |
-| =list_views=          | —                     | JSON of open views/tabs: =index=, =uri=, =title=, =active=, =id= (stable), =opener_id= (0 = none), =container= (null = default) |
-| =open_view=           | =uri=, =container=    | Open a view; =container= is a container id, =temporary= (a new temporary container) or =default=; without it the =containers= policy places the view (host rules, new-tab policy); returns its index |
+** Views by stable id
 
-Content/scripting tools run JavaScript synchronously via a nested main loop so
-the MCP handler can return the result.
+Every view has a process-unique id that never changes and is never reused (=gsurf_view_get_id()=). Tools take it as =view= (and =parent=, =before=, =after=, =target= where a second view is meant); =list_views= and every tool returning a view report it as =id=. Positions (=index=) change whenever tabs open, close or move; the original tools keep their =index= argument for backward compatibility, but agents should use ids.
+
+The page tools (=navigate=, =get_current_uri=, =get_title=, =go_back=, =go_forward=, =reload=, =stop=, =get_page_text=, =get_page_html=, =get_links=, =execute_javascript=, =scroll=, =find_text=, =click_link=, =screenshot=, =save_screenshot=, =get_cookies=) act on the active view unless given =view= (or =index=).
+
+Only views of the active window are addressable (gsurf runs one window per process). =reopen_in_container= replaces a view: the old id is gone afterwards and the result carries the new one.
+
+** Numbers and booleans
+
+Arguments are read leniently because models are not consistent: an integer may be sent as =3=, =3.0= or ="3"=; a boolean as =true= / =false= or ="true"= / ="false"= / ="1"= / ="0"=. Anything else fails with ='view' must be an integer= (or =... a boolean=).
+
+** Results and errors
+
+The original tools return plain text (="ok"=, a URI, an index). The tools added in 0.4.4 return JSON (as the text of the result). A failure is an MCP error result whose text says what went wrong and, where it helps, what to do:
+
+| Situation | Error text (examples) |
+|-----------+------------------------|
+| no window yet | =no active window= |
+| unknown view | =unknown view 42 (no such view in the active window; list_views gives the ids)= |
+| bad index | =index 7 out of range (the window has 3 views)= |
+| wmux not running | =no window layout is installed: enable the wmux module (modules.wmux.enabled: true) to get panes and windows= |
+| kiosk mode | =kiosk mode: opening or reopening views is not allowed=, =action 'open-prompt' is not allowed in kiosk mode=, =kiosk mode shows a single view: wmux stays inactive= |
+| a wmux command fails | the command, then wmux's own message: =select-pane -t 9: select-pane: can't find pane 9 (the window has 2)= |
+| a wmux command does not parse | wmux's parse error: =position 0: unknown command "frobnicate"= |
+| no tab tree | =re-parenting needs a tab tree: enable the tabs module (modules.tabs.enabled: true)= |
+| no modal module | =input modes need the modal module (modules.modal.enabled: true)= |
+| unknown names | =unknown action 'fly' (list_actions gives the names)=, =unknown container 'x' (list_containers gives the ids; "temporary" and "default" are always accepted)= |
+
+Tools that change wmux panes or windows return the current wmux window's panes afterwards (the =list_panes= result), so an agent sees the effect without another call.
+
+* Tool reference
+
+** Page and navigation (original tools)
+
+| Tool | Args | Description |
+|------+------+-------------|
+| =navigate= | =uri=, =view?= | Load a URI |
+| =get_current_uri= | =view?= | Current URI |
+| =get_title= | =view?= | Page title |
+| =go_back= / =go_forward= | =view?= | History navigation |
+| =reload= | =bypass_cache?=, =view?= | Reload |
+| =stop= | =view?= | Stop loading |
+| =get_page_text= | =view?= | Rendered =innerText= of the page |
+| =get_page_html= | =view?= | Full serialized HTML |
+| =get_links= | =view?= | JSON array of ={text, href}= |
+| =execute_javascript= | =code=, =view?= | Run JS in the page, return the result |
+| =scroll= | =direction=, =view?= | up / down / top / bottom |
+| =find_text= | =text=, =backward?=, =view?= | Find in page |
+| =click_link= | =index?= or =selector?=, =view?= | Click a link |
+| =screenshot= / =save_screenshot= | (=path=), =view?= | PNG of the visible page |
+| =get_history= | =limit?= | Recent history lines |
+| =get_cookies= | =view?= | =document.cookie= |
+| =get_config= / =set_config= | (=key=, =value=) | Browser configuration |
+| =set_setting= | =key=, =value= | Web-engine setting, applied to the active view |
+| =list_modules= / =toggle_module= | (=name=, =enabled?=) | Modules |
+
+Content/scripting tools run JavaScript synchronously via a nested main loop so the MCP handler can return the result.
+
+** Views
+
+| Tool | Args | Returns |
+|------+------+---------|
+| =list_views= | — | array of view objects |
+| =switch_view= | =view= or =index= | ="ok"= |
+| =open_view= | =uri?=, =container?= | the new view's index (text) |
+| =close_view= | =view= or =index= | ="ok"=; the last view cannot close |
+| =open_child_view= | =parent?=, =uri?=, =background?=, =container?= | the new view object |
+
+A *view object* (=list_views= elements and every tool that returns a view):
+
+| Member | Meaning |
+|--------+---------|
+| =index= | position in the window |
+| =id= | stable id |
+| =uri=, =title= | page |
+| =active= | the focused view (the active wmux pane's view) |
+| =visible= | on screen (in a pane of the current wmux window, not hidden by a zoom); without wmux only the active view |
+| =opener_id= | the view it was opened from, 0 for none (fixed for its life) |
+| =parent_id= | its parent in the tab tree, 0 for a root (follows closes, promotions and moves) |
+| =container= | container id, =null= for the default container |
+| =container_name=, =container_color=, =container_temporary= | the container's decoration (=null= / =false= for the default) |
+| =pane= | =null=, or ={"window": <wmux window index>, "index": <pane index>}= of the pane showing it |
+
+#+begin_src json
+// list_views {}
+[{"index":0,"id":1,"uri":"https://example.org/","title":"Example","active":true,"visible":true,
+  "opener_id":0,"parent_id":0,"container":null,"container_name":null,"container_color":null,
+  "container_temporary":false,"pane":{"window":0,"index":0}},
+ {"index":1,"id":4,"uri":"https://example.org/docs","title":"Docs","active":false,"visible":false,
+  "opener_id":1,"parent_id":1,"container":"media","container_name":"Media",
+  "container_color":"#f9e2af","container_temporary":false,"pane":null}]
+#+end_src
+
+=open_view= opens a root view and focuses it; it is refused in kiosk mode (since 0.4.4). =container= is a container id, =temporary= (a new temporary container) or =default=; without it the =containers= policy places the view (host rules, new-tab policy).
+
+=open_child_view= opens a view whose opener is =parent= (default: the active view): the =tabs= module places it after the parent's subtree as its last child, and the =containers= policy puts it in the parent's container unless a host rule or =container= says otherwise. With =background: true= the current view keeps the focus (with wmux the child takes no pane: it is a background tab). Refused in kiosk mode.
+
+#+begin_src json
+// open_child_view {"parent": 1, "uri": "https://example.org/a", "background": true}
+{"index":1,"id":7,"uri":"https://example.org/a","title":"","active":false,"visible":false,
+ "opener_id":1,"parent_id":1,"container":null,"container_name":null,"container_color":null,
+ "container_temporary":false,"pane":null}
+#+end_src
+
+** Tab tree
+
+| Tool | Args | Returns |
+|------+------+---------|
+| =get_tab_tree= | — | the tree, and the wmux grouping |
+| =move_view= | =view=, exactly one of =parent=, =before=, =after=, =index= | the moved view object |
+| =set_collapsed= | =view=, =collapsed?= (default =true=) | the view object |
+
+=get_tab_tree= returns:
+
+- =has_tree_provider=: whether a module provides the tree (the =tabs= module). Without one the tree is derived from the openers exactly as =tabs.org= describes ("Where the tree comes from"), and nothing is collapsed;
+- =tree=: the roots in window order; each node is a view object plus =collapsed= and =children= (nodes, in window order);
+- =grouped=: =true= when the window layout has groups (wmux windows);
+- =groups=: =null=, or one object per wmux window, as the tabs sidebar shows it: =index=, =name=, =current=, =background: false= and =tabs= (the tabs its panes show in pane order, each with =pane_index= and, as =children=, its descendants that no pane shows); then, when there are any, a group with =index: null=, =background: true= and the tabs module's =background_label= (default =Background=) holding the background tabs under no pane tab.
+
+#+begin_src json
+// get_tab_tree {}
+{"has_tree_provider":true,
+ "tree":[{"index":0,"id":1,"title":"Example",...,"collapsed":false,"children":[
+           {"index":1,"id":7,"title":"A",...,"collapsed":false,"children":[]}]},
+         {"index":2,"id":9,"title":"Temp",...,"collapsed":false,"children":[]}],
+ "grouped":true,
+ "groups":[{"index":0,"name":"Example","current":true,"background":false,"tabs":[
+             {"index":0,"id":1,...,"pane_index":0,"collapsed":false,"children":[
+               {"index":1,"id":7,...,"children":[]}]}]},
+           {"index":null,"name":"Background","current":false,"background":true,"tabs":[
+             {"index":2,"id":9,...,"children":[]}]}]}
+#+end_src
+
+=move_view= moves a view with its subtree:
+
+- =parent=: becomes that view's last child; =parent: 0= makes it a root at the end of the window. Needs the =tabs= module;
+- =before= / =after=: becomes that view's sibling, right before it or after its whole subtree (like the sidebar's drop zones). Without the =tabs= module these are plain window reorders;
+- =index=: a window position (=gsurf_window_move_view()=); the tree is re-derived from the new order.
+
+A view cannot move into its own subtree or relative to itself; the window order always follows.
+
+#+begin_src json
+// move_view {"view": 9, "parent": 1}
+{"index":2,"id":9,...,"opener_id":0,"parent_id":1,...}
+// move_view {"view": 1, "parent": 9}
+error: cannot move view 1 under view 9 (a view cannot move into its own subtree)
+#+end_src
+
+=set_collapsed= hides (=true=) or shows (=false=) a view's descendants in the sidebar, like its twisty; the descendants keep loading. Collapsing a subtree that holds the active tab activates the collapsed tab. Fails for a view without children and without the =tabs= module.
+
+#+begin_src json
+// set_collapsed {"view": 1}
+{"index":0,"id":1,...,"parent_id":0,...}
+// set_collapsed {"view": 7}
+error: view 7 has no children to collapse
+#+end_src
+
+** Containers
+
+| Tool | Args | Returns |
+|------+------+---------|
+| =list_containers= | — | array of containers |
+| =reopen_in_container= | =view?=, =container= | the new view object |
+| =new_temporary_container_view= | =uri?=, =background?= | the new view object |
+
+=list_containers= lists the default container first (=id: "default"=, =n_views= counted in the active window), then every container of the registry (persistent ones in configuration order, then temporary ones): =id=, =name=, =color=, =temporary=, =default=, =n_views= (live views using it), =rules= (the host regular expressions the =containers= module's configuration assigns to it) and =rules_active= (the =containers= module is running, so the rules are applied).
+
+#+begin_src json
+// list_containers {}
+[{"id":"default","name":"Default","color":null,"temporary":false,"default":true,"n_views":2,
+  "rules":[],"rules_active":true},
+ {"id":"media","name":"Media","color":"#f9e2af","temporary":false,"default":false,"n_views":1,
+  "rules":["(^|\\.)youtube\\.com$"],"rules_active":true},
+ {"id":"tmp-3","name":"Temporary 3","color":"#89b4fa","temporary":true,"default":false,
+  "n_views":1,"rules":[],"rules_active":true}]
+#+end_src
+
+=reopen_in_container= reopens a view's page in another container (=gsurf_window_reopen_view()=): the new view takes the old one's place in the window and the tree, its opener, children, collapse state, wmux pane and focus; the old view closes. The page loads in the new container's cookie jar; back/forward history does not carry over. =container= is an id from =list_containers=, =temporary= or =default=. Refused in kiosk mode.
+
+#+begin_src json
+// reopen_in_container {"view": 1, "container": "media"}
+{"index":0,"id":12,"uri":"https://example.org/","title":"",...,"container":"media",
+ "container_name":"Media","container_color":"#f9e2af","container_temporary":false,
+ "pane":{"window":0,"index":0}}
+#+end_src
+
+=new_temporary_container_view= opens a root view in a fresh temporary container (its own cookies and storage, deleted after its last view closes). =open_view= with =container: "temporary"= does the same but returns only the index.
+
+#+begin_src json
+// new_temporary_container_view {"uri": "https://example.org/", "background": true}
+{"index":3,"id":13,...,"container":"tmp-4","container_name":"Temporary 4",
+ "container_color":"#89b4fa","container_temporary":true,"pane":null}
+#+end_src
+
+** Modes and actions
+
+| Tool | Args | Returns |
+|------+------+---------|
+| =get_mode= | — | the mode object |
+| =set_mode= | =mode= (=normal= / =insert=), =view?= | the mode object |
+| =follow_hints= | =new_view?=, =view?= | the mode object |
+| =run_action= | =action=, =view?= | ={"action": <name>, "performed": true}= |
+| =list_actions= | — | array of ={name, allowed}= |
+
+The mode object: =mode= (=normal=, =insert=, =follow=, =find=, =passthrough=; the nick of =GsurfModePolicy=), =label= (=NORMAL=, ...), =passthrough= (bare keys go to the page) and =modal_active= (the =modal= module owns the modes; without it the mode stays =normal=).
+
+#+begin_src json
+// set_mode {"mode": "insert"}
+{"mode":"insert","label":"INSERT","passthrough":true,"modal_active":true}
+// follow_hints {}
+{"mode":"follow","label":"FOLLOW","passthrough":false,"modal_active":true}
+#+end_src
+
+=set_mode= performs =enter-normal-mode= / =enter-insert-mode= and checks that the mode changed. =follow_hints= performs =follow-hints= (or =follow-hints-new-view=): the page shows link hints and waits for the user's keys; =set_mode normal= cancels them.
+
+=run_action= performs any =GsurfAction= by name exactly as its key binding would (=gsurf_module_manager_execute_action()=): the gsurf binary's built-in actions (back, forward, reload, zoom, scroll, fullscreen, quit, show keybinds, ...) and every module's (=tab-*=, =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-up=, =container-new-temp=, =container-reopen-next=, =pane-split-right=, =pane-split-down=, =dark-mode-toggle=, =form-autofill=, =find=, =open-prompt=, ...). Names are the keybind action strings (=list_actions=); underscores are accepted for dashes. Kiosk mode refuses the actions it refuses on the keyboard (=gsurf_kiosk_allows_action()=) before anything runs. An action nothing performs (no host implementation and no module claiming it, e.g. a module that is not loaded) is an error. =toggle-setting= and =module= need arguments a name cannot carry and are not performed.
+
+#+begin_src json
+// run_action {"action": "tab-sidebar-toggle"}
+{"action":"tab-sidebar-toggle","performed":true}
+// run_action {"action": "open-prompt"}   (kiosk mode)
+error: action 'open-prompt' is not allowed in kiosk mode
+// list_actions {}
+[{"name":"back","allowed":true},{"name":"forward","allowed":true},...,
+ {"name":"pane-split-right","allowed":true},{"name":"open-new-view-background","allowed":true}]
+#+end_src
+
+** wmux: status, windows and panes
+
+| Tool | Args | Returns |
+|------+------+---------|
+| =wmux_status= | — | status object |
+| =list_wmux_windows= | — | array of windows |
+| =list_panes= | =window?= | the panes of a wmux window |
+| =wmux_command= | =command= | the current window's panes |
+
+=wmux_status= never fails: =loaded= (wmux.so is loaded), =enabled= (the module is active), =active= (its layout is installed in the window), =kiosk=, and what the layout says about itself (=gsurf_window_layout_describe()=): =name= (=wmux=), =prefix= (the prefix key in gsurf notation, e.g. =Ctrl+b=), =status= (status line shown), =mouse=, =width= / =height= (the pane area in pixels), =windows= (count) and =current= (index).
+
+#+begin_src json
+// wmux_status {}
+{"loaded":true,"enabled":true,"active":true,"kiosk":false,"name":"wmux","prefix":"Ctrl+b",
+ "status":true,"mouse":true,"width":1000,"height":652,"windows":2,"current":0}
+#+end_src
+
+=list_wmux_windows= lists the wmux windows (tmux-style windows: each its own arrangement of panes): =index=, =name= (as the status line shows it), =current=, =last= (the previously current one, what =last-window= selects), =zoomed= and =panes=.
+
+=list_panes= returns one wmux window (default: the current one) as ={window, name, current, zoomed, panes}=. Each pane:
+
+| Member | Meaning |
+|--------+---------|
+| =index= | its position in the window's pane order (left to right, top to bottom): what =pane= means in the other tools and =select-pane -t= takes |
+| =id= | wmux's id for the pane, stable while it lives |
+| =view= | the id of the view it shows (=null= for none) |
+| =uri=, =title= | that view's page |
+| =active= | the window's active pane |
+| =focused= | its view is the window's focused view |
+| =zoomed= | it fills the window (=resize-pane -Z=) |
+| =visible= | on screen now (current window, not hidden by another pane's zoom) |
+| =rect= | ={x, y, width, height}= in pixels of the pane area (the unzoomed arrangement; a zoomed pane gets the whole area); 0 before the window is allocated |
+| =fraction= | the same rectangle as fractions (0..1) of the area, independent of window size and gaps |
+
+#+begin_src json
+// list_panes {}
+{"window":0,"name":"Example","current":true,"zoomed":false,"panes":[
+  {"index":0,"id":0,"view":1,"uri":"https://example.org/","title":"Example","active":false,
+   "focused":false,"zoomed":false,"visible":true,
+   "rect":{"x":0,"y":0,"width":499,"height":652},
+   "fraction":{"x":0.0,"y":0.0,"width":0.5,"height":1.0}},
+  {"index":1,"id":1,"view":7,"uri":"https://example.org/a","title":"A","active":true,
+   "focused":true,"zoomed":false,"visible":true,
+   "rect":{"x":501,"y":0,"width":499,"height":652},
+   "fraction":{"x":0.5,"y":0.0,"width":0.5,"height":1.0}}]}
+#+end_src
+
+=wmux_command= runs one line of wmux's command language, exactly as typed at the =C-b := prompt (=gsurf_window_layout_run_command()=): any command of [[file:wmux.org][wmux.org]], "Command reference" (=split-window=, =select-pane=, =last-pane=, =kill-pane=, =resize-pane=, =swap-pane=, =rotate-window=, =select-layout=, =next-layout=, =break-pane=, =new-window=, =next-window=, =previous-window=, =last-window=, =select-window=, =kill-window=, =rename-window=, ...). A line that does not parse fails with wmux's positioned parse error; a command that cannot be carried out (an unknown pane or window, no last pane or window, a split below =min_pane_pct=, =break-pane= of a lone pane) fails with the message wmux would show in its status line. Interactive commands (=command-prompt=, =confirm-before=, =choose-tree=, =display-panes=) open their UI for the user and return at once.
+
+#+begin_src json
+// wmux_command {"command": "resize-pane -R 10"}
+{"window":0,"name":"Example","current":true,"zoomed":false,"panes":[...]}
+// wmux_command {"command": "select-window -t 4"}
+error: select-window: can't find window 4 (there are 2)
+// wmux_command {"command": "spilt-window"}
+error: position 0: unknown command "spilt-window"
+#+end_src
+
+** wmux: convenience tools
+
+Each is a thin wrapper over the command language (or the drop and rename seams), with errors and results as above. Tools that address a pane take =pane= (an index in the window =window=, default the current one), or =view= (the pane showing that view, in whichever wmux window: that window is selected first); with neither they act on the active pane. Addressing a pane selects it, as the same keys would.
+
+| Tool | Args | Command(s) |
+|------+------+------------|
+| =split_pane= | =direction?= (=right= default, =left=, =down=, =up=), =uri?=, =duplicate?=, =ratio?=, =background?=, =pane?= / =view?= / =window?= | =split-window -h= / =-v=, =-b= for left/up, =-d=, =-c=, =-p N=, the URI |
+| =select_pane= | =direction?=, =last?=, =pane?= / =view?= / =window?= | =select-pane -L= / =-R= / =-U= / =-D=, =last-pane=, =select-pane -t N= |
+| =kill_pane= | =pane?= / =view?= / =window?= | =kill-pane= |
+| =zoom_pane= | =zoomed?= (default: toggle), =pane?= / =view?= / =window?= | =resize-pane -Z= when the state differs |
+| =select_layout= | =name=: =even-horizontal=, =even-vertical=, =main-horizontal=, =main-vertical=, =tiled=, =next=, =even= | =select-layout NAME=, =next-layout=, =select-layout -E= |
+| =show_view_in_pane= | =view=, =pane= (+ =window=) or =target=, =zone?= | =gsurf_window_layout_show_view_at()= |
+| =select_window= | =index= or =which= (=next=, =previous=, =last=) | =select-window -t N=, =next-window=, ... |
+| =new_window= | =name?=, =uri?= | =new-window [-n NAME] [URI]= |
+| =rename_window= | =name= (=""= = automatic), =index?= | =gsurf_window_layout_rename_group()= |
+| =kill_window= | =index?= | =select-window -t N=, =kill-window= |
+
+=split_pane= details: =ratio= is the new pane's share of the split pane, as a fraction (=0.3=) or a percentage (=30=); =duplicate= shows a copy of the split pane's page in the same container; =background= keeps the split pane active. When =view= names a background tab (a view no pane shows), that view is put in a new pane beside the active pane on the =direction= side instead (=uri= and =duplicate= then do not apply). Refused in kiosk mode.
+
+#+begin_src json
+// split_pane {"direction": "down", "ratio": 0.3, "uri": "https://example.org/b"}
+{"window":0,"name":"Example","current":true,"zoomed":false,"panes":[
+  {"index":0,"id":0,"view":1,...,"fraction":{"x":0.0,"y":0.0,"width":0.5,"height":1.0}},
+  {"index":1,"id":1,"view":7,...,"fraction":{"x":0.5,"y":0.0,"width":0.5,"height":0.7}},
+  {"index":2,"id":2,"view":15,"active":true,...,
+   "fraction":{"x":0.5,"y":0.7,"width":0.5,"height":0.3}}]}
+// split_pane {"ratio": 0.05}
+error: split-window -h -p 5: no space for a new pane (minimum 10%)
+#+end_src
+
+#+begin_src json
+// select_pane {"direction": "left"}          -> select-pane -L
+// select_pane {"view": 15}                   -> select-pane -t 2
+// select_pane {"last": true}                 -> last-pane
+// select_pane {"pane": 7}
+error: select-pane -t 7: select-pane: can't find pane 7 (the window has 3)
+#+end_src
+
+#+begin_src json
+// kill_pane {"pane": 2}
+{"window":0,...,"panes":[{"index":0,...},{"index":1,...}]}
+// kill_pane {"view": 9}
+error: view 9 is not shown in any pane (a background tab; show_view_in_pane or split_pane can put it in one)
+#+end_src
+
+#+begin_src json
+// zoom_pane {"view": 7}
+{"window":0,"name":"A","current":true,"zoomed":true,"panes":[
+  {"index":0,...,"zoomed":false,"visible":false,...},
+  {"index":1,...,"zoomed":true,"visible":true,"rect":{"x":0,"y":0,"width":1000,"height":652},
+   "fraction":{"x":0.0,"y":0.0,"width":1.0,"height":1.0}}]}
+// zoom_pane {"zoomed": false}
+{"window":0,...,"zoomed":false,...}
+#+end_src
+
+#+begin_src json
+// select_layout {"name": "even-horizontal"}
+{"window":0,...,"panes":[{"index":0,...,"fraction":{"x":0.0,"y":0.0,"width":0.333,"height":1.0}},...]}
+// select_layout {"name": "bogus"}
+error: select-layout bogus: position 14: select-layout: unknown layout "bogus" (even-horizontal, even-vertical, main-horizontal, main-vertical, tiled)
+#+end_src
+
+=show_view_in_pane= is what dropping a tab from the sidebar onto a pane does (=GsurfWindowLayout= =show_view_at=). =zone= =center= (default) shows =view= in the target pane's place: when =view= was in another pane (of any wmux window) the two swap places, otherwise the target's view becomes a background tab. An edge zone (=left=, =right=, =top=, =bottom=) splits the target pane (=split_ratio=) and shows =view= on that side; a view that was in another pane leaves it (join). The target is a pane of the current window (=pane=, after selecting =window= when given) or a view on screen (=target=). Dropping a pane's own view on its centre just selects the pane; on an edge it is refused.
+
+#+begin_src json
+// show_view_in_pane {"view": 9, "pane": 0, "zone": "right"}
+{"window":0,...,"panes":[{"index":0,"view":1,...},{"index":1,"view":9,"active":true,...}]}
+// show_view_in_pane {"view": 1, "target": 9}          (swap)
+{"window":0,...,"panes":[{"index":0,"view":9,...},{"index":1,"view":1,"active":true,...}]}
+// show_view_in_pane {"view": 4, "target": 22}
+error: view 22 is not on screen: the target must be shown in a pane of the current wmux window
+#+end_src
+
+#+begin_src json
+// new_window {"name": "docs", "uri": "https://docs.example.org/"}
+{"window":1,"name":"docs","current":true,"zoomed":false,"panes":[{"index":0,"view":20,...}]}
+// select_window {"which": "last"}
+{"window":0,...}
+// select_window {"index": 5}
+error: select-window -t 5: select-window: can't find window 5 (there are 2)
+// rename_window {"index": 1, "name": "reference"}
+{"window":1,"name":"reference",...}
+// rename_window {"index": 1, "name": ""}       (back to the page title)
+{"window":1,"name":"Docs",...}
+// kill_window {"index": 1}
+{"window":0,...}
+#+end_src
+
+* Drive wmux from an agent
+
+A typical session, every call through the tools above:
+
+1. =wmux_status= — is wmux active, what is the pane area? If =active= is false, the user has to enable =modules.wmux= (the error of every wmux tool says so).
+2. =list_views= — the tabs with their ids, which pane shows which, containers.
+3. Lay out a reading desk: =split_pane {"uri": "https://docs.example.org/", "ratio": 0.4}= puts the docs at the right with 40 %; =split_pane {"direction": "down", "uri": "https://example.org/notes"}= splits that pane again. Each result lists the panes with their =view= ids and rectangles.
+4. Work in a pane by its view: =navigate {"view": 15, "uri": ...}=, =get_page_text {"view": 15}=, =select_pane {"view": 15}= to give it the keyboard.
+5. Bring a tab in from the background: =open_child_view {"parent": 1, "uri": ..., "background": true}= opens it without disturbing the panes; =show_view_in_pane {"view": <id>, "pane": 0, "zone": "bottom"}= puts it under pane 0, or =zoom_pane {"view": <id>}= after showing it to read it full size.
+6. Rearrange: =select_layout {"name": "main-vertical"}=, =wmux_command {"command": "swap-pane -D"}=, =wmux_command {"command": "resize-pane -L 10"}=.
+7. Separate tasks in windows: =new_window {"name": "research", "uri": ...}=, =list_wmux_windows=, =select_window {"which": "last"}=, =rename_window=.
+8. Clean up: =kill_pane {"view": <id>}= (closes the tab too unless =on_pane_kill: keep_tab=), =kill_window {"index": 1}=.
+
+=get_tab_tree= shows the same state as the sidebar (grouped by wmux window), and =run_action= reaches the keyboard-only features (=tab-sidebar-toggle=, =pane-split-right= for the active tab, ...).
+
+* Core seams
+
+Since 0.4.4 (all GIR-annotated, see the headers):
+
+| Seam | What the MCP module uses it for |
+|------+---------------------------------|
+| =GsurfWindowLayout= =list_panes= / =run_command= / =describe= (=gsurf_window_layout_list_panes()=, =_run_command()=, =_describe()=), =GsurfLayoutPane= and =GsurfLayoutGroup= =last= / =zoomed= | panes with geometry, any wmux command, =wmux_status=, window flags |
+| =GsurfWindowLayout= =list_groups= / =rename_group= / =show_view_at= (0.4.2, 0.4.3) | windows, renames, drops |
+| =GsurfTabTreeProvider= (=src/interfaces/gsurf-tab-tree-provider.h=, implemented by =tabs=) | tree parents, collapse state, =move_view=, =set_collapsed= |
+| =gsurf_module_manager_execute_action()= and =gsurf_module_manager_set_action_executor()= (the gsurf binary registers its keybind executor) | =run_action=, =set_mode=, =follow_hints= with kiosk refusals |
+| =gsurf_module_manager_get_mode()= (0.4.2) | =get_mode= |
+| =GsurfContainerRegistry=, =gsurf_window_reopen_view()=, =gsurf_view_new_full()= | containers and view creation |
+
+See [[file:architecture.org][architecture.org]] ("Window layouts (panes)") and [[file:module-system.org][module-system.org]].
+
+* In-process calls
+
+=mcp.so= exports two functions for embedders and tests, found with =g_module_symbol()= (the module is not linked by anything):
+
+#+begin_src c
+/* Call a tool through the same registration (enabled flags, schemas,
+ * handlers) as the socket server; returns the result's text, sets
+ * is_error for an error result, NULL + error for bad JSON or a
+ * disabled / unknown tool. */
+gchar *gsurf_mcp_module_call_tool (GsurfModule *module, const gchar *name,
+                                   const gchar *arguments_json, gboolean *is_error,
+                                   GError **error);
+
+/* The enabled tools as tools/list announces them (JSON array). */
+gchar *gsurf_mcp_module_list_tools (GsurfModule *module);
+#+end_src
 
 * Security
 
-=execute_javascript= grants full page control; =get_page_text/html/links= expose
-page content. Enable only the tools an agent needs. The server binds a
-user-private Unix socket under =$XDG_RUNTIME_DIR=.
+=execute_javascript= grants full page control; =get_page_text/html/links= expose page content; =run_action= can do anything a key can (including =quit=); =wmux_command= any pane or window operation. Enable only the tools an agent needs. Kiosk mode refuses every tool that would open, reopen or split views and every action kiosk keybindings refuse. The server binds a user-private Unix socket under =$XDG_RUNTIME_DIR=.
+
+* Known issues
+
+- mcp-glib's stdio transport does not keep itself alive for a pending read: stopping the server (deactivating the module, quitting gsurf) while a client is still connected runs the cancelled read's callback on a finalized transport (a GLib critical, possibly a crash). Disconnect clients before stopping the server. The fix belongs in =deps/mcp-glib= (=read_line_cb= in =mcp-stdio-transport.c=).
+- mcp-glib logs a =Transport error: Remote end closed connection= warning whenever a client hangs up.
+
+* Tests
+
+- =tests/test-mcp.c= (headless, =make test=, needs =MCP=1=): loads the real =mcp.so= and calls its tools in-process. A recording window layout and tree-provider module stand in for wmux and tabs, so every convenience tool is checked down to the exact command line it sends; also registration (all tools off by default, per-tool enabling, schemas, reconfigure), every "no window" error, view addressing by id / index / numeric strings, the opener-derived tree, provider-backed moves and collapses, the layout's errors as tool errors, run_action through modules, kiosk refusals, containers with their configured host rules.
+- =tests/test-mcp-webkit.c= (=make test-gui=, both toolkits): real windows with =wmux=, =tabs=, =containers= and =modal=, driven only through tools and checked against the core: splits with directions, ratios and URIs and their pixel / fractional rectangles, pane selection by direction, view, index and last, zoom, layouts, kills, every command-language error class, break-pane, wmux windows (new, rename and automatic naming, select by index / last / next, kill), background children shown in panes (edge, centre swap) and split in, the grouped tree with its background group, re-parenting and collapsing, containers (rules, reopen in place with a new id, temporary children), modes, hints, run_action through modules and a host executor, wmux switched off, and a real JSON-RPC round trip over the Unix socket.
+- The core seams have their own unit tests: =test-window-layout= (=list_panes=, =run_command=, =describe=, =GsurfLayoutPane=), =test-tab-tree-provider=, =test-manager= (=execute_action=), =test-enums=.

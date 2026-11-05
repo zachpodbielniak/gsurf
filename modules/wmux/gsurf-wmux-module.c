@@ -207,40 +207,72 @@ is_kill(const GsurfWmuxCommand *cmd)
 	       (cmd->id == GSURF_WMUX_CMD_KILL_PANE || cmd->id == GSURF_WMUX_CMD_KILL_WINDOW);
 }
 
-void
-gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
+/*
+ * gsurf_wmux_run:
+ * @cmd: a parsed command
+ * @error: (nullable): where a command that cannot be carried out says why
+ *
+ * Runs @cmd on the current window. Unknown targets (select-pane -t 7 with
+ * two panes, select-window -t 9, last-pane without a last pane, ...) and
+ * refused operations (a split below min_pane_pct, break-pane of a lone
+ * pane) fail with a message as tmux prints it; a direction without a
+ * neighbour (select-pane -L at the left edge) is not an error.
+ *
+ * Returns: whether @cmd ran
+ */
+gboolean
+gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd, GError **error)
 {
 	GsurfWmuxWin *win = gsurf_wmux_current(self);
 	guint active;
 	gint target;
 
-	if (cmd == NULL || win == NULL || !self->attached)
-		return;
+	if (cmd == NULL)
+		return TRUE;
+	if (win == NULL || !self->attached) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+			"wmux is not attached to a window");
+		return FALSE;
+	}
 	active = gsurf_wmux_layout_get_active(win->layout);
 
 	switch (cmd->id) {
 	case GSURF_WMUX_CMD_SPLIT_WINDOW:
-		gsurf_wmux_split(self, active,
+		return gsurf_wmux_split(self, active,
 			gsurf_wmux_command_has_flag(cmd, 'h') ? GSURF_WMUX_SPLIT_H : GSURF_WMUX_SPLIT_V,
 			gsurf_wmux_command_has_flag(cmd, 'b'), gsurf_wmux_command_has_flag(cmd, 'd'),
 			cmd->has_number ? (guint)cmd->number : 0, gsurf_wmux_command_has_flag(cmd, 'c'),
-			gsurf_wmux_command_get_arg(cmd, 0), NULL);
-		break;
+			gsurf_wmux_command_get_arg(cmd, 0), NULL, error);
 	case GSURF_WMUX_CMD_SELECT_PANE:
 		if (gsurf_wmux_command_has_flag(cmd, 'l')) {
+			if (gsurf_wmux_layout_get_last(win->layout) == GSURF_WMUX_PANE_NONE) {
+				g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+					"select-pane: no last pane");
+				return FALSE;
+			}
 			gsurf_wmux_select_pane(self, gsurf_wmux_layout_get_last(win->layout));
 		} else if (gsurf_wmux_command_has_flag(cmd, 't')) {
 			target = resolve_target(cmd, gsurf_wmux_layout_get_pane_index(win->layout, active),
 				(gint)gsurf_wmux_layout_get_n_panes(win->layout));
-			if (target >= 0)
-				gsurf_wmux_select_pane(self,
-					gsurf_wmux_layout_get_nth_pane(win->layout, (guint)target));
+			if (target < 0) {
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+					"select-pane: can't find pane %d (the window has %u)", cmd->number,
+					gsurf_wmux_layout_get_n_panes(win->layout));
+				return FALSE;
+			}
+			gsurf_wmux_select_pane(self,
+				gsurf_wmux_layout_get_nth_pane(win->layout, (guint)target));
 		} else {
 			gsurf_wmux_select_pane(self, gsurf_wmux_layout_neighbor(win->layout, active,
 				direction_of(gsurf_wmux_command_direction(cmd)), TRUE));
 		}
 		break;
 	case GSURF_WMUX_CMD_LAST_PANE:
+		if (gsurf_wmux_layout_get_last(win->layout) == GSURF_WMUX_PANE_NONE) {
+			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+				"last-pane: no last pane");
+			return FALSE;
+		}
 		gsurf_wmux_select_pane(self, gsurf_wmux_layout_get_last(win->layout));
 		break;
 	case GSURF_WMUX_CMD_KILL_PANE:
@@ -271,8 +303,13 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
 		} else {
 			GsurfWmuxPreset preset;
 
-			if (gsurf_wmux_preset_from_string(gsurf_wmux_command_get_arg(cmd, 0), &preset))
-				gsurf_wmux_layout_apply_preset(win->layout, preset);
+			if (!gsurf_wmux_preset_from_string(gsurf_wmux_command_get_arg(cmd, 0), &preset)) {
+				g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+					"select-layout: unknown layout '%s'",
+					gsurf_wmux_command_get_arg(cmd, 0));
+				return FALSE;
+			}
+			gsurf_wmux_layout_apply_preset(win->layout, preset);
 		}
 		gsurf_wmux_show_active(self);
 		break;
@@ -281,8 +318,7 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
 		gsurf_wmux_show_active(self);
 		break;
 	case GSURF_WMUX_CMD_BREAK_PANE:
-		gsurf_wmux_break_pane(self);
-		break;
+		return gsurf_wmux_break_pane(self, error);
 	case GSURF_WMUX_CMD_DISPLAY_PANES:
 		gsurf_wmux_ui_display_panes(self, TRUE);
 		break;
@@ -297,13 +333,22 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
 		gsurf_wmux_select_window(self, (self->current + self->wins->len - 1) % self->wins->len);
 		break;
 	case GSURF_WMUX_CMD_LAST_WINDOW:
-		if (self->last_win >= 0)
-			gsurf_wmux_select_window(self, (guint)self->last_win);
+		if (self->last_win < 0 || (guint)self->last_win >= self->wins->len) {
+			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+				"last-window: no last window");
+			return FALSE;
+		}
+		gsurf_wmux_select_window(self, (guint)self->last_win);
 		break;
 	case GSURF_WMUX_CMD_SELECT_WINDOW:
 		target = resolve_target(cmd, (gint)self->current, (gint)self->wins->len);
-		if (target >= 0)
-			gsurf_wmux_select_window(self, (guint)target);
+		if (target < 0) {
+			g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+				"select-window: can't find window %d (there are %u)", cmd->number,
+				self->wins->len);
+			return FALSE;
+		}
+		gsurf_wmux_select_window(self, (guint)target);
 		break;
 	case GSURF_WMUX_CMD_KILL_WINDOW:
 		gsurf_wmux_kill_window(self, self->current);
@@ -330,10 +375,8 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
 
 		if (cmd->nested == NULL)
 			break;
-		if (!self->confirm_kill && is_kill(cmd->nested)) {
-			gsurf_wmux_run(self, cmd->nested);
-			break;
-		}
+		if (!self->confirm_kill && is_kill(cmd->nested))
+			return gsurf_wmux_run(self, cmd->nested, error);
 		text = gsurf_wmux_command_to_string(cmd->nested);
 		prompt = gsurf_wmux_command_get_value(cmd, 'p') != NULL
 			? expand_formats(self, gsurf_wmux_command_get_value(cmd, 'p'))
@@ -353,6 +396,20 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
 	default:
 		break;
 	}
+	return TRUE;
+}
+
+/* Run @cmd from a key or the prompt: a failure goes to the status line
+ * (and the log), as tmux shows it. */
+static void
+run_and_report(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd)
+{
+	g_autoptr(GError) error = NULL;
+
+	if (!gsurf_wmux_run(self, cmd, &error) && error != NULL) {
+		g_debug("wmux: %s", error->message);
+		gsurf_wmux_ui_message(self, error->message);
+	}
 }
 
 gboolean
@@ -366,7 +423,7 @@ gsurf_wmux_run_line(GsurfWmuxModule *self, const gchar *line)
 		gsurf_wmux_ui_message(self, error->message);
 		return FALSE;
 	}
-	gsurf_wmux_run(self, cmd);
+	run_and_report(self, cmd);
 	return TRUE;
 }
 
@@ -378,7 +435,7 @@ gsurf_wmux_run_line(GsurfWmuxModule *self, const gchar *line)
 static void
 run_binding(GsurfWmuxModule *self, GsurfWmuxBindings *table, const gchar *key)
 {
-	gsurf_wmux_run(self, gsurf_wmux_bindings_get_command(table, key));
+	run_and_report(self, gsurf_wmux_bindings_get_command(table, key));
 }
 
 /* Keys while the chooser is open: j/k (or arrows) move, Enter picks, x
@@ -517,10 +574,10 @@ gsurf_wmux_handle_action(GsurfActionHandler *handler, GsurfView *view, GsurfActi
 
 	if (view != NULL && gsurf_wmux_view_visible(self, view) &&
 	    gsurf_wmux_find_view(self, gsurf_view_get_id(view), &w, &p))
-		gsurf_wmux_split(self, p, split, FALSE, FALSE, 0, FALSE, NULL, NULL);
+		gsurf_wmux_split(self, p, split, FALSE, FALSE, 0, FALSE, NULL, NULL, NULL);
 	else
 		gsurf_wmux_split(self, gsurf_wmux_layout_get_active(win->layout), split, FALSE,
-			FALSE, 0, FALSE, NULL, view);
+			FALSE, 0, FALSE, NULL, view, NULL);
 	return TRUE;
 }
 

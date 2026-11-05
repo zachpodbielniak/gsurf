@@ -12,6 +12,7 @@
 
 #include <gsurf.h>
 #include <glib.h>
+#include <gio/gio.h>
 #include <glib/gstdio.h>
 #include <string.h>
 
@@ -300,6 +301,123 @@ test_action_dispatch(void)
 	g_assert_cmpuint(prompt->calls, ==, 1);  /* find consumed it first */
 
 	g_assert_false(gsurf_module_manager_dispatch_action(mgr, NULL, GSURF_ACTION_TAB_NEW));
+}
+
+/* ---- execute_action (0.4.4) ---- */
+
+typedef struct { GsurfWindow parent; } ExecWindow;
+typedef struct { GsurfWindowClass parent; } ExecWindowClass;
+
+GType exec_window_get_type(void);
+G_DEFINE_TYPE(ExecWindow, exec_window, GSURF_TYPE_WINDOW)
+
+static void exec_window_class_init(ExecWindowClass *klass) { (void)klass; }
+static void exec_window_init(ExecWindow *self) { (void)self; }
+
+typedef struct {
+	guint        calls;
+	GsurfWindow *window;
+	GsurfAction  action;
+	gboolean     answer;
+	guint        destroyed;
+} ExecLog;
+
+static gboolean
+exec_record(GsurfWindow *window, GsurfView *view, GsurfAction action, gpointer user_data)
+{
+	ExecLog *log = user_data;
+
+	(void)view;
+	log->calls++;
+	log->window = window;
+	log->action = action;
+	return log->answer;
+}
+
+static void
+exec_destroy(gpointer user_data)
+{
+	((ExecLog *)user_data)->destroyed++;
+}
+
+/* gsurf_module_manager_execute_action(): bad actions, modules alone, the
+ * host's executor (its destroy notify on replace and dispose), kiosk
+ * refusals before anything runs. */
+static void
+test_execute_action(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autoptr(TestActionModule) find = new_action_module("t-find", GSURF_ACTION_FIND, FALSE);
+	g_autoptr(GsurfWindow) window = g_object_new(exec_window_get_type(), NULL);
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+	ExecLog log = { 0 };
+
+	gsurf_module_manager_add_module(mgr, GSURF_MODULE(find));
+	gsurf_module_manager_activate_all(mgr);
+
+	/* 1. Not an action. */
+	g_assert_false(gsurf_module_manager_execute_action(mgr, NULL, NULL, GSURF_ACTION_NONE,
+		&error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_clear_error(&error);
+	g_assert_false(gsurf_module_manager_execute_action(mgr, NULL, NULL, GSURF_ACTION_LAST,
+		&error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_clear_error(&error);
+
+	/* 2. No executor: the modules only. */
+	g_assert_true(gsurf_module_manager_execute_action(mgr, NULL, NULL, GSURF_ACTION_FIND,
+		&error));
+	g_assert_no_error(error);
+	g_assert_cmpuint(find->calls, ==, 1);
+	g_assert_false(gsurf_module_manager_execute_action(mgr, NULL, NULL, GSURF_ACTION_ZOOM_IN,
+		&error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+	g_assert_nonnull(strstr(error->message, "zoom-in"));
+	g_clear_error(&error);
+
+	/* 3. The executor gets the window and the action; FALSE is an error.
+	 *    Without a window (no application, none given) it is skipped. */
+	gsurf_module_manager_set_action_executor(mgr, exec_record, &log, exec_destroy);
+	log.answer = TRUE;
+	g_assert_true(gsurf_module_manager_execute_action(mgr, window, NULL, GSURF_ACTION_ZOOM_IN,
+		&error));
+	g_assert_no_error(error);
+	g_assert_cmpuint(log.calls, ==, 1);
+	g_assert_true(log.window == window);
+	g_assert_cmpint(log.action, ==, GSURF_ACTION_ZOOM_IN);
+	log.answer = FALSE;
+	g_assert_false(gsurf_module_manager_execute_action(mgr, window, NULL, GSURF_ACTION_RELOAD,
+		&error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+	g_clear_error(&error);
+	g_assert_true(gsurf_module_manager_execute_action(mgr, NULL, NULL, GSURF_ACTION_FIND, NULL));
+	g_assert_cmpuint(log.calls, ==, 2);
+
+	/* 4. Kiosk refuses forbidden actions before the executor runs. */
+	config->kiosk = TRUE;
+	gsurf_config_set_default(config);
+	log.answer = TRUE;
+	g_assert_false(gsurf_module_manager_execute_action(mgr, window, NULL,
+		GSURF_ACTION_OPEN_PROMPT, &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED);
+	g_assert_nonnull(strstr(error->message, "open-prompt"));
+	g_clear_error(&error);
+	g_assert_cmpuint(log.calls, ==, 2);
+	g_assert_true(gsurf_module_manager_execute_action(mgr, window, NULL, GSURF_ACTION_ZOOM_IN,
+		&error));
+	g_assert_cmpuint(log.calls, ==, 3);
+	gsurf_config_set_default(NULL);
+
+	/* 5. Replacing the executor frees the old data; so does dispose. */
+	gsurf_module_manager_set_action_executor(mgr, exec_record, &log, exec_destroy);
+	g_assert_cmpuint(log.destroyed, ==, 1);
+	gsurf_module_manager_set_action_executor(mgr, NULL, NULL, NULL);
+	g_assert_cmpuint(log.destroyed, ==, 2);
+	gsurf_module_manager_set_action_executor(mgr, exec_record, &log, exec_destroy);
+	g_clear_object(&mgr);
+	g_assert_cmpuint(log.destroyed, ==, 3);
 }
 
 /* A priority claimed inside activate() takes effect for dispatch: the
@@ -720,6 +838,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
 	g_test_add_func("/gsurf/manager/mode", test_mode);
 	g_test_add_func("/gsurf/manager/action-dispatch", test_action_dispatch);
+	g_test_add_func("/gsurf/manager/execute-action", test_execute_action);
 	g_test_add_func("/gsurf/manager/main-response-dispatch", test_main_response_dispatch);
 	g_test_add_func("/gsurf/manager/priority-set-in-activate", test_priority_set_in_activate);
 	g_test_add_func("/gsurf/manager/load-bad-path", test_load_bad_path);

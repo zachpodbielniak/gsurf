@@ -252,11 +252,13 @@ struct _GsurfWmuxModule
 
 /* --- Module (gsurf-wmux-module.c) --- */
 
-/* Parse and run one command line; errors go to the status line (and the
- * log). Returns whether it parsed. */
+/* Parse and run one command line; parse and execution errors go to the
+ * status line (and the log). Returns whether it parsed. */
 G_GNUC_INTERNAL gboolean gsurf_wmux_run_line(GsurfWmuxModule *self, const gchar *line);
-/* Run a parsed command. */
-G_GNUC_INTERNAL void     gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd);
+/* Run a parsed command; %FALSE with @error set when it cannot be carried
+ * out (an unknown pane or window, a refused split, ...). */
+G_GNUC_INTERNAL gboolean gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd,
+                                        GError **error);
 /* Set or clear the window's key grab for a pending key (prefix, chooser,
  * display-panes). */
 G_GNUC_INTERNAL void     gsurf_wmux_update_grab(GsurfWmuxModule *self);
@@ -286,12 +288,12 @@ G_GNUC_INTERNAL void     gsurf_wmux_select_window(GsurfWmuxModule *self, guint i
 G_GNUC_INTERNAL gboolean gsurf_wmux_split(GsurfWmuxModule *self, guint pane, GsurfWmuxSplit split,
                                           gboolean before, gboolean keep_active, guint pct,
                                           gboolean duplicate, const gchar *uri,
-                                          GsurfView *existing);
+                                          GsurfView *existing, GError **error);
 G_GNUC_INTERNAL void     gsurf_wmux_kill_pane(GsurfWmuxModule *self, guint win, guint pane);
 G_GNUC_INTERNAL void     gsurf_wmux_kill_window(GsurfWmuxModule *self, guint index);
 G_GNUC_INTERNAL void     gsurf_wmux_new_window(GsurfWmuxModule *self, const gchar *name,
                                                const gchar *uri);
-G_GNUC_INTERNAL void     gsurf_wmux_break_pane(GsurfWmuxModule *self);
+G_GNUC_INTERNAL gboolean gsurf_wmux_break_pane(GsurfWmuxModule *self, GError **error);
 G_GNUC_INTERNAL void     gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name);
 /* Rename tmux window @index ("" or NULL: automatic naming again). */
 G_GNUC_INTERNAL gboolean gsurf_wmux_rename_window_at(GsurfWmuxModule *self, guint index,
@@ -313,6 +315,9 @@ G_GNUC_INTERNAL void     gsurf_wmux_session_clear(GsurfWmuxModule *self);
 
 G_GNUC_INTERNAL void      gsurf_wmux_ui_build(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_free(GsurfWmuxModule *self);
+/* The size of the area the panes share (the grid), in pixels; 0 x 0
+ * before the UI is built or allocated. */
+G_GNUC_INTERNAL void      gsurf_wmux_ui_area(GsurfWmuxModule *self, gint *width, gint *height);
 /* Bring the grid, frames, classes, status line and visibility in line
  * with the model; notifies the window when the visible views changed. */
 G_GNUC_INTERNAL void      gsurf_wmux_ui_sync(GsurfWmuxModule *self);

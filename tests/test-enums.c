@@ -84,6 +84,7 @@ test_enum_types(void)
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_MODE_POLICY));
 	g_assert_true(G_TYPE_IS_FLAGS(GSURF_TYPE_KEY_MOD));
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_LAYOUT_DROP_ZONE));
+	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_TAB_TREE_POSITION));
 
 	/* The mode indicator labels. */
 	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_NORMAL), ==, "NORMAL");
@@ -119,6 +120,17 @@ test_enum_values(void)
 	g_assert_nonnull(v);
 	g_assert_cmpint(v->value, ==, GSURF_LAYOUT_DROP_BOTTOM);
 	g_assert_cmpuint(klass->n_values, ==, 5);
+	g_type_class_unref(klass);
+
+	/* The tab tree positions (0.4.4), by nick. */
+	klass = g_type_class_ref(GSURF_TYPE_TAB_TREE_POSITION);
+	v = g_enum_get_value_by_nick(klass, "before");
+	g_assert_nonnull(v);
+	g_assert_cmpint(v->value, ==, GSURF_TAB_TREE_POSITION_BEFORE);
+	v = g_enum_get_value_by_nick(klass, "child");
+	g_assert_nonnull(v);
+	g_assert_cmpint(v->value, ==, GSURF_TAB_TREE_POSITION_CHILD);
+	g_assert_cmpuint(klass->n_values, ==, 3);
 	g_type_class_unref(klass);
 }
 

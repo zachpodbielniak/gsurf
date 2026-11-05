@@ -21,6 +21,7 @@
  */
 
 #include <gsurf.h>
+#include <gio/gio.h>
 #include <string.h>
 
 /* One log for everything, reset per test. */
@@ -183,6 +184,10 @@ typedef struct {
 	gint        drop_zone;
 	gint        drags;        /* begin_view_drag - end_view_drag */
 	gchar      *renamed;      /* "<index>=<name>" of the last rename_group */
+	/* The 0.4.4 extras. */
+	gchar      *command;      /* the last run_command line */
+	gboolean    silent_fail;  /* run_command fails without an error */
+	gboolean    bad_describe; /* describe returns a string, not a{sv} */
 } TestLayout;
 typedef struct { GObjectClass parent; } TestLayoutClass;
 
@@ -344,6 +349,63 @@ l_end_drag(GsurfWindowLayout *self, GsurfWindow *window)
 	((TestLayout *)self)->drags--;
 }
 
+/* 0.4.4: one pane per view of group 0, the first active, in a row of
+ * 100 px cells; no other group. */
+static GPtrArray *
+l_list_panes(GsurfWindowLayout *self, GsurfWindow *window, guint group)
+{
+	GPtrArray *panes;
+	guint n = gsurf_window_get_n_views(window);
+	guint i;
+
+	(void)self;
+	if (group != 0)
+		return NULL;
+	panes = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_layout_pane_unref);
+	for (i = 0; i < n; i++) {
+		GsurfLayoutPane *pane = gsurf_layout_pane_new(i, 10 + i,
+			gsurf_view_get_id(gsurf_window_get_nth_view(window, i)), i == 0);
+
+		gsurf_layout_pane_set_rect(pane, (gint)i * 100, 0, 100, 50);
+		gsurf_layout_pane_set_fraction(pane, (gdouble)i / n, 0.0, 1.0 / n, 1.0);
+		g_ptr_array_add(panes, pane);
+	}
+	return panes;
+}
+
+/* Accepts "ok ..." lines, refuses the rest (with an error unless
+ * silent_fail). */
+static gboolean
+l_run_command(GsurfWindowLayout *self, GsurfWindow *window, const gchar *command,
+              GError **error)
+{
+	TestLayout *layout = (TestLayout *)self;
+
+	(void)window;
+	g_free(layout->command);
+	layout->command = g_strdup(command);
+	if (g_str_has_prefix(command, "ok"))
+		return TRUE;
+	if (!layout->silent_fail)
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT, "bad: %s", command);
+	return FALSE;
+}
+
+/* A floating vardict (or, with bad_describe, a plain string). */
+static GVariant *
+l_describe(GsurfWindowLayout *self, GsurfWindow *window)
+{
+	GVariantBuilder b;
+
+	if (((TestLayout *)self)->bad_describe)
+		return g_variant_new_string("nope");
+	g_variant_builder_init(&b, G_VARIANT_TYPE_VARDICT);
+	g_variant_builder_add(&b, "{sv}", "name", g_variant_new_string("test"));
+	g_variant_builder_add(&b, "{sv}", "panes",
+		g_variant_new_uint32(gsurf_window_get_n_views(window)));
+	return g_variant_builder_end(&b);
+}
+
 static void
 test_layout_iface_init(GsurfWindowLayoutInterface *iface)
 {
@@ -362,6 +424,9 @@ test_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->begin_view_drag = l_begin_drag;
 	iface->end_view_drag = l_end_drag;
 	iface->rename_group = l_rename_group;
+	iface->list_panes = l_list_panes;
+	iface->run_command = l_run_command;
+	iface->describe = l_describe;
 }
 
 static void
@@ -373,6 +438,7 @@ test_layout_finalize(GObject *object)
 	g_clear_pointer(&self->visible, g_hash_table_unref);
 	g_clear_pointer(&self->name, g_free);
 	g_clear_pointer(&self->renamed, g_free);
+	g_clear_pointer(&self->command, g_free);
 	G_OBJECT_CLASS(test_layout_parent_class)->finalize(object);
 }
 
@@ -978,6 +1044,144 @@ test_groups_and_drops(void)
 	g_test_assert_expected_messages();
 }
 
+/* 0.4.4: the pane boxed type and the group's last / zoomed flags. */
+static void
+test_pane_boxed(void)
+{
+	g_autoptr(GsurfLayoutPane) pane = gsurf_layout_pane_new(2, 17, 99, TRUE);
+	g_autoptr(GsurfLayoutGroup) group = gsurf_layout_group_new(1, "g", FALSE);
+	GsurfLayoutPane *copy;
+	gint x = -1;
+	gint y = -1;
+	gint w = -1;
+	gint h = -1;
+	gdouble fx = -1.0;
+	gdouble fy = -1.0;
+	gdouble fw = -1.0;
+	gdouble fh = -1.0;
+
+	g_assert_true(G_TYPE_IS_BOXED(GSURF_TYPE_LAYOUT_PANE));
+	g_assert_cmpuint(gsurf_layout_pane_get_index(pane), ==, 2);
+	g_assert_cmpuint(gsurf_layout_pane_get_id(pane), ==, 17);
+	g_assert_cmpuint(gsurf_layout_pane_get_view_id(pane), ==, 99);
+	g_assert_true(gsurf_layout_pane_get_active(pane));
+	g_assert_false(gsurf_layout_pane_get_zoomed(pane));
+
+	/* A new pane has an empty rectangle; optional outs may be NULL. */
+	gsurf_layout_pane_get_rect(pane, &x, &y, &w, &h);
+	g_assert_cmpint(x + y + w + h, ==, 0);
+	gsurf_layout_pane_get_fraction(pane, &fx, NULL, NULL, &fh);
+	g_assert_cmpfloat(fx, ==, 0.0);
+	g_assert_cmpfloat(fh, ==, 0.0);
+
+	/* Negative sizes become 0; fractions are clamped to 0..1. */
+	gsurf_layout_pane_set_rect(pane, -5, 7, -1, 30);
+	gsurf_layout_pane_get_rect(pane, &x, &y, &w, &h);
+	g_assert_cmpint(x, ==, -5);
+	g_assert_cmpint(y, ==, 7);
+	g_assert_cmpint(w, ==, 0);
+	g_assert_cmpint(h, ==, 30);
+	gsurf_layout_pane_set_fraction(pane, 0.25, -1.0, 2.0, 0.5);
+	gsurf_layout_pane_get_fraction(pane, &fx, &fy, &fw, &fh);
+	g_assert_cmpfloat(fx, ==, 0.25);
+	g_assert_cmpfloat(fy, ==, 0.0);
+	g_assert_cmpfloat(fw, ==, 1.0);
+	g_assert_cmpfloat(fh, ==, 0.5);
+	gsurf_layout_pane_set_zoomed(pane, 42);
+	g_assert_true(gsurf_layout_pane_get_zoomed(pane) == TRUE);
+
+	/* g_boxed_copy() is a reference. */
+	copy = g_boxed_copy(GSURF_TYPE_LAYOUT_PANE, pane);
+	g_assert_true(copy == pane);
+	g_boxed_free(GSURF_TYPE_LAYOUT_PANE, copy);
+	g_assert_cmpuint(gsurf_layout_pane_get_id(pane), ==, 17);
+
+	/* The group flags default off and normalize to TRUE/FALSE. */
+	g_assert_false(gsurf_layout_group_get_last(group));
+	g_assert_false(gsurf_layout_group_get_zoomed(group));
+	gsurf_layout_group_set_last(group, 7);
+	gsurf_layout_group_set_zoomed(group, TRUE);
+	g_assert_true(gsurf_layout_group_get_last(group) == TRUE);
+	g_assert_true(gsurf_layout_group_get_zoomed(group));
+	gsurf_layout_group_set_last(group, FALSE);
+	g_assert_false(gsurf_layout_group_get_last(group));
+}
+
+/* 0.4.4: list_panes, run_command and describe reach the vfuncs; a layout
+ * without them answers "none" / NOT_SUPPORTED; bad answers are fixed up
+ * (a FALSE without an error gets one, a non-vardict description is
+ * dropped with a warning). */
+static void
+test_panes_commands_describe(void)
+{
+	static const gchar *const names[] = { "a", "b", NULL };
+	g_autoptr(GsurfWindow) window = new_window(names);
+	g_autoptr(TestLayout) layout = new_layout("L");
+	g_autoptr(TestMinLayout) min = g_object_new(test_min_layout_get_type(), NULL);
+	g_autoptr(GPtrArray) panes = NULL;
+	g_autoptr(GVariant) info = NULL;
+	g_autoptr(GError) error = NULL;
+	GsurfWindowLayout *l = GSURF_WINDOW_LAYOUT(layout);
+	GsurfWindowLayout *m = GSURF_WINDOW_LAYOUT(min);
+	const gchar *name = NULL;
+	gint x;
+	guint n = 0;
+
+	setup();
+
+	/* 1. Panes of a group; an unknown group is NULL. */
+	panes = gsurf_window_layout_list_panes(l, window, 0);
+	g_assert_nonnull(panes);
+	g_assert_cmpuint(panes->len, ==, 2);
+	g_assert_cmpuint(gsurf_layout_pane_get_view_id(g_ptr_array_index(panes, 1)), ==,
+		gsurf_view_get_id(view_named(window, "b")));
+	gsurf_layout_pane_get_rect(g_ptr_array_index(panes, 1), &x, NULL, NULL, NULL);
+	g_assert_cmpint(x, ==, 100);
+	g_assert_null(gsurf_window_layout_list_panes(l, window, 3));
+
+	/* 2. Commands: success, an error with the layout's message, and a
+	 *    silent failure turned into a generic error. */
+	g_assert_true(gsurf_window_layout_run_command(l, window, "ok go", &error));
+	g_assert_no_error(error);
+	g_assert_cmpstr(layout->command, ==, "ok go");
+	g_assert_false(gsurf_window_layout_run_command(l, window, "nope", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_assert_cmpstr(error->message, ==, "bad: nope");
+	g_clear_error(&error);
+	layout->silent_fail = TRUE;
+	g_assert_false(gsurf_window_layout_run_command(l, window, "quiet", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_FAILED);
+	g_assert_nonnull(strstr(error->message, "quiet"));
+	g_clear_error(&error);
+	/* NULL error is fine either way. */
+	g_assert_false(gsurf_window_layout_run_command(l, window, "quiet", NULL));
+
+	/* 3. describe(): a full reference to a vardict. */
+	info = gsurf_window_layout_describe(l, window);
+	g_assert_nonnull(info);
+	g_assert_false(g_variant_is_floating(info));
+	g_assert_true(g_variant_lookup(info, "name", "&s", &name));
+	g_assert_cmpstr(name, ==, "test");
+	g_assert_true(g_variant_lookup(info, "panes", "u", &n));
+	g_assert_cmpuint(n, ==, 2);
+	layout->bad_describe = TRUE;
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*not a{sv}*");
+	g_assert_null(gsurf_window_layout_describe(l, window));
+	g_test_assert_expected_messages();
+
+	/* 4. A layout without the vfuncs. */
+	g_assert_null(gsurf_window_layout_list_panes(m, window, 0));
+	g_assert_null(gsurf_window_layout_describe(m, window));
+	g_assert_false(gsurf_window_layout_run_command(m, window, "ok", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+	g_clear_error(&error);
+
+	/* 5. Guards. */
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*command != NULL*");
+	g_assert_false(gsurf_window_layout_run_command(l, window, NULL, NULL));
+	g_test_assert_expected_messages();
+}
+
 /* --- views: opener id, new-view requests --- */
 
 static gboolean
@@ -1056,6 +1260,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/window-layout/bad-arguments", test_bad_arguments);
 	g_test_add_func("/window-layout/group-boxed", test_group_boxed);
 	g_test_add_func("/window-layout/groups-and-drops", test_groups_and_drops);
+	g_test_add_func("/window-layout/pane-boxed", test_pane_boxed);
+	g_test_add_func("/window-layout/panes-commands-describe", test_panes_commands_describe);
 	g_test_add_func("/view/opener-id", test_view_opener_id);
 	g_test_add_func("/view/new-view-requested", test_view_new_view_requested);
 

@@ -22,7 +22,9 @@
 #include "interfaces/gsurf-render-overlay.h"
 #include "interfaces/gsurf-keybind-provider.h"
 #include "boxed/gsurf-keybind-help.h"
+#include "util/gsurf-kiosk.h"
 
+#include <gio/gio.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
 
@@ -37,6 +39,9 @@ struct _GsurfModuleManager
 	GsurfConfig *config;        /* ref */
 	gboolean     input_passthrough; /* INSERT mode: bare keys go to the page */
 	GsurfModePolicy mode;           /* the published input mode */
+	GsurfActionExecutor executor;   /* the host's keybind actions (0.4.4) */
+	gpointer     executor_data;
+	GDestroyNotify executor_destroy;
 };
 
 G_DEFINE_FINAL_TYPE(GsurfModuleManager, gsurf_module_manager, G_TYPE_OBJECT)
@@ -446,6 +451,74 @@ gsurf_module_manager_dispatch_action(GsurfModuleManager *self, GsurfView *view,
 	return FALSE;
 }
 
+/* --- Action execution (since 0.4.4) --- */
+
+void
+gsurf_module_manager_set_action_executor(GsurfModuleManager *self, GsurfActionExecutor executor,
+                                         gpointer user_data, GDestroyNotify destroy)
+{
+	GDestroyNotify old_destroy;
+	gpointer old_data;
+
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+
+	/* Swap first, then free the old data: its destroy notify may call
+	 * back into the manager. */
+	old_destroy = self->executor_destroy;
+	old_data = self->executor_data;
+	self->executor = executor;
+	self->executor_data = user_data;
+	self->executor_destroy = destroy;
+	if (old_destroy != NULL)
+		old_destroy(old_data);
+}
+
+gboolean
+gsurf_module_manager_execute_action(GsurfModuleManager *self, GsurfWindow *window,
+                                    GsurfView *view, GsurfAction action, GError **error)
+{
+	const gchar *nick;
+	gboolean done;
+
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), FALSE);
+	g_return_val_if_fail(window == NULL || GSURF_IS_WINDOW(window), FALSE);
+	g_return_val_if_fail(view == NULL || GSURF_IS_VIEW(view), FALSE);
+	g_return_val_if_fail(error == NULL || *error == NULL, FALSE);
+
+	/* 1. A real action. */
+	if (action <= GSURF_ACTION_NONE || action >= GSURF_ACTION_LAST) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"%d is not an action", (gint)action);
+		return FALSE;
+	}
+	nick = gsurf_action_to_string(action);
+
+	/* 2. Kiosk mode refuses what a kiosk keybinding would refuse. */
+	if (gsurf_kiosk_is_enabled() && !gsurf_kiosk_allows_action(action)) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+			"action '%s' is not allowed in kiosk mode", nick);
+		return FALSE;
+	}
+
+	/* 3. Where: the active window and its active view by default. */
+	if (window == NULL)
+		window = gsurf_module_manager_get_active_window(self);
+	if (view == NULL && window != NULL)
+		view = gsurf_window_get_active_view(window);
+
+	/* 4. The host's executor knows the built-in actions; without one
+	 *    only the modules can perform it. */
+	if (self->executor != NULL && window != NULL)
+		done = self->executor(window, view, action, self->executor_data);
+	else
+		done = gsurf_module_manager_dispatch_action(self, view, action);
+	if (!done)
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+			"nothing performed action '%s' (no built-in implementation or module "
+			"handled it here)", nick);
+	return done;
+}
+
 gboolean
 gsurf_module_manager_dispatch_mouse_event(GsurfModuleManager *self, GsurfView *view,
                                           guint button, guint state)
@@ -789,6 +862,7 @@ gsurf_module_manager_dispose(GObject *object)
 	g_clear_pointer(&self->by_name, g_hash_table_unref);
 	g_clear_pointer(&self->search_paths, g_ptr_array_unref);
 	g_clear_object(&self->config);
+	gsurf_module_manager_set_action_executor(self, NULL, NULL, NULL);
 	gsurf_module_manager_set_application(self, NULL);
 
 	G_OBJECT_CLASS(gsurf_module_manager_parent_class)->dispose(object);

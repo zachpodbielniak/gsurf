@@ -70,6 +70,7 @@
 #include "interfaces/gsurf-context-menu-provider.h"
 #include "interfaces/gsurf-render-overlay.h"
 #include "interfaces/gsurf-keybind-provider.h"
+#include "interfaces/gsurf-tab-tree-provider.h"
 
 /* Utilities */
 #include "util/gsurf-keys.h"

@@ -7,15 +7,20 @@
  * Exposes browser navigation, content, and scripting as MCP tools over a
  * Unix-domain socket (via deps/mcp-glib). Built only when MCP=1. Every
  * tool defaults OFF and is enabled per-tool under modules.mcp.tools.
+ *
+ * This file holds the module (configuration, server life cycle, tool
+ * registration, the in-process entry points) and the page tools; the
+ * view / tab tree / container / mode / action tools live in
+ * gsurf-mcp-views.c and the wmux tools in gsurf-mcp-wmux.c (see
+ * gsurf-mcp-private.h).
  */
 
-#include <gsurf/gsurf.h>
 #include <gmodule.h>
 #include <yaml-glib.h>
-#include <json-glib/json-glib.h>
-#include <mcp.h>
 #include <string.h>
 #include <unistd.h>
+
+#include "gsurf-mcp-private.h"
 
 #define GSURF_TYPE_MCP_MODULE (gsurf_mcp_module_get_type())
 G_DECLARE_FINAL_TYPE(GsurfMcpModule, gsurf_mcp_module, GSURF, MCP_MODULE, GsurfModule)
@@ -28,6 +33,7 @@ struct _GsurfMcpModule
 	gchar *socket_name;   /* optional custom name */
 
 	McpUnixSocketServer *unix_server;
+	McpServer           *local_server; /* in-process calls (gsurf_mcp_module_call_tool) */
 
 	/* Per-tool enable flags (all default FALSE). */
 	GHashTable *tools;    /* gchar* tool-name -> GINT(enabled) */
@@ -43,26 +49,16 @@ active_view(void)
 	return gsurf_module_manager_get_active_view(gsurf_module_manager_get_default());
 }
 
-static GsurfWindow *
-active_window(void)
-{
-	return gsurf_module_manager_get_active_window(gsurf_module_manager_get_default());
-}
-
 static McpToolResult *
 text_result(const gchar *text)
 {
-	McpToolResult *r = mcp_tool_result_new(FALSE);
-	mcp_tool_result_add_text(r, text ? text : "");
-	return r;
+	return gsurf_mcp_text(text);
 }
 
 static McpToolResult *
 error_result(const gchar *text)
 {
-	McpToolResult *r = mcp_tool_result_new(TRUE);
-	mcp_tool_result_add_text(r, text ? text : "error");
-	return r;
+	return gsurf_mcp_error("%s", text != NULL ? text : "error");
 }
 
 typedef struct {
@@ -105,12 +101,13 @@ run_js_sync(GsurfView *view, const gchar *script, GError **error)
 static McpToolResult *
 tool_navigate(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	const gchar *uri = args && json_object_has_member(args, "uri")
 		? json_object_get_string_member(args, "uri") : NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	if (uri == NULL)
 		return error_result("missing 'uri'");
 
@@ -121,27 +118,30 @@ tool_navigate(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_get_current_uri(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	return text_result(gsurf_view_get_uri(view));
 }
 
 static McpToolResult *
 tool_get_title(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	return text_result(gsurf_view_get_title(view));
 }
 
 static McpToolResult *
 tool_go_back(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	gsurf_view_go_back(view);
 	return text_result("ok");
 }
@@ -149,9 +149,10 @@ tool_go_back(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_go_forward(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	gsurf_view_go_forward(view);
 	return text_result("ok");
 }
@@ -159,12 +160,13 @@ tool_go_forward(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_reload(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	gboolean bypass = args && json_object_has_member(args, "bypass_cache")
 		? json_object_get_boolean_member(args, "bypass_cache") : FALSE;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	gsurf_view_reload(view, bypass);
 	return text_result("ok");
 }
@@ -172,9 +174,10 @@ tool_reload(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_stop(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	gsurf_view_stop_loading(view);
 	return text_result("ok");
 }
@@ -182,12 +185,13 @@ tool_stop(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_get_page_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *text = NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	text = run_js_sync(view, "document.body ? document.body.innerText : ''", &error);
 	if (text == NULL)
 		return error_result(error ? error->message : "javascript failed");
@@ -197,12 +201,13 @@ tool_get_page_text(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 static McpToolResult *
 tool_get_page_html(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *html = NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	html = run_js_sync(view, "document.documentElement.outerHTML", &error);
 	if (html == NULL)
 		return error_result(error ? error->message : "javascript failed");
@@ -212,7 +217,8 @@ tool_get_page_html(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 static McpToolResult *
 tool_get_links(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *json = NULL;
 	static const gchar *js =
@@ -220,7 +226,7 @@ tool_get_links(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 		".slice(0,500).map(a=>({text:(a.innerText||'').trim().slice(0,200),href:a.href})))";
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	json = run_js_sync(view, js, &error);
 	if (json == NULL)
 		return error_result(error ? error->message : "javascript failed");
@@ -230,14 +236,15 @@ tool_get_links(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_execute_javascript(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	const gchar *code = args && json_object_has_member(args, "code")
 		? json_object_get_string_member(args, "code") : NULL;
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *result = NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	if (code == NULL)
 		return error_result("missing 'code'");
 	result = run_js_sync(view, code, &error);
@@ -249,13 +256,14 @@ tool_execute_javascript(McpServer *s, const gchar *name, JsonObject *args, gpoin
 static McpToolResult *
 tool_scroll(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	const gchar *dir = args && json_object_has_member(args, "direction")
 		? json_object_get_string_member(args, "direction") : "down";
 	const gchar *js;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 
 	if (g_strcmp0(dir, "up") == 0)        js = "window.scrollBy(0,-window.innerHeight*0.9)";
 	else if (g_strcmp0(dir, "top") == 0)  js = "window.scrollTo(0,0)";
@@ -266,73 +274,20 @@ tool_scroll(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	return text_result("ok");
 }
 
-static McpToolResult *
-tool_list_views(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
-{
-	GsurfWindow *window = active_window();
-	GsurfView *active = window ? gsurf_window_get_active_view(window) : NULL;
-	g_autoptr(JsonBuilder) b = json_builder_new();
-	g_autoptr(JsonGenerator) gen = NULL;
-	g_autoptr(JsonNode) root = NULL;
-	guint i, n;
-	gchar *out;
-
-	if (window == NULL)
-		return error_result("no active window");
-
-	json_builder_begin_array(b);
-	n = gsurf_window_get_n_views(window);
-	for (i = 0; i < n; i++) {
-		GsurfView *v = gsurf_window_get_nth_view(window, i);
-		json_builder_begin_object(b);
-		json_builder_set_member_name(b, "index");
-		json_builder_add_int_value(b, i);
-		json_builder_set_member_name(b, "uri");
-		json_builder_add_string_value(b, gsurf_view_get_uri(v) ? gsurf_view_get_uri(v) : "");
-		json_builder_set_member_name(b, "title");
-		json_builder_add_string_value(b, gsurf_view_get_title(v) ? gsurf_view_get_title(v) : "");
-		json_builder_set_member_name(b, "active");
-		json_builder_add_boolean_value(b, v == active);
-		/* Stable identity and tab-tree/container data (0 / null when
-		 * the view has no opener or uses the default container). */
-		json_builder_set_member_name(b, "id");
-		json_builder_add_int_value(b, (gint64)gsurf_view_get_id(v));
-		json_builder_set_member_name(b, "opener_id");
-		json_builder_add_int_value(b, (gint64)gsurf_view_get_opener_id(v));
-		json_builder_set_member_name(b, "container");
-		if (gsurf_view_get_container_id(v) != NULL)
-			json_builder_add_string_value(b, gsurf_view_get_container_id(v));
-		else
-			json_builder_add_null_value(b);
-		json_builder_end_object(b);
-	}
-	json_builder_end_array(b);
-
-	root = json_builder_get_root(b);
-	gen = json_generator_new();
-	json_generator_set_root(gen, root);
-	out = json_generator_to_data(gen, NULL);
-
-	{
-		McpToolResult *r = text_result(out);
-		g_free(out);
-		return r;
-	}
-}
-
 /* ----- find / interaction ----- */
 
 static McpToolResult *
 tool_find_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	const gchar *text = args && json_object_has_member(args, "text")
 		? json_object_get_string_member(args, "text") : NULL;
 	gboolean forward = !(args && json_object_has_member(args, "backward") &&
 		json_object_get_boolean_member(args, "backward"));
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	if (text == NULL)
 		return error_result("missing 'text'");
 	gsurf_view_find(view, text, FALSE, forward);
@@ -342,13 +297,14 @@ tool_find_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_click_link(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *js = NULL;
 	g_autofree gchar *result = NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 
 	if (args && json_object_has_member(args, "selector")) {
 		const gchar *sel = json_object_get_string_member(args, "selector");
@@ -370,72 +326,6 @@ tool_click_link(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	if (result == NULL)
 		return error_result(error ? error->message : "no matching link");
 	return text_result(result);
-}
-
-/* ----- view management ----- */
-
-static McpToolResult *
-tool_switch_view(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
-{
-	GsurfWindow *window = active_window();
-	gint64 idx = (args && json_object_has_member(args, "index"))
-		? json_object_get_int_member(args, "index") : -1;
-
-	if (window == NULL)
-		return error_result("no active window");
-	if (idx < 0 || idx >= gsurf_window_get_n_views(window))
-		return error_result("index out of range");
-	gsurf_window_set_active_view(window, gsurf_window_get_nth_view(window, (guint)idx));
-	return text_result("ok");
-}
-
-static McpToolResult *
-tool_open_view(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
-{
-	GsurfWindow *window = active_window();
-	GsurfConfig *config = gsurf_config_get_default();
-	const gchar *uri = args && json_object_has_member(args, "uri")
-		? json_object_get_string_member(args, "uri") : NULL;
-	const gchar *container = args && json_object_has_member(args, "container")
-		? json_object_get_string_member(args, "container") : NULL;
-	GsurfView *view;
-	g_autofree gchar *msg = NULL;
-
-	if (window == NULL)
-		return error_result("no active window");
-
-	/* "container": a container id or "temporary"; the registry (and the
-	 * containers module's policy, if loaded) has the final say. */
-	view = gsurf_view_new_full(NULL, container, uri, FALSE);
-	if (view == NULL)
-		return error_result("could not create a view");
-	if (config != NULL && config->settings != NULL)
-		gsurf_view_apply_settings(view, config->settings);
-	gsurf_window_add_view(window, view);
-	gsurf_window_set_active_view(window, view);
-	gsurf_view_load_uri(view, (uri != NULL && *uri != '\0') ? uri
-		: ((config && config->new_view_uri) ? config->new_view_uri : "about:blank"));
-	g_object_unref(view);
-
-	msg = g_strdup_printf("%u", gsurf_window_get_n_views(window) - 1);
-	return text_result(msg);
-}
-
-static McpToolResult *
-tool_close_view(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
-{
-	GsurfWindow *window = active_window();
-	gint64 idx = (args && json_object_has_member(args, "index"))
-		? json_object_get_int_member(args, "index") : -1;
-
-	if (window == NULL)
-		return error_result("no active window");
-	if (gsurf_window_get_n_views(window) <= 1)
-		return error_result("cannot close the last view");
-	if (idx < 0 || idx >= gsurf_window_get_n_views(window))
-		return error_result("index out of range");
-	gsurf_window_remove_view(window, gsurf_window_get_nth_view(window, (guint)idx));
-	return text_result("ok");
 }
 
 /* ----- capture ----- */
@@ -476,7 +366,8 @@ snapshot_sync(GsurfView *view, GError **error)
 static McpToolResult *
 tool_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GBytes) bytes = NULL;
 	g_autofree gchar *b64 = NULL;
@@ -485,7 +376,7 @@ tool_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	McpToolResult *r;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	bytes = snapshot_sync(view, &error);
 	if (bytes == NULL)
 		return error_result(error ? error->message : "snapshot failed");
@@ -500,7 +391,8 @@ tool_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_save_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	const gchar *path = args && json_object_has_member(args, "path")
 		? json_object_get_string_member(args, "path") : NULL;
 	g_autoptr(GError) error = NULL;
@@ -509,7 +401,7 @@ tool_save_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer
 	const guchar *data;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	if (path == NULL)
 		return error_result("missing 'path'");
 	bytes = snapshot_sync(view, &error);
@@ -566,12 +458,13 @@ tool_get_history(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 static McpToolResult *
 tool_get_cookies(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 {
-	GsurfView *view = active_view();
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *cookies = NULL;
 
 	if (view == NULL)
-		return error_result("no active view");
+		return gsurf_mcp_gerror(verr, "no active view");
 	/* Non-HttpOnly cookies visible to the current document. */
 	cookies = run_js_sync(view, "document.cookie", &error);
 	if (cookies == NULL)
@@ -783,76 +676,64 @@ tool_toggle_module(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 
 /* ===== tool registration ===== */
 
-#define MCP_TOOL_MAX_ARGS 4
+#define VIEW_ARG { "view", "integer", "stable view id (list_views 'id'); default: the active view", FALSE }
 
-typedef struct {
-	const gchar *name;      /* NULL-name entry terminates the arg list */
-	const gchar *type;      /* "string", "boolean", "number" */
-	const gchar *desc;
-	gboolean     required;
-} ToolArg;
-
-typedef struct {
-	const gchar    *name;
-	const gchar    *description;
-	ToolArg         args[MCP_TOOL_MAX_ARGS];
-	McpToolHandler  handler;
-} ToolDef;
-
-static const ToolDef tool_defs[] = {
-	{ "navigate", "Load a URI in the active view",
-	  {{ "uri", "string", "the URI to load", TRUE }}, tool_navigate },
-	{ "get_current_uri", "Get the active view's current URI", {{0}}, tool_get_current_uri },
-	{ "get_title", "Get the active view's page title", {{0}}, tool_get_title },
-	{ "go_back", "Navigate back in history", {{0}}, tool_go_back },
-	{ "go_forward", "Navigate forward in history", {{0}}, tool_go_forward },
-	{ "reload", "Reload the active view",
-	  {{ "bypass_cache", "boolean", "bypass the cache", FALSE }}, tool_reload },
-	{ "stop", "Stop loading the active view", {{0}}, tool_stop },
-	{ "get_page_text", "Get the rendered text of the page", {{0}}, tool_get_page_text },
-	{ "get_page_html", "Get the full HTML of the page", {{0}}, tool_get_page_html },
-	{ "get_links", "List the links on the page as JSON", {{0}}, tool_get_links },
-	{ "execute_javascript", "Run JavaScript in the page and return the result",
-	  {{ "code", "string", "the JavaScript to run", TRUE }}, tool_execute_javascript },
-	{ "scroll", "Scroll the page (direction: up/down/top/bottom)",
-	  {{ "direction", "string", "scroll direction", FALSE }}, tool_scroll },
-	{ "list_views", "List open views/tabs as JSON", {{0}}, tool_list_views },
-	{ "find_text", "Find text in the page",
+static const GsurfMcpToolDef page_tools[] = {
+	{ "navigate", "Load a URI in a view (default: the active view)",
+	  {{ "uri", "string", "the URI to load", TRUE }, VIEW_ARG }, tool_navigate },
+	{ "get_current_uri", "Get a view's current URI", {VIEW_ARG}, tool_get_current_uri },
+	{ "get_title", "Get a view's page title", {VIEW_ARG}, tool_get_title },
+	{ "go_back", "Navigate back in a view's history", {VIEW_ARG}, tool_go_back },
+	{ "go_forward", "Navigate forward in a view's history", {VIEW_ARG}, tool_go_forward },
+	{ "reload", "Reload a view",
+	  {{ "bypass_cache", "boolean", "bypass the cache", FALSE }, VIEW_ARG }, tool_reload },
+	{ "stop", "Stop loading a view", {VIEW_ARG}, tool_stop },
+	{ "get_page_text", "Get the rendered text of a view's page", {VIEW_ARG}, tool_get_page_text },
+	{ "get_page_html", "Get the full HTML of a view's page", {VIEW_ARG}, tool_get_page_html },
+	{ "get_links", "List the links on a view's page as JSON [{text, href}]", {VIEW_ARG},
+	  tool_get_links },
+	{ "execute_javascript", "Run JavaScript in a view's page and return the result",
+	  {{ "code", "string", "the JavaScript to run", TRUE }, VIEW_ARG }, tool_execute_javascript },
+	{ "scroll", "Scroll a view's page (direction: up/down/top/bottom)",
+	  {{ "direction", "string", "scroll direction", FALSE }, VIEW_ARG }, tool_scroll },
+	{ "find_text", "Find text in a view's page",
 	  {{ "text", "string", "the text to find", TRUE },
-	   { "backward", "boolean", "search backward", FALSE }}, tool_find_text },
+	   { "backward", "boolean", "search backward", FALSE }, VIEW_ARG }, tool_find_text },
 	{ "click_link", "Click a link by index (a[href] order) or CSS selector",
 	  {{ "index", "number", "link index", FALSE },
-	   { "selector", "string", "CSS selector", FALSE }}, tool_click_link },
-	{ "switch_view", "Switch the active view by index",
-	  {{ "index", "number", "view index", TRUE }}, tool_switch_view },
-	{ "open_view", "Open a new view/tab (returns its index)",
-	  {{ "uri", "string", "the URI to load", FALSE },
-	   { "container", "string", "container id, or \"temporary\" for a new temporary container", FALSE }},
-	  tool_open_view },
-	{ "close_view", "Close a view/tab by index",
-	  {{ "index", "number", "view index", TRUE }}, tool_close_view },
-	{ "screenshot", "Capture the visible page as a PNG image", {{0}}, tool_screenshot },
-	{ "save_screenshot", "Capture the visible page to a PNG file",
-	  {{ "path", "string", "output file path", TRUE }}, tool_save_screenshot },
+	   { "selector", "string", "CSS selector", FALSE }, VIEW_ARG }, tool_click_link },
+	{ "screenshot", "Capture a view's visible page as a PNG image", {VIEW_ARG}, tool_screenshot },
+	{ "save_screenshot", "Capture a view's visible page to a PNG file",
+	  {{ "path", "string", "output file path", TRUE }, VIEW_ARG }, tool_save_screenshot },
 	{ "get_history", "Get recent history entries",
 	  {{ "limit", "number", "max entries", FALSE }}, tool_get_history },
-	{ "get_cookies", "Get the current document's cookies", {{0}}, tool_get_cookies },
-	{ "get_config", "Get the browser configuration as JSON", {{0}}, tool_get_config },
+	{ "get_cookies", "Get the cookies visible to a view's document", {VIEW_ARG}, tool_get_cookies },
+	{ "get_config", "Get the browser configuration as JSON", {{ NULL, NULL, NULL, FALSE }},
+	  tool_get_config },
 	{ "set_config", "Set a configuration value",
 	  {{ "key", "string", "config key", TRUE },
 	   { "value", "string", "new value", TRUE }}, tool_set_config },
 	{ "set_setting", "Set a web-engine setting on the active view",
 	  {{ "key", "string", "setting key", TRUE },
 	   { "value", "string", "new value", TRUE }}, tool_set_setting },
-	{ "list_modules", "List loaded modules as JSON", {{0}}, tool_list_modules },
+	{ "list_modules", "List loaded modules as JSON", {{ NULL, NULL, NULL, FALSE }},
+	  tool_list_modules },
 	{ "toggle_module", "Activate or deactivate a module",
 	  {{ "name", "string", "module name", TRUE },
 	   { "enabled", "boolean", "enable (default true)", FALSE }}, tool_toggle_module },
-	{ NULL, NULL, {{0}}, NULL }
+	{ NULL, NULL, {{ NULL, NULL, NULL, FALSE }}, NULL }
+};
+
+/* Every tool table, in tools/list order. */
+static const GsurfMcpToolDef *const tool_tables[] = {
+	page_tools,
+	gsurf_mcp_view_tools,
+	gsurf_mcp_wmux_tools,
+	NULL
 };
 
 static JsonNode *
-build_schema(const ToolDef *def)
+build_schema(const GsurfMcpToolDef *def)
 {
 	g_autoptr(JsonBuilder) b = json_builder_new();
 	gint i;
@@ -862,7 +743,7 @@ build_schema(const ToolDef *def)
 	json_builder_add_string_value(b, "object");
 	json_builder_set_member_name(b, "properties");
 	json_builder_begin_object(b);
-	for (i = 0; i < MCP_TOOL_MAX_ARGS && def->args[i].name != NULL; i++) {
+	for (i = 0; i < GSURF_MCP_TOOL_MAX_ARGS && def->args[i].name != NULL; i++) {
 		json_builder_set_member_name(b, def->args[i].name);
 		json_builder_begin_object(b);
 		json_builder_set_member_name(b, "type");
@@ -875,7 +756,7 @@ build_schema(const ToolDef *def)
 
 	json_builder_set_member_name(b, "required");
 	json_builder_begin_array(b);
-	for (i = 0; i < MCP_TOOL_MAX_ARGS && def->args[i].name != NULL; i++)
+	for (i = 0; i < GSURF_MCP_TOOL_MAX_ARGS && def->args[i].name != NULL; i++)
 		if (def->args[i].required)
 			json_builder_add_string_value(b, def->args[i].name);
 	json_builder_end_array(b);
@@ -888,24 +769,159 @@ build_schema(const ToolDef *def)
 static void
 register_tools(GsurfMcpModule *self, McpServer *server)
 {
-	gint i;
+	guint t;
+	guint i;
 
-	for (i = 0; tool_defs[i].name != NULL; i++) {
-		const ToolDef *def = &tool_defs[i];
-		McpTool *tool;
-		JsonNode *schema;
+	for (t = 0; tool_tables[t] != NULL; t++) {
+		for (i = 0; tool_tables[t][i].name != NULL; i++) {
+			const GsurfMcpToolDef *def = &tool_tables[t][i];
+			McpTool *tool;
+			JsonNode *schema;
 
-		if (!GPOINTER_TO_INT(g_hash_table_lookup(self->tools, def->name)))
-			continue;
+			if (!GPOINTER_TO_INT(g_hash_table_lookup(self->tools, def->name)))
+				continue;
 
-		tool = mcp_tool_new(def->name, def->description);
-		schema = build_schema(def);
-		mcp_tool_set_input_schema(tool, schema);
-		json_node_unref(schema);
+			tool = mcp_tool_new(def->name, def->description);
+			schema = build_schema(def);
+			mcp_tool_set_input_schema(tool, schema);
+			json_node_unref(schema);
 
-		mcp_server_add_tool(server, tool, def->handler, self, NULL);
-		g_object_unref(tool);
+			mcp_server_add_tool(server, tool, def->handler, self, NULL);
+			g_object_unref(tool);
+		}
 	}
+}
+
+/* The tools of an in-process server, (re)built after configure() so it
+ * follows the enabled flags. */
+static McpServer *
+local_server(GsurfMcpModule *self)
+{
+	if (self->local_server == NULL) {
+		self->local_server = mcp_server_new("gsurf", GSURF_VERSION_STRING);
+		register_tools(self, self->local_server);
+	}
+	return self->local_server;
+}
+
+/**
+ * gsurf_mcp_module_call_tool:
+ * @module: the mcp module (gsurf_module_manager_get_module(mgr, "mcp"))
+ * @name: a tool name
+ * @arguments_json: (nullable): the arguments as a JSON object text; %NULL
+ *   or "" for none
+ * @is_error: (out) (optional): whether the tool reported an error
+ * @error: return location for a #GError (bad JSON, a disabled or unknown
+ *   tool)
+ *
+ * Calls a tool in-process, through the same registration (enabled flags,
+ * schemas, handlers) the socket server uses, without a client or a
+ * socket: for embedders and tests. Found with g_module_symbol() on
+ * mcp.so; the module is not linked by anything.
+ *
+ * Returns: (transfer full) (nullable): the text of the result (text items
+ *   joined with newlines; an image item as "[image <mime>]"), or %NULL
+ *   with @error set
+ *
+ * Since: 0.4.4
+ */
+G_MODULE_EXPORT gchar *
+gsurf_mcp_module_call_tool(GsurfModule *module, const gchar *name, const gchar *arguments_json,
+                           gboolean *is_error, GError **error);
+
+G_MODULE_EXPORT gchar *
+gsurf_mcp_module_call_tool(GsurfModule *module, const gchar *name, const gchar *arguments_json,
+                           gboolean *is_error, GError **error)
+{
+	GsurfMcpModule *self;
+	g_autoptr(JsonParser) parser = NULL;
+	JsonObject *args = NULL;
+	McpToolResult *result;
+	JsonArray *content;
+	GString *out;
+	guint i;
+
+	g_return_val_if_fail(GSURF_IS_MCP_MODULE(module), NULL);
+	g_return_val_if_fail(name != NULL, NULL);
+	self = GSURF_MCP_MODULE(module);
+
+	/* 1. Arguments: a JSON object, or none. */
+	if (arguments_json != NULL && *arguments_json != '\0') {
+		JsonNode *root;
+
+		parser = json_parser_new();
+		if (!json_parser_load_from_data(parser, arguments_json, -1, error))
+			return NULL;
+		root = json_parser_get_root(parser);
+		if (root == NULL || !JSON_NODE_HOLDS_OBJECT(root)) {
+			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+				"the arguments must be a JSON object");
+			return NULL;
+		}
+		args = json_node_get_object(root);
+	}
+
+	/* 2. The call, through the registered (enabled) tools only. */
+	result = mcp_server_invoke_tool(local_server(self), name, args, error);
+	if (result == NULL)
+		return NULL;
+
+	/* 3. Its content as text. */
+	out = g_string_new(NULL);
+	content = mcp_tool_result_get_content(result);
+	for (i = 0; content != NULL && i < json_array_get_length(content); i++) {
+		JsonObject *item = json_array_get_object_element(content, i);
+		const gchar *type = item != NULL && json_object_has_member(item, "type")
+			? json_object_get_string_member(item, "type") : NULL;
+
+		if (out->len > 0)
+			g_string_append_c(out, '\n');
+		if (g_strcmp0(type, "text") == 0)
+			g_string_append(out, json_object_get_string_member(item, "text"));
+		else if (g_strcmp0(type, "image") == 0)
+			g_string_append_printf(out, "[image %s]",
+				json_object_has_member(item, "mimeType")
+					? json_object_get_string_member(item, "mimeType") : "?");
+	}
+	if (is_error != NULL)
+		*is_error = mcp_tool_result_get_is_error(result);
+	mcp_tool_result_unref(result);
+	return g_string_free(out, FALSE);
+}
+
+/**
+ * gsurf_mcp_module_list_tools:
+ * @module: the mcp module
+ *
+ * The enabled tools as the socket server's tools/list announces them.
+ *
+ * Returns: (transfer full): a JSON array text of {name, description,
+ *   inputSchema}
+ *
+ * Since: 0.4.4
+ */
+G_MODULE_EXPORT gchar *gsurf_mcp_module_list_tools(GsurfModule *module);
+
+G_MODULE_EXPORT gchar *
+gsurf_mcp_module_list_tools(GsurfModule *module)
+{
+	g_autoptr(JsonBuilder) b = json_builder_new();
+	g_autoptr(JsonGenerator) gen = json_generator_new();
+	g_autoptr(JsonNode) root = NULL;
+	GList *tools;
+	GList *l;
+
+	g_return_val_if_fail(GSURF_IS_MCP_MODULE(module), NULL);
+
+	tools = mcp_server_list_tools(local_server(GSURF_MCP_MODULE(module)));
+	json_builder_begin_array(b);
+	for (l = tools; l != NULL; l = l->next)
+		json_builder_add_value(b, mcp_tool_to_json(MCP_TOOL(l->data)));
+	json_builder_end_array(b);
+	g_list_free_full(tools, g_object_unref);
+	root = json_builder_get_root(b);
+	json_generator_set_root(gen, root);
+	return json_generator_to_data(gen, NULL);
 }
 
 static void
@@ -923,6 +939,9 @@ gsurf_mcp_configure(GsurfModule *module, gpointer config_ptr)
 	GsurfConfig *config = config_ptr;
 	YamlNode *node;
 	YamlMapping *m, *tools;
+
+	/* The in-process server follows the new flags. */
+	g_clear_object(&self->local_server);
 
 	node = gsurf_config_get_module_node(config, "mcp");
 	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
@@ -975,7 +994,9 @@ gsurf_mcp_activate(GsurfModule *module)
 
 	self->unix_server = mcp_unix_socket_server_new("gsurf", GSURF_VERSION_STRING, sock);
 	mcp_unix_socket_server_set_instructions(self->unix_server,
-		"Control the gsurf web browser: navigate, read page content, run JavaScript.");
+		"Control the gsurf web browser: navigate, read page content, run JavaScript, "
+		"manage views by stable id, the tab tree, containers, input modes, any keybind "
+		"action (run_action), and wmux panes and windows (wmux_status first).");
 	g_signal_connect(self->unix_server, "session-created",
 		G_CALLBACK(on_session_created), self);
 
@@ -1021,6 +1042,7 @@ gsurf_mcp_module_finalize(GObject *object)
 	g_clear_pointer(&self->transport, g_free);
 	g_clear_pointer(&self->socket_name, g_free);
 	g_clear_pointer(&self->tools, g_hash_table_unref);
+	g_clear_object(&self->local_server);
 
 	G_OBJECT_CLASS(gsurf_mcp_module_parent_class)->finalize(object);
 }

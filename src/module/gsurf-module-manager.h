@@ -216,6 +216,75 @@ GPtrArray   *gsurf_module_manager_get_modules(GsurfModuleManager *self);
 void         gsurf_module_manager_activate_all(GsurfModuleManager *self);
 void         gsurf_module_manager_deactivate_all(GsurfModuleManager *self);
 
+/* --- Action execution (since 0.4.4) --- */
+
+/**
+ * GsurfActionExecutor:
+ * @window: the window to act in
+ * @view: (nullable): the view to act on (normally @window's active view)
+ * @action: the action to perform
+ * @user_data: (closure): data passed to
+ *   gsurf_module_manager_set_action_executor()
+ *
+ * Performs @action the way the host's keybindings do: the host's
+ * built-in actions (back, zoom, scroll, ...) and, for the rest,
+ * gsurf_module_manager_dispatch_action().
+ *
+ * Returns: %TRUE when @action was performed
+ *
+ * Since: 0.4.4
+ */
+typedef gboolean (*GsurfActionExecutor) (GsurfWindow *window, GsurfView *view,
+                                         GsurfAction action, gpointer user_data);
+
+/**
+ * gsurf_module_manager_set_action_executor:
+ * @self: a #GsurfModuleManager
+ * @executor: (nullable) (scope notified) (closure user_data) (destroy destroy):
+ *   the host's action executor, or %NULL to remove it
+ * @user_data: data for @executor
+ * @destroy: (nullable): frees @user_data when the executor is replaced or
+ *   the manager is disposed
+ *
+ * Registers the host's implementation of the keybind actions, so modules
+ * (the MCP server's run_action) can perform any #GsurfAction exactly as
+ * a key press would. The gsurf binary registers its own; an embedder may
+ * register one or leave it unset (then only module actions run).
+ *
+ * Since: 0.4.4
+ */
+void                gsurf_module_manager_set_action_executor(GsurfModuleManager *self,
+                                                             GsurfActionExecutor executor,
+                                                             gpointer user_data,
+                                                             GDestroyNotify destroy);
+
+/**
+ * gsurf_module_manager_execute_action:
+ * @self: a #GsurfModuleManager
+ * @window: (nullable): the window to act in; %NULL for the active window
+ * @view: (nullable): the view to act on; %NULL for @window's active view
+ * @action: the action to perform
+ * @error: return location for a #GError
+ *
+ * Performs @action through the host's executor (see
+ * gsurf_module_manager_set_action_executor()), or, without one (or
+ * without a window to act in), through
+ * gsurf_module_manager_dispatch_action(). In kiosk mode
+ * (gsurf_kiosk_is_enabled()) an action gsurf_kiosk_allows_action()
+ * refuses fails with %G_IO_ERROR_PERMISSION_DENIED and nothing runs.
+ * %GSURF_ACTION_NONE and out-of-range values fail with
+ * %G_IO_ERROR_INVALID_ARGUMENT; an action nothing performed (no host
+ * implementation and no module claiming it) fails with
+ * %G_IO_ERROR_NOT_SUPPORTED.
+ *
+ * Returns: %TRUE when @action was performed
+ *
+ * Since: 0.4.4
+ */
+gboolean            gsurf_module_manager_execute_action(GsurfModuleManager *self,
+                                                        GsurfWindow *window, GsurfView *view,
+                                                        GsurfAction action, GError **error);
+
 /* --- Hook dispatch --- */
 gboolean            gsurf_module_manager_dispatch_key_event(GsurfModuleManager *self, GsurfView *view,
                                                             guint keyval, guint keycode, guint state,

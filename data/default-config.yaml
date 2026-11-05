@@ -411,6 +411,35 @@ modules:
       set_config: false
       set_setting: false
       toggle_module: false
+      # Views by stable id, tab tree, containers (docs/mcp.org)
+      open_child_view: false
+      move_view: false
+      set_collapsed: false
+      get_tab_tree: false
+      list_containers: false
+      reopen_in_container: false
+      new_temporary_container_view: false
+      # Input modes and any keybind action by name
+      get_mode: false
+      set_mode: false
+      follow_hints: false
+      run_action: false             # every action a key can trigger
+      list_actions: false
+      # wmux panes and windows (needs modules.wmux)
+      wmux_status: false
+      list_wmux_windows: false
+      list_panes: false
+      wmux_command: false           # any wmux command line
+      split_pane: false
+      select_pane: false
+      kill_pane: false
+      zoom_pane: false
+      select_layout: false
+      show_view_in_pane: false
+      select_window: false
+      new_window: false
+      rename_window: false
+      kill_window: false
 
   # ---------- Tier 3: nice-to-have ----------
 

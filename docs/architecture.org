@@ -110,11 +110,25 @@ While a layout is set the abstract window routes view changes to it instead of t
 
 This is the seam between the =tabs= module (the sidebar's grouping and drags) and =wmux= (the windows and panes): neither links against the other.
 
+*Panes, commands and description (since 0.4.4).* Three more optional vfuncs let a program drive a layout without linking against its module (the =mcp= module's wmux tools):
+
+| vfunc | Wrapper | Contract |
+|-------+---------+----------|
+| =list_panes= | =gsurf_window_layout_list_panes(layout, window, group)= | The panes of a group in pane order as =GsurfLayoutPane= boxes: index (the position a "select pane N" command takes), the layout's pane id, the view shown (0 for none), active, zoomed, and the rectangle in pixels of the layout's area and as fractions (0..1) of it. =NULL= for an unknown group or a layout without panes. |
+| =run_command= | =gsurf_window_layout_run_command(layout, window, line, error)= | Run one line of the layout's command language (wmux: the tmux subset of =wmux.org=). =FALSE= with a =GError= whose message says why when it does not parse or cannot be carried out; the wrapper adds a generic error for an implementation that fails silently, and fails with =G_IO_ERROR_NOT_SUPPORTED= for a layout without a command language. |
+| =describe= | =gsurf_window_layout_describe(layout, window)= | Facts about the layout as an =a{sv}= =GVariant= (wmux: =name=, =prefix=, =status=, =mouse=, =width=, =height=, =windows=, =current=). The wrapper sinks a floating result and drops (with a warning) anything that is not a vardict. |
+
+=GsurfLayoutGroup= also gained =last= (the previously current group) and =zoomed= (one pane fills the group) flags, set by the layout in =list_groups=.
+
 *Visibility.* =gsurf_window_get_view_visible(window, view)= says whether a view is on screen: without a layout only the active view is (a change is announced by =active-view-changed=); with one the layout decides, and announces changes by calling =gsurf_window_layout_notify_visible(window)=, which emits =visible-views-changed=. Chrome (the tab tree) marks visible tabs from it.
 
 *Focus follows click.* While a layout is set, a view that takes keyboard focus — a click into it (WebKit grabs focus on a press), Tab — becomes the active view, if it is visible (a background view never becomes active this way). GTK3 follows the toplevel's =GtkWindow::set-focus= (after the change), which also fires while the window is in the background; GTK4 adds a =GtkEventControllerFocus= (=enter=, named =gsurf-view-focus=) to each view widget. =gsurf_window_set_active_view()= returns early for the active view, so the layout's own focusing in =activate_view= does not loop.
 
 *Key grab.* =gsurf_window_set_key_grab(window, TRUE)= makes every key press reach =GsurfWindow::key-press= even while the user types: GTK3 no longer runs =gtk_window_propagate_key_event()= into a focused chrome entry first, GTK4 skips its early return for bare keys in an editable, and the =gsurf= binary skips its typing guard (a focused page field or modal INSERT passthrough would otherwise send a bare key straight to the page). A key the handlers decline still reaches the focused widget. A module sets the grab after its prefix key (wmux =C-b=) so the next key is a command wherever focus is, and clears it once that key is handled; Escape reaches modules as usual.
+
+** Tab tree provider
+
+The tab tree lives in the =tabs= module; since 0.4.4 it is reachable through the =GsurfTabTreeProvider= interface (=src/interfaces/gsurf-tab-tree-provider.h=): =get_parent=, =get_collapsed=, =set_collapsed= and =move_view= (=GsurfTabTreePosition=: before, after, child; a =NULL= target makes a root at the end). Every vfunc is optional (root, expanded, "cannot"). Code finds the provider by walking the module manager's active modules; see [[file:tabs.org][tabs.org]].
 
 ** Code shared by the WebKit backends
 
