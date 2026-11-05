@@ -386,6 +386,18 @@ gsurf_tabs_select_group(GsurfTabsModule *self, guint index)
 }
 
 gboolean
+gsurf_tabs_rename_group(GsurfTabsModule *self, guint index, const gchar *name)
+{
+	GsurfWindowLayout *layout;
+
+	if (self->window == NULL || index == GSURF_TAB_GROUP_BACKGROUND)
+		return FALSE;
+	layout = gsurf_window_get_layout(self->window);
+	return layout != NULL &&
+	       gsurf_window_layout_rename_group(layout, self->window, index, name);
+}
+
+gboolean
 gsurf_tabs_group_collapsed(GsurfTabsModule *self, guint index)
 {
 	if (index == GSURF_TAB_GROUP_BACKGROUND)

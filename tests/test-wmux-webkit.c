@@ -2672,6 +2672,161 @@ test_mode_indicator(void)
 	h_free(&h);
 }
 
+/* Press @button on a sidebar row widget (GTK4: its click gesture for the
+ * button, @n_press presses; GTK3: a press, a double press for 2). */
+static void
+press_row_widget(GtkWidget *row, guint button, gint n_press)
+{
+#ifdef GSURF_BACKEND_GTK4
+	g_autofree gchar *name = n_press == 2 ? g_strdup("gsurf-chrome-dblclick-1")
+		: g_strdup_printf("gsurf-chrome-click-%u", button);
+	GtkWidget *title = find_named(row, "gsurf-tab-title");
+	graphene_rect_t bounds;
+
+	WAIT_UNTIL(gtk_widget_get_width(title) > 0);
+	g_assert_true(gtk_widget_compute_bounds(title, row, &bounds));
+	g_signal_emit_by_name(controller_named(row, name), "pressed", n_press,
+		(gdouble)(bounds.origin.x + bounds.size.width / 2),
+		(gdouble)(bounds.origin.y + bounds.size.height / 2));
+#else
+	GdkEvent *event = gdk_event_new(n_press == 2 ? GDK_2BUTTON_PRESS : GDK_BUTTON_PRESS);
+	gboolean handled = FALSE;
+
+	event->button.button = button;
+	g_signal_emit_by_name(row, "button-press-event", event, &handled);
+	gdk_event_free(event);
+	g_assert_true(handled);
+#endif
+}
+
+/* A key press delivered to @widget's chrome key handler. */
+static gboolean
+key_to(H *h, GtkWidget *widget, guint keyval)
+{
+	gboolean handled = FALSE;
+#ifdef GSURF_BACKEND_GTK4
+	(void)h;
+	g_signal_emit_by_name(controller_named(widget, "gsurf-chrome-key"), "key-pressed",
+		keyval, 0u, (GdkModifierType)0, &handled);
+#else
+	GdkEvent *event = gdk_event_new(GDK_KEY_PRESS);
+
+	event->key.window = g_object_ref(gtk_widget_get_window(h->toplevel));
+	event->key.keyval = keyval;
+	event->key.string = g_strdup("");
+	g_signal_emit_by_name(widget, "key-press-event", event, &handled);
+	gdk_event_free(event);
+#endif
+	return handled;
+}
+
+/* v0.4.3: renaming a wmux window from its sidebar heading (the menu, a
+ * double click, F2), consistent with the status line, the C-b , prompt
+ * and the saved state. */
+static void
+test_group_rename(void)
+{
+	static const gchar *const modules[] = { "tabs", NULL };
+	H h;
+	GtkWidget *entry;
+	GtkWidget *title;
+	GActionGroup *actions;
+	GsurfModule *tabs;
+	g_autofree gchar *state = NULL;
+
+	if (!gsurf_webkit_test_init() ||
+	    !h_init(&h, NULL, "  tabs:\n    enabled: true\n    sidebar: true\n", modules))
+		return;
+	tabs = gsurf_module_manager_get_module(h.mgr, "tabs");
+	cmd(&h, GDK_KEY_c, 0);
+	background_tab(&h, NULL, "d");
+	ASSERT_SIDEBAR(&h, "[0:first] first@1 [1:new*] new@1 [Background] d@1");
+
+	/* 1. The heading's menu: Rename Window… opens the entry with the
+	 *    name; Enter applies it to the right window. */
+	press_row_widget(group_row(&h, 0), 3, 1);
+	actions = g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-actions");
+	g_assert_nonnull(actions);
+	{
+		GMenuModel *model = g_object_get_data(G_OBJECT(tabs), "gsurf-tabs-menu-model");
+		g_autofree gchar *action = NULL;
+
+		g_assert_nonnull(model);
+		g_assert_cmpint(g_menu_model_get_n_items(model), ==, 1);
+		g_assert_true(g_menu_model_get_item_attribute(model, 0, G_MENU_ATTRIBUTE_ACTION,
+			"s", &action));
+		g_assert_cmpstr(action, ==, "tab.rename-group");
+	}
+	g_action_group_activate_action(actions, "rename-group", NULL);
+	entry = find_named(group_row(&h, 0), "gsurf-tab-group-rename");
+	title = find_named(group_row(&h, 0), "gsurf-tab-title");
+	g_assert_true(gtk_widget_get_visible(entry));
+	g_assert_false(gtk_widget_get_visible(title));
+	g_assert_cmpstr(gsurf_chrome_editable_get_text(entry), ==, "first");
+	gsurf_chrome_editable_set_text(entry, "  docs ");
+	g_assert_true(key_to(&h, entry, GDK_KEY_Return));
+	g_assert_false(gtk_widget_get_visible(entry));
+	g_assert_true(gtk_widget_get_visible(title));
+	ASSERT_SIDEBAR(&h, "[0:docs] first@1 [1:new*] new@1 [Background] d@1");
+	g_assert_true(((GsurfWmuxWin *)g_ptr_array_index(h.w->wins, 0))->renamed);
+	g_assert_cmpuint(h.w->current, ==, 1);
+	{
+		g_autofree gchar *status = status_text(&h);
+
+		g_assert_nonnull(strstr(status, "0:docs-"));
+	}
+
+	/* 2. A double click; Escape cancels and keeps the name. */
+	press_row_widget(group_row(&h, 1), 1, 2);
+	entry = find_named(group_row(&h, 1), "gsurf-tab-group-rename");
+	g_assert_true(gtk_widget_get_visible(entry));
+	gsurf_chrome_editable_set_text(entry, "nope");
+	g_assert_true(key_to(&h, entry, GDK_KEY_Escape));
+	g_assert_false(gtk_widget_get_visible(entry));
+	ASSERT_SIDEBAR(&h, "[0:docs] first@1 [1:new*] new@1 [Background] d@1");
+	/* Other keys are typing (the handler leaves them to the entry; on
+	 * GTK3 the entry's own handler then takes the emitted key). */
+	press_row_widget(group_row(&h, 1), 1, 2);
+#ifdef GSURF_BACKEND_GTK4
+	g_assert_false(key_to(&h, entry, GDK_KEY_a));
+#else
+	key_to(&h, entry, GDK_KEY_a);
+#endif
+	gsurf_chrome_editable_set_text(entry, "mail");
+	g_assert_true(key_to(&h, entry, GDK_KEY_KP_Enter));
+	ASSERT_SIDEBAR(&h, "[0:docs] first@1 [1:mail*] new@1 [Background] d@1");
+
+	/* 3. The C-b , prompt starts from the same name; the saved state
+	 *    carries it. */
+	cmd(&h, GDK_KEY_comma, 0);
+	g_assert_cmpstr(gsurf_chrome_editable_get_text(h.w->prompt_entry), ==, "mail");
+	prompt_key(&h, GDK_KEY_Escape);
+	state = gsurf_window_layout_serialize(GSURF_WINDOW_LAYOUT(h.module), h.window,
+		map_index, h.window);
+	g_assert_nonnull(strstr(state, "name=\"docs\" renamed=1"));
+	g_assert_nonnull(strstr(state, "name=\"mail\" renamed=1"));
+
+	/* 4. F2 on a heading; an empty name goes back to automatic naming. */
+	g_assert_true(key_to(&h, group_row(&h, 0), GDK_KEY_F2));
+	entry = find_named(group_row(&h, 0), "gsurf-tab-group-rename");
+	g_assert_true(gtk_widget_get_visible(entry));
+	gsurf_chrome_editable_set_text(entry, "   ");
+	g_assert_true(key_to(&h, entry, GDK_KEY_Return));
+	ASSERT_SIDEBAR(&h, "[0:first] first@1 [1:mail*] new@1 [Background] d@1");
+	g_assert_false(((GsurfWmuxWin *)g_ptr_array_index(h.w->wins, 0))->renamed);
+	/* Other keys on a heading are not F2. */
+#ifdef GSURF_BACKEND_GTK4
+	g_assert_false(key_to(&h, group_row(&h, 0), GDK_KEY_F3));
+#endif
+
+	/* 5. The background heading cannot be renamed (F2 is taken, nothing
+	 *    opens). */
+	g_assert_true(key_to(&h, group_row(&h, G_MAXUINT), GDK_KEY_F2));
+	entry = find_named(group_row(&h, G_MAXUINT), "gsurf-tab-group-rename");
+	g_assert_true(entry == NULL || !gtk_widget_get_visible(entry));
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2700,6 +2855,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/wmux/webkit/grouped-tree", test_grouped_tree);
 	g_test_add_func("/gsurf/wmux/webkit/opened-children", test_opened_children);
 	g_test_add_func("/gsurf/wmux/webkit/mode-indicator", test_mode_indicator);
+	g_test_add_func("/gsurf/wmux/webkit/group-rename", test_group_rename);
 
 	ret = g_test_run();
 	g_clear_object(&server);

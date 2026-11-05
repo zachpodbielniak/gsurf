@@ -204,6 +204,9 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GsurfLayoutGroup, gsurf_layout_group_unref)
  *   @view: show drop targets over the views on screen
  * @end_view_drag: optional (since 0.4.2); the drag ended (dropped or
  *   not): hide them again
+ * @rename_group: optional (since 0.4.3); give the group with @index the
+ *   name @name; %NULL or "" goes back to the layout's automatic naming;
+ *   %FALSE for an unknown index
  *
  * Virtual table for #GsurfWindowLayout. Every vfunc runs on the main
  * thread; the window guarantees @attach before and @detach after every
@@ -239,6 +242,10 @@ struct _GsurfWindowLayoutInterface
 	void       (*begin_view_drag) (GsurfWindowLayout *self, GsurfWindow *window,
 	                               GsurfView *view);
 	void       (*end_view_drag)   (GsurfWindowLayout *self, GsurfWindow *window);
+
+	/* Since 0.4.3 */
+	gboolean   (*rename_group)    (GsurfWindowLayout *self, GsurfWindow *window,
+	                               guint index, const gchar *name);
 };
 
 /* --- Interface wrappers (the window calls these; so may tests) --- */
@@ -380,6 +387,25 @@ GPtrArray *gsurf_window_layout_list_groups(GsurfWindowLayout *self, GsurfWindow 
  */
 gboolean   gsurf_window_layout_select_group(GsurfWindowLayout *self, GsurfWindow *window,
                                             guint index);
+
+/**
+ * gsurf_window_layout_rename_group:
+ * @self: a #GsurfWindowLayout
+ * @window: the window
+ * @index: a group index (gsurf_layout_group_get_index())
+ * @name: (nullable): the new name; %NULL or "" restores automatic naming
+ *   (wmux: the window follows its active pane's page title)
+ *
+ * Renames a group, the way the layout's own rename does (wmux: like
+ * =rename-window=), so every place that shows the name agrees. The
+ * layout announces the change with gsurf_window_layout_notify_groups().
+ *
+ * Returns: %TRUE when the layout has the group
+ *
+ * Since: 0.4.3
+ */
+gboolean   gsurf_window_layout_rename_group(GsurfWindowLayout *self, GsurfWindow *window,
+                                            guint index, const gchar *name);
 
 /**
  * gsurf_window_layout_show_view_at:
