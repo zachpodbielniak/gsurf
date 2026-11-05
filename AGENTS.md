@@ -182,6 +182,16 @@ and `GTlsCertificate` instead.
    (`--list-modules` prints that table in alphabetical order).
 4. `make` (modules are auto-discovered) and add a test under `tests/`.
 
+**Control socket and gsurfctl.** `src/control/` is the scripting interface
+(`GsurfControlServer`, core methods, `GsurfControlClient`,
+`GsurfControlProvider`), started by `main.c` when `control.enabled`;
+`tools/gsurfctl/gsurfctl.c` is the client binary (built by `make`, tested by
+`tests/test-control*.c` and `tests/test-gsurfctl.c`). A behaviour or config
+change that a user can reach through the socket updates `docs/control.org`
+(and `docs/gsurfctl.org` / `data/gsurfctl.1` for new commands) in the same
+commit. Keep `gsurfctl help --names` exact: it lists the commands and is
+checked by tests. The control headers stay out of `gsurf.h` (json-glib).
+
 `modules/search_engines/` is the reference implementation; `modules/mcp/` shows a
 module that runs its own server lifecycle on `activate()`; `modules/adblock/`
 shows a module that also ships a WebKit web-process extension (built into

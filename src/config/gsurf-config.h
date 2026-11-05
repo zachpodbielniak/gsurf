@@ -39,6 +39,10 @@ G_DECLARE_FINAL_TYPE(GsurfConfig, gsurf_config, GSURF, CONFIG, GObject)
  * @fullscreen_on_start: start fullscreen
  * @settings: web engine default settings (#GsurfSettings)
  * @kiosk: host-selected UI restrictions; set before creating windows/views
+ * @control_enabled: start the control socket (`control.enabled`, default
+ *   %TRUE; read by the gsurf binary, since 0.5)
+ * @control_name: (nullable): the instance name the control socket
+ *   registers (`control.name`, since 0.5)
  * @keybinds: (element-type utf8 gint): normalized "Mods+Key" -> #GsurfAction
  *
  * Public configuration struct. Fields are read directly by the rest of
@@ -81,6 +85,11 @@ struct _GsurfConfig
 	/*< public >*/
 	/* Set by the host before creating views; kiosk is a UI restriction. */
 	gboolean    kiosk;
+
+	/* The control socket (`control:`, since 0.5): whether the gsurf binary
+	 * starts it, and the instance name it registers (NULL: none). */
+	gboolean    control_enabled;
+	gchar      *control_name;
 };
 
 /**

@@ -56,6 +56,7 @@ static GParamSpec *props[N_PROPS];
 
 enum {
 	SIG_MODE_CHANGED,
+	SIG_DOWNLOAD_STARTED,
 	N_SIGNALS
 };
 
@@ -693,9 +694,12 @@ gsurf_module_manager_dispatch_decide_destination(GsurfModuleManager *self,
 			continue;
 		path = gsurf_download_handler_decide_destination(GSURF_DOWNLOAD_HANDLER(m),
 			uri, suggested);
-		if (path != NULL)
+		if (path != NULL) {
+			g_signal_emit(self, signals[SIG_DOWNLOAD_STARTED], 0, uri, suggested, path);
 			return path;
+		}
 	}
+	g_signal_emit(self, signals[SIG_DOWNLOAD_STARTED], 0, uri, suggested, NULL);
 	return NULL;
 }
 
@@ -932,6 +936,24 @@ gsurf_module_manager_class_init(GsurfModuleManagerClass *klass)
 	signals[SIG_MODE_CHANGED] = g_signal_new("mode-changed",
 		G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 1, GSURF_TYPE_MODE_POLICY);
+
+	/**
+	 * GsurfModuleManager::download-started:
+	 * @manager: the module manager
+	 * @uri: (nullable): the download's URI
+	 * @suggested: (nullable): the file name the server suggested
+	 * @destination: (nullable): the path a #GsurfDownloadHandler chose, or
+	 *   %NULL when the engine picks it
+	 *
+	 * Emitted by gsurf_module_manager_dispatch_decide_destination(), which
+	 * the backends call once for every download that starts. The control
+	 * server turns it into a `download` event.
+	 *
+	 * Since: 0.5
+	 */
+	signals[SIG_DOWNLOAD_STARTED] = g_signal_new("download-started",
+		G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 3, G_TYPE_STRING, G_TYPE_STRING, G_TYPE_STRING);
 }
 
 static void

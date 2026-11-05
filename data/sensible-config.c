@@ -179,6 +179,11 @@ gsurf_config_init(void)
 	config->proxy_uri = g_strdup("");
 	config->do_not_track = FALSE;                  /* DNT header, via the hardening module */
 
+	/* ===== Control socket (gsurfctl, docs/control.org) ===== */
+	config->control_enabled = TRUE;
+	g_free(config->control_name);
+	config->control_name = NULL;                   /* e.g. g_strdup("main"): gsurfctl -i main */
+
 	/* ===== Window ===== */
 	g_free(config->window_title);
 	config->window_title = g_strdup("gsurf");

@@ -46,6 +46,10 @@ gsurf_config_init(void)
 	/* config->window_height = 800; */
 	/* g_free(config->window_title); config->window_title = g_strdup("gsurf"); */
 
+	/* --- Control socket (gsurfctl) --- */
+	/* config->control_enabled = FALSE; */
+	/* g_free(config->control_name); config->control_name = g_strdup("work"); */
+
 	/* --- Web engine defaults (GsurfSettings) --- */
 	/* config->settings->javascript = TRUE; */
 	/* config->settings->webgl = FALSE; */

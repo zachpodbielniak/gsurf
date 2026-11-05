@@ -1,0 +1,139 @@
+.TH GSURFCTL 1 "2026" "gsurf 0.4.4" "User Commands"
+.SH NAME
+gsurfctl \- drive a running gsurf from the shell
+.SH SYNOPSIS
+.B gsurfctl
+.RI [ OPTIONS ]
+.I COMMAND
+.RI [ ARGUMENTS ...]
+.SH DESCRIPTION
+.B gsurfctl
+talks to the control socket every
+.BR gsurf (1)
+opens (JSON-RPC 2.0 over a Unix socket in
+.IR $XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/control.sock ,
+owner-only; see
+.I docs/control.org
+under
+.IR @DATADIR@/doc/gsurf ).
+It opens and lists tabs, reads pages, runs JavaScript and key-binding
+actions, switches the input mode, drives wmux panes and windows, reads the
+configuration, toggles modules and follows events.
+.PP
+The instance is the one given with
+.B \-S
+or
+.BR \-i ,
+else
+.BR $GSURF_INSTANCE ,
+else the only one running, else the most recently focused one.
+.PP
+Options may come before or after the command;
+.B \-\-
+ends them. The words after
+.BR wmux ,
+.B eval
+and
+.B call
+are taken literally.
+.SH OPTIONS
+.TP
+.BR \-i ", " \-\-instance =\fIID\fR
+The instance: a pid, a
+.B control.name
+or a runtime directory id.
+.TP
+.BR \-S ", " \-\-socket =\fIPATH\fR
+A control socket instead of an instance.
+.TP
+.BR \-a ", " \-\-all
+Send the command to every running instance.
+.TP
+.BR \-j ", " \-\-json
+Print results as JSON.
+.TP
+.BR \-p ", " \-\-pretty
+Indent JSON.
+.TP
+.BR \-T ", " \-\-timeout =\fIS\fR
+Seconds to wait for a reply (default 30; 0 forever).
+.TP
+.BR \-q ", " \-\-quiet
+Print nothing on success.
+.TP
+.BR \-\-completion =\fIbash\fR
+Print the bash completion script.
+.TP
+.BR \-V ", " \-\-version
+Print the version.
+.TP
+.B \-\-license
+Print the license.
+.SH COMMANDS
+.TP
+.B list
+The running instances.
+.TP
+.B info
+pid, version, backend, name, windows, views, focus time.
+.TP
+.BR open " [\fIURL\fR] [\fB\-\-bg\fR] [\fB\-\-container\fR \fIID\fR] [\fB\-\-child\-of\fR \fIVIEW\fR]"
+Open a tab (an existing file path opens as file://).
+.TP
+.BR nav " \fIURL\fR, " back ", " forward ", " stop ", " reload " [\fB\-\-hard\fR]"
+Load, history, reload.
+.TP
+.BR tabs ", " tab " \fIVIEW\fR, " close " [\fIVIEW\fR]"
+List, switch to, close views (ids).
+.TP
+.BR tree ", " move " \fIVIEW\fR \fB\-\-parent\fR|\fB\-\-before\fR|\fB\-\-after\fR|\fB\-\-index\fR \fIN\fR, " collapse " \fIVIEW\fR [on|off]"
+The tab tree.
+.TP
+.BR containers ", " reopen " \fIVIEW CONTAINER\fR"
+Containers; reopen a view in another one.
+.TP
+.BR title ", " uri ", " text ", " eval " \fIJS\fR, " screenshot " \fIFILE\fR"
+The page.
+.TP
+.BR actions ", " action " \fINAME\fR, " mode " [normal|insert]"
+Key-binding actions and the input mode.
+.TP
+.BR panes ", " windows ", " wmux " \fI'COMMAND'\fR, " select\-window " \fIN\fR, " rename\-window " \fIN\fR [\fINAME\fR]"
+wmux panes and windows.
+.TP
+.BR config " [\fIKEY\fR], " modules ", " module " \fINAME\fR [on|off], " methods
+Configuration, modules, the socket's methods.
+.TP
+.BR watch " [\fITOPIC\fR...]"
+Print events (view, uri, title, load, mode, layout, download) until
+interrupted.
+.TP
+.BR call " \fIMETHOD\fR [\fIJSON\fR|\fIKEY=VALUE\fR...]"
+A raw JSON-RPC call.
+.TP
+.BR help " [\fICOMMAND\fR|\fB\-\-names\fR]"
+Help, one command's usage, or the command names.
+.SH EXIT STATUS
+0 ok; 1 the command failed; 2 usage error; 3 no instance (or it could not be
+reached); 4 refused by kiosk mode.
+.SH ENVIRONMENT
+.TP
+.B GSURF_INSTANCE
+The default instance.
+.TP
+.B XDG_RUNTIME_DIR
+Where instances are found.
+.SH EXAMPLES
+.nf
+gsurfctl open https://example.org \-\-bg
+gsurfctl \-j tabs
+gsurfctl wmux 'split\-window \-h https://github.com'
+gsurfctl mode insert
+gsurfctl watch view uri
+gsurfctl \-i work open https://mail.example.org
+gsurfctl call open uri=https://example.org background=true
+.fi
+.SH SEE ALSO
+.BR gsurf (1)
+.SH LICENSE
+AGPL-3.0-or-later.
