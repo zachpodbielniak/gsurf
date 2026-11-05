@@ -11,7 +11,7 @@
 # Version
 VERSION_MAJOR := 0
 VERSION_MINOR := 4
-VERSION_MICRO := 2
+VERSION_MICRO := 3
 VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_MICRO)
 
 # Installation directories
@@ -227,6 +227,17 @@ ifeq ($(LRG_BACKEND),1)
     # WebKitGTK offscreen engine unless explicitly building the GTK-free WPE one.
     LRG_ENGINE ?= webkitgtk
     LRG_AVAILABLE := $(shell test -f $(LRG_GRAYLIB_INC)/graylib.h && echo 1 || echo 0)
+    # An explicit LRG_BACKEND=1 with no graylib is a configuration error, not
+    # a reason to quietly build a GTK-only libgsurf whose `--lrg' then fails at
+    # runtime.  Say exactly where we looked and how to fix it.  (clean/help
+    # style goals don't need the backend, so they are let through.)
+    ifneq ($(LRG_AVAILABLE),1)
+        ifeq ($(filter clean clean-all help show-config check-deps install-deps,$(MAKECMDGOALS)),)
+            $(error LRG_BACKEND=1 but graylib was not found at $(LRG_GRAYLIB_INC)/graylib.h \
+(LIBREGNUM_DIR=$(LIBREGNUM_DIR)).  Run `git submodule update --init --recursive' \
+for the bundled deps/libregnum, or pass LIBREGNUM_DIR=<a recursively checked-out libregnum>)
+        endif
+    endif
     ifeq ($(LRG_AVAILABLE),1)
         CFLAGS += -DGSURF_HAVE_LRG_BACKEND=1
         ifeq ($(LRG_ENGINE),wpe)

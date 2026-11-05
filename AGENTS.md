@@ -47,15 +47,30 @@ raylib from libregnum.
 **libregnum location.**  gsurf bundles its own libregnum as a git submodule at
 `deps/libregnum` (clone with `--recursive`, or `git submodule update --init
 --recursive`), so the LRG backend builds self-contained standalone — `make
-LRG_BACKEND=1` builds the bundled libregnum automatically when needed.
-`config.mk` resolves `LIBREGNUM_DIR` to: an explicit `LIBREGNUM_DIR=<path>`
-override (highest priority) → else the bundled `deps/libregnum` when it is
-recursively checked out → else a sibling `../libregnum`.  An embedder links its
-OWN libregnum by passing the override: **cmacs** builds the LRG gsurf lib with
+LRG_BACKEND=1` builds the bundled **graylib** (only graylib: the LRG backend
+uses nothing else from libregnum, and libregnum's full build pulls in
+MMO/OpenSSL, cad-glib, ai-glib, … that can break independently) before any LRG
+object compiles, because `graylib.h` includes graylib's *generated*
+`grl-version.h`.  That sub-make pins graylib's `BUILDDIR` and `BUILD_GIR=0`, so
+a gsurf `BUILDDIR=`/`BUILD_GIR=` on the command line doesn't leak into it, and
+it runs only when an archive is missing (never against an embedder's prebuilt
+copy).  `config.mk` resolves `LIBREGNUM_DIR` to: an explicit
+`LIBREGNUM_DIR=<path>` override (highest priority) → else the bundled
+`deps/libregnum` when it is recursively checked out → else a sibling
+`../libregnum`.  `LRG_BACKEND=1` with no `graylib.h` at the resolved path is a
+hard `$(error)`, not a silent GTK-only build.  An embedder links its OWN
+libregnum by passing the override: **cmacs** builds the LRG gsurf lib with
 `LIBREGNUM_DIR=$(cmacs)/deps/libregnum` so only ONE libregnum/graylib/raylib is
 linked into the host (the static-lib dedup invariant); gsurf's bundled copy is
-unused there and need not be checked out.  **Toggling `LRG_BACKEND` between
-builds needs `make clean`** (the shared object paths don't see the flag change).
+unused there and need not be checked out.  **Toggling `LRG_BACKEND` (or
+`GTK_BACKEND`, `LIBREGNUM_DIR`, any CFLAGS) needs no `make clean`:** the
+Makefile writes the configuration to `$(OBJDIR)/.build-flags` at parse time
+whenever it changes, and every object, test object and the libraries depend on
+it.  `tests/test-build-config.sh` (run by `make test`, alone by `make
+test-build`) checks all of this against a stub libregnum without compiling.
+Bumping `deps/libregnum`: check the nested pins resolve from a fresh clone
+(`git submodule update --init --recursive` in a scratch clone) — a nested
+commit that was never pushed fails there with `upload-pack: not our ref`.
 
 `STATIC=1` links `libgsurf.a` into the `gsurf` binary (no runtime
 `libgsurf.so` dependency); system libs (GTK/WebKit/…) stay dynamic since

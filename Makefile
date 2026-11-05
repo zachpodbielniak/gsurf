@@ -31,7 +31,7 @@ _clean_then_build:
 	$(MAKE) $(_other_goals)
 else
 
-.PHONY: all lib gsurf gir modules test test-gui appimage adblock-lists deps check-deps
+.PHONY: all lib gsurf gir modules test test-build test-gui appimage adblock-lists deps check-deps
 
 # Include configuration
 include config.mk
@@ -72,17 +72,33 @@ LIB_SRCS += src/backend/lrg/gsurf-lrg-backend.c \
 	src/backend/lrg/gsurf-lrg-window.c \
 	src/backend/lrg/gsurf-lrg-engine-$(LRG_ENGINE).c
 
-# Standalone convenience: build the bundled (or pointed-at) libregnum so its
-# graylib/raylib archives exist before we link.  These targets have NO
-# prerequisites, so make runs them only when the archive file is MISSING --
-# never to "update" an embedder's prebuilt copy.  cmacs builds libregnum itself
-# and overrides LIBREGNUM_DIR, so the archives are already present and the
-# recipe never fires there.  (When both are missing the recipe runs twice; the
-# second invocation is a no-op since the first `make -C' built both.)
-$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB):
-	$(MAKE) -C $(LIBREGNUM_DIR)
+# Standalone convenience: build the bundled (or pointed-at) graylib so its
+# graylib/raylib archives -- and its GENERATED headers (grl-version.h, which
+# graylib.h includes) -- exist before anything that includes graylib.h
+# compiles or links.  Only graylib is built, not all of libregnum: the LRG
+# backend uses nothing but graylib, and the full libregnum build drags in
+# MMO/OpenSSL, cad-glib, ai-glib, ... that can fail independently of gsurf.
+#
+# The archives have NO prerequisites, so make runs the recipe only when one is
+# MISSING -- never to "update" an embedder's prebuilt copy.  cmacs builds its
+# libregnum itself and overrides LIBREGNUM_DIR, so the archives are already
+# present and the recipe never fires there.  `&:' (grouped target) runs the
+# recipe ONCE for both archives; with plain `a b:' a parallel make ran two
+# concurrent graylib builds over the same tree.
+#
+# Command-line variables propagate to sub-makes via MAKEFLAGS and override the
+# sub-make's own assignments, so graylib's BUILDDIR is pinned (a gsurf
+# `BUILDDIR=build-lrg' would otherwise move graylib's archives away from
+# $(LRG_GRAYLIB_LIB)), and its GIR is skipped (gsurf's `BUILD_GIR=1' is about
+# Gsurf's GIR; graylib's would only add a g-ir-scanner dependency).
+$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) &:
+	$(MAKE) -C $(GRAYLIB_DIR) BUILDDIR=$(abspath $(GRAYLIB_DIR))/build BUILD_GIR=0
 $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): \
 	$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB)
+# The LRG sources include graylib.h, whose grl-version.h exists only once
+# graylib has been built: order-only, so a rebuilt archive doesn't recompile.
+$(patsubst src/%.c,$(OBJDIR)/%.o,$(filter src/backend/lrg/%,$(LIB_SRCS))): \
+	| $(LRG_GRAYLIB_LIB)
 endif
 endif
 
@@ -121,6 +137,29 @@ CRISPY_OBJS := $(patsubst deps/%.c,$(OBJDIR)/deps/%.o,$(CRISPY_SRCS))
 MAIN_OBJ := $(OBJDIR)/main.o
 TEST_OBJS := $(patsubst tests/%.c,$(OBJDIR)/tests/%.o,$(TEST_SRCS))
 TEST_BINS := $(patsubst tests/%.c,$(OUTDIR)/%,$(TEST_SRCS))
+
+# Build-configuration stamp.  Object paths don't encode the configuration, so
+# toggling LRG_BACKEND (or GTK_BACKEND, LIBREGNUM_DIR, any CFLAGS change) between
+# two builds of one BUILDDIR used to leave objects compiled for the OTHER
+# configuration -- e.g. gsurf-backend.o still referencing the LRG backend after
+# LRG_BACKEND=1 -> 0, an undefined-reference link failure -- unless the user
+# remembered `make clean'.  The stamp holds every flag that shapes an object;
+# it is rewritten (at parse time, so the comparison wins any race with the
+# rules below) only when that text changes, and every compiled artifact
+# depends on it, so a configuration change rebuilds exactly once.
+GSURF_FLAGS_STAMP := $(OBJDIR)/.build-flags
+GSURF_FLAGS_NOW := CC=$(CC) GTK_BACKEND=$(GTK_BACKEND) LRG_BACKEND=$(LRG_BACKEND) \
+	LRG_ENGINE=$(LRG_ENGINE) LIBREGNUM_DIR=$(LIBREGNUM_DIR) STATIC=$(STATIC) \
+	CFLAGS=$(CFLAGS) TEST_CFLAGS=$(TEST_CFLAGS) \
+	LDFLAGS=$(LDFLAGS)
+ifeq ($(filter clean clean-all,$(MAKECMDGOALS)),)
+ifneq ($(file <$(GSURF_FLAGS_STAMP)),$(GSURF_FLAGS_NOW))
+$(shell mkdir -p $(OBJDIR))
+$(file >$(GSURF_FLAGS_STAMP),$(GSURF_FLAGS_NOW))
+endif
+endif
+$(LIB_OBJS) $(YAMLGLIB_OBJS) $(MAIN_OBJ) $(TEST_OBJS): $(GSURF_FLAGS_STAMP)
+$(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): $(GSURF_FLAGS_STAMP)
 
 # Include build rules
 include rules.mk
@@ -200,6 +239,13 @@ modules: lib $(OUTDIR)/modules
 test: gsurf modules $(TEST_BINS)
 	@echo "Running tests..."
 	@failed=0; \
+	echo "  Running test-build-config.sh..."; \
+	if tests/test-build-config.sh "$(MAKE)" "$(BUILDDIR)"; then \
+		echo "    PASS"; \
+	else \
+		echo "    FAIL"; \
+		failed=$$((failed + 1)); \
+	fi; \
 	for test in $(TEST_BINS); do \
 		echo "  Running $$(basename $$test)..."; \
 		if LD_LIBRARY_PATH=$(OUTDIR):$(CURDIR)/deps/mcp-glib/build $$test; then \
@@ -215,6 +261,10 @@ test: gsurf modules $(TEST_BINS)
 	else \
 		echo "All tests passed"; \
 	fi
+
+# Build-system regression tests only (no compile; see the script's header).
+test-build:
+	tests/test-build-config.sh "$(MAKE)" "$(BUILDDIR)"
 
 # test-tab-tree compiles the tabs module's tree model in directly.
 $(OBJDIR)/tests/test-tab-tree.o: modules/tabs/gsurf-tab-tree.c modules/tabs/gsurf-tab-tree.h
