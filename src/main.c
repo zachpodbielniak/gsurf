@@ -9,6 +9,7 @@
  */
 
 #include "gsurf.h"
+#include "control/gsurf-control.h"
 
 #include <gdk/gdk.h>
 #include <glib-unix.h>
@@ -665,6 +666,7 @@ main(int argc, char *argv[])
 	GsurfApplication *app;
 	GsurfWindow *window;
 	GsurfView *view;
+	GsurfControlServer *control = NULL;
 	const gchar *target_uri;
 
 	context = g_option_context_new("[URI] - GObject Surf web browser");
@@ -900,6 +902,23 @@ main(int argc, char *argv[])
 	/* Activate modules now that the app/window/view exist. */
 	gsurf_module_manager_activate_all(mgr);
 
+	/* The control socket (gsurfctl, docs/control.org): started once the
+	 * modules are active, so their control methods register too. A
+	 * failure leaves the browser running without it. */
+	if (config->control_enabled) {
+		g_autoptr(GError) cerr = NULL;
+
+		control = gsurf_control_server_new(app);
+		if (config->control_name != NULL &&
+		    !gsurf_control_server_set_name(control, config->control_name))
+			g_warning("control.name '%s' is not a valid instance name "
+				"(letters, digits, '-', '_', '.')", config->control_name);
+		if (!gsurf_control_server_start(control, NULL, &cerr)) {
+			g_warning("gsurf: control socket: %s", cerr->message);
+			g_clear_object(&control);
+		}
+	}
+
 	/* The initial view was constructed before any module was active, so
 	 * its script-injector hooks (content filters, user scripts, styles)
 	 * have not run yet; views created from here on get them on creation. */
@@ -927,6 +946,11 @@ main(int argc, char *argv[])
 	g_unix_signal_add(SIGTERM, on_quit_signal, app);
 	g_unix_signal_add(SIGHUP, on_quit_signal, app);
 	gsurf_application_run(app);
+	/* Clients go before the windows do. */
+	if (control != NULL) {
+		gsurf_control_server_stop(control);
+		g_object_unref(control);
+	}
 	/* The executor borrows the application; drop it first. */
 	gsurf_module_manager_set_action_executor(mgr, NULL, NULL, NULL);
 	g_object_unref(app);

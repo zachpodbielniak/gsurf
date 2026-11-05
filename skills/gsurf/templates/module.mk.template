@@ -1,0 +1,32 @@
+# modules/<name>/Makefile - builds <name>.so (the directory name)
+#
+# SPDX-License-Identifier: AGPL-3.0-or-later
+#
+# In the gsurf tree, the top-level `make modules` finds this directory and
+# passes OUTDIR, LIBDIR, CFLAGS (the module flags) and LDFLAGS
+# (-shared -fPIC). Outside the tree, pass them yourself:
+#
+#   make OUTDIR=$PWD/out LIBDIR=$GSURF_SRC/build/release \
+#        CFLAGS="$(make -s -C $GSURF_SRC print-MODULE_CFLAGS)" \
+#        LDFLAGS="-shared -fPIC"
+#
+# Then run gsurf with GSURF_MODULE_PATH=$PWD/out (one directory).
+
+MODULE_NAME := $(notdir $(CURDIR))
+SRCS := $(wildcard *.c)
+CC ?= gcc
+
+# libgsurf link flags. STATIC=1 builds of gsurf pass LIBGSURF_LINK= so
+# modules resolve gsurf_* from the executable instead.
+LIBGSURF_LINK ?= -L$(LIBDIR) -lgsurf
+
+all: $(OUTDIR)/$(MODULE_NAME).so
+
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS)
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS) $(LIBGSURF_LINK)
+
+clean:
+	rm -f $(OUTDIR)/$(MODULE_NAME).so
+
+.PHONY: all clean

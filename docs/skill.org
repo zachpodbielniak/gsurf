@@ -1,0 +1,72 @@
+#+TITLE: The /gsurf agent skill
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+=skills/gsurf/= is an agent skill: a bundle of instructions, references and templates that teaches an AI coding agent (Claude Code, Grok, any tool that reads the agent-skills layout) to drive, configure, extend and build gsurf. An agent loads it as =/gsurf=. It covers =gsurfctl= and the control protocol, YAML and C configuration, every module's keys, wmux, tabs and containers, keybindings and modes, the MCP server, writing modules, embedding libgsurf, building on Fedora and troubleshooting.
+
+The skill follows the house layout of the agent-skills repository (the =/skill-skill-writer= skill) with one deliberate difference: it is named =gsurf=, not =skill-gsurf=, so agents invoke it as =/gsurf=.
+
+* Layout
+
+| Path | What it holds |
+|------+---------------|
+| =skills/gsurf/SKILL.md= | Frontmatter (=name: gsurf=, =description:=), then =# Skill: gsurf= with the sections When to Use, Prerequisites, Instructions (a decision map to the references), Output Format, Examples and Constraints. At most 500 lines. |
+| =skills/gsurf/references/*.md= | One topic each, at most 200 lines: =gsurfctl.md=, =control-protocol.md=, =configuration-yaml.md=, =configuration-c.md=, =modules-catalog.md= (all 33 modules, the keys each one reads, and the keys of the default config that nothing reads), =writing-modules.md=, =wmux.md=, =tabs-and-containers.md=, =keybindings-and-modes.md=, =mcp.md=, =embedding.md=, =building.md=, =troubleshooting.md=. |
+| =skills/gsurf/templates/*.template= | Files to copy and adapt, at most 100 lines (see "Size exceptions"): =config.yaml.template= (a complete YAML config), =config.c.template= (a complete C config with the embedded modules YAML), =module.c.template= and =module.mk.template= (a working =GsurfUriHandler= module and its Makefile), =gsurfctl-session.sh.template= (a ShellCheck-clean session script). |
+
+The references are Markdown because agents read Markdown; this document and the rest of =docs/= stay in org-mode.
+
+* Installing
+
+#+begin_src sh
+make install-skill            # copy to ~/.agents/skills/gsurf, link ~/.claude and ~/.grok
+make SKILLS_LINK=1 install-skill   # link this checkout instead of copying
+make uninstall-skill
+#+end_src
+
+=install-skills= and =uninstall-skills= are aliases. The targets build nothing, skip the dependency check, and are not part of =make install=.
+
+| Variable | Default | Meaning |
+|----------+---------+---------|
+| =AGENTS_HOME= | =$HOME/.agents= | the shared copy goes to =$AGENTS_HOME/skills/gsurf= |
+| =CLAUDE_DIR= | =$HOME/.claude= | =$CLAUDE_DIR/skills/gsurf= links to the shared copy |
+| =GROK_DIR= | =$HOME/.grok= | =$GROK_DIR/skills/gsurf= links to the shared copy |
+| =SKILLS_LINK= | =0= | =1=: the shared path is a symlink to =skills/gsurf= in this tree, so edits show at once |
+
+Rules the installer follows, mirroring agent-skills' =scripts/install.sh= and libresearch's recipe:
+
+- An existing directory at a destination is replaced only when its =SKILL.md= has the line =name: gsurf=; otherwise the install stops and leaves it alone.
+- An existing link is replaced when it points at the shared copy, at this tree, or at another =gsurf= skill (or dangles); a link to anything else stops the install.
+- A tool's skills directory that is itself a link to =$AGENTS_HOME/skills= gets no extra link (it already sees the copy).
+- An =AGENTS_HOME= whose =skills/= resolves to this tree's =skills/= is refused, so the source can never be replaced by itself.
+- =uninstall-skill= removes only links to this skill and copies whose =SKILL.md= says =name: gsurf=; anything else is reported and kept.
+- Paths may contain spaces.
+
+* Keeping it current
+
+The skill is documentation, and it is held to the same rule as =docs/=: *a change to behaviour or configuration updates the skill in the same commit* (=AGENTS.md=). In particular:
+
+- a new or changed config key: =modules-catalog.md= (and =configuration-yaml.md= for core sections);
+- a new module: its row in =modules-catalog.md=;
+- a new or renamed =gsurfctl= command or control method: =gsurfctl.md= and =control-protocol.md=;
+- a new build flag or Fedora package: =building.md=;
+- a new failure mode worth knowing: =troubleshooting.md=.
+
+* Tests
+
+| Test | Run by | Checks |
+|------+--------+--------|
+| =tests/test-skill.sh= | =make test=, =make test-skill= | The checks of agent-skills' =scripts/validate-skills.sh= without its =skill-= prefix rule: frontmatter (=name= equals the directory, a non-empty =description=, a literal =name: gsurf= line for the installer), the title and the six sections outside fenced code, allowed directories, reference and template file names, sizes, every relative link, and ShellCheck on the shell template. When agent-skills is checked out next to this repository (or =AGENT_SKILLS_DIR= names it), the real validator runs too and may report exactly one error: the directory-name prefix. |
+| =tests/test-install-skill.sh= | =make test=, =make test-install-skill= | The installer in a temporary HOME (a path with spaces): copy and links, reinstall over an edited copy, =SKILLS_LINK=1=, refusing a foreign directory and a foreign link (both kept by uninstall), a tool directory aliasing the shared one, refusing the tree's own =skills/=, =HOME== relocating every default. It refuses to touch the real home. |
+| =tests/test-skill-examples.c= | =make test= | Every =yaml= block of =SKILL.md= and the references, and =config.yaml.template=, loads through the real config loader over the built-in defaults and configures every built module without a GLib warning; root keys are sections gsurf reads, module names are real modules, every bound action exists. =config.c.template= compiles, loads and runs through the real C-config compiler and its modules configure cleanly. Every complete C program in the references passes =gcc -fsyntax-only= with the module flags. The module template and its Makefile build a =.so= with no compiler warning that the module manager loads and that behaves as documented (including a reconfigure and a bad entry). Every =gsurfctl= command the skill names exists in =gsurfctl help --names= (skipped only while =gsurfctl= is not built). |
+
+The module-template check needs the module compiler flags, which =make= writes to =build/<mode>/module-cflags.txt= before building the test.
+
+* Size exceptions
+
+| File | Lines | Reason |
+|------+-------+--------|
+| =templates/module.c.template= | 107 | One complete module (type, interface, configure with reconfigure and bad-input handling, finalize, entry point) in the house C style, where every function signature spans several lines. Splitting it would leave a module that does not build. |
+
+=tests/test-skill.sh= allows exactly these; anything else over its limit fails.

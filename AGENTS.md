@@ -13,6 +13,10 @@ a thin `main.c`. surf "patches" are implemented as runtime-loaded `.so` **module
 
 - Behaviour changes come with tests and the matching `docs/*.org` update in the **same
   commit**. A change without both is not done and must not be merged.
+- The `/gsurf` agent skill (`skills/gsurf/`, see `docs/skill.org`) is documentation too: a
+  change to behaviour, config keys, modules, `gsurfctl` commands, build flags or packages
+  updates the matching `skills/gsurf/references/*.md` (or `SKILL.md`, a template) in the
+  **same commit**. `make test` checks its structure, its installer and its examples.
 - Zero warnings on every target (`make clean all`, `make test`, `make test-gui`,
   `make BUILD_GIR=1 gir`) and on **both** `GTK_BACKEND=gtk3` and `GTK_BACKEND=gtk4`.
   Fix the code, never the flags.
@@ -177,6 +181,16 @@ and `GTlsCertificate` instead.
    `data/default-config.yaml`, and a row in `builtin_modules[]` in `src/main.c`
    (`--list-modules` prints that table in alphabetical order).
 4. `make` (modules are auto-discovered) and add a test under `tests/`.
+
+**Control socket and gsurfctl.** `src/control/` is the scripting interface
+(`GsurfControlServer`, core methods, `GsurfControlClient`,
+`GsurfControlProvider`), started by `main.c` when `control.enabled`;
+`tools/gsurfctl/gsurfctl.c` is the client binary (built by `make`, tested by
+`tests/test-control*.c` and `tests/test-gsurfctl.c`). A behaviour or config
+change that a user can reach through the socket updates `docs/control.org`
+(and `docs/gsurfctl.org` / `data/gsurfctl.1` for new commands) in the same
+commit. Keep `gsurfctl help --names` exact: it lists the commands and is
+checked by tests. The control headers stay out of `gsurf.h` (json-glib).
 
 `modules/search_engines/` is the reference implementation; `modules/mcp/` shows a
 module that runs its own server lifecycle on `activate()`; `modules/adblock/`

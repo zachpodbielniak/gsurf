@@ -88,6 +88,16 @@ make show-config           # dump the resolved build configuration
 ./build/release/gsurf --generate-yaml-config > ~/.config/gsurf/config.yaml
 #+end_src
 
+A running gsurf can be driven from the shell with =gsurfctl= (its control socket is on by default):
+
+#+begin_src sh
+./build/release/gsurfctl open https://example.org --bg
+./build/release/gsurfctl tabs
+./build/release/gsurfctl wmux 'split-window -h'
+#+end_src
+
+See [[file:docs/gsurfctl.org][docs/gsurfctl.org]] and [[file:docs/control.org][docs/control.org]].
+
 Configuration is loaded from =~/.config/gsurf/config.yaml= (then a compiled
 =~/.config/gsurf/config.c= if present). See [[file:docs/configuration.org][docs/configuration.org]] and
 [[file:docs/keybindings.org][docs/keybindings.org]].
@@ -104,6 +114,8 @@ src/
   config/      GsurfConfig (YAML), GsurfSettings, GsurfConfigCompiler (crispy)
   module/      GsurfModule, GsurfModuleManager
   interfaces/  hook-point GInterfaces
+  control/     control socket: server, methods, client, provider interface
+tools/gsurfctl the gsurfctl command-line client
 modules/       one directory per loadable module (.so)
 data/          default-config.yaml + default-config.c (embedded)
 deps/          yaml-glib, crispy, mcp-glib (git submodules)

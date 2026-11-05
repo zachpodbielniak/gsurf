@@ -9,6 +9,10 @@ Since 0.4.4 the server reaches everything the 0.4.0–0.4.3 features added: view
 
 The module never links against =wmux=, =tabs= or =modal=. It goes through public core seams only (see "Core seams"), so a different window layout or tab tree implementing the same interfaces is driven the same way.
 
+** MCP and the control socket
+
+Since 0.5 every gsurf also has a control socket ([[file:control.org][control.org]]), driven by =gsurfctl= ([[file:gsurfctl.org][gsurfctl.org]]). It is built in (no =MCP=1=), on by default, and offers the same reach (views, tree, containers, wmux, modes, actions, page text and JavaScript) as plain JSON-RPC methods, plus an event stream. Use MCP when an AI client speaks MCP and you want per-tool opt-in; use the control socket (or =gsurfctl= from an agent's shell) for scripts, editors and agents with a shell. Both go through the same core seams, so they agree.
+
 * Enabling
 
 #+begin_src yaml

@@ -10,6 +10,7 @@
 #   make modules          - Build all modules
 #   make test             - Run the test suite
 #   make install          - Install to PREFIX
+#   make install-skill    - Install the /gsurf agent skill (~/.agents, ~/.claude, ~/.grok)
 #   make clean            - Clean build artifacts
 #   make DEBUG=1          - Build with debug symbols
 #   make MCP=1            - Build with the MCP server module
@@ -31,13 +32,14 @@ _clean_then_build:
 	$(MAKE) $(_other_goals)
 else
 
-.PHONY: all lib gsurf gir modules test test-build test-gui appimage adblock-lists deps check-deps
+.PHONY: all lib gsurf gsurfctl gir modules test test-build test-gui appimage adblock-lists deps check-deps
 
 # Include configuration
 include config.mk
 
 # Check dependencies before anything else (skip for targets that don't need them)
-SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all adblock-lists
+SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all adblock-lists \
+	install-skill install-skills uninstall-skill uninstall-skills test-skill test-install-skill
 ifeq ($(filter $(SKIP_DEP_CHECK_TARGETS),$(MAKECMDGOALS)),)
 $(foreach dep,$(DEPS_REQUIRED),$(call check_dep,$(dep)))
 endif
@@ -50,7 +52,8 @@ LIB_SRCS := $(wildcard src/*.c) \
 	$(wildcard src/config/*.c) \
 	$(wildcard src/module/*.c) \
 	$(wildcard src/interfaces/*.c) \
-	$(wildcard src/util/*.c)
+	$(wildcard src/util/*.c) \
+	$(wildcard src/control/*.c)
 LIB_SRCS := $(filter-out src/main.c,$(LIB_SRCS))
 
 # Backend sources (only the selected backend compiles)
@@ -110,7 +113,8 @@ LIB_HDRS := $(wildcard src/*.h) \
 	$(wildcard src/config/*.h) \
 	$(wildcard src/module/*.h) \
 	$(wildcard src/interfaces/*.h) \
-	$(wildcard src/util/*.h)
+	$(wildcard src/util/*.h) \
+	$(filter-out %-private.h,$(wildcard src/control/*.h))
 
 # yaml-glib sources (vendored dependency, compiled into libgsurf)
 YAMLGLIB_SRCS := $(wildcard $(YAMLGLIB_DIR)/src/*.c)
@@ -135,6 +139,8 @@ LIB_OBJS := $(patsubst src/%.c,$(OBJDIR)/%.o,$(LIB_SRCS))
 YAMLGLIB_OBJS := $(patsubst $(YAMLGLIB_DIR)/%.c,$(OBJDIR)/deps/yaml-glib/%.o,$(YAMLGLIB_SRCS))
 CRISPY_OBJS := $(patsubst deps/%.c,$(OBJDIR)/deps/%.o,$(CRISPY_SRCS))
 MAIN_OBJ := $(OBJDIR)/main.o
+# gsurfctl, the control-socket client (tools/gsurfctl, linked with libgsurf).
+GSURFCTL_OBJ := $(OBJDIR)/tools/gsurfctl/gsurfctl.o
 TEST_OBJS := $(patsubst tests/%.c,$(OBJDIR)/tests/%.o,$(TEST_SRCS))
 TEST_BINS := $(patsubst tests/%.c,$(OUTDIR)/%,$(TEST_SRCS))
 
@@ -158,14 +164,14 @@ $(shell mkdir -p $(OBJDIR))
 $(file >$(GSURF_FLAGS_STAMP),$(GSURF_FLAGS_NOW))
 endif
 endif
-$(LIB_OBJS) $(YAMLGLIB_OBJS) $(MAIN_OBJ) $(TEST_OBJS): $(GSURF_FLAGS_STAMP)
+$(LIB_OBJS) $(YAMLGLIB_OBJS) $(MAIN_OBJ) $(GSURFCTL_OBJ) $(TEST_OBJS): $(GSURF_FLAGS_STAMP)
 $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): $(GSURF_FLAGS_STAMP)
 
 # Include build rules
 include rules.mk
 
 # Default target
-all: deps lib gsurf
+all: deps lib gsurf gsurfctl
 ifeq ($(BUILD_MODULES),1)
 all: modules
 endif
@@ -196,6 +202,9 @@ lib: src/gsurf-version.h $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL) $(
 
 # Build the executable
 gsurf: lib $(OUTDIR)/gsurf
+
+# Build the control-socket client
+gsurfctl: lib $(OUTDIR)/gsurfctl
 
 # Build GIR/typelib
 gir: $(OUTDIR)/$(GIR_FILE) $(OUTDIR)/$(TYPELIB_FILE)
@@ -236,7 +245,7 @@ modules: lib $(OUTDIR)/modules
 	done
 
 # Build and run tests (modules needed for the module-loading test)
-test: gsurf modules $(TEST_BINS)
+test: gsurf gsurfctl modules $(TEST_BINS)
 	@echo "Running tests..."
 	@failed=0; \
 	echo "  Running test-build-config.sh..."; \
@@ -246,6 +255,15 @@ test: gsurf modules $(TEST_BINS)
 		echo "    FAIL"; \
 		failed=$$((failed + 1)); \
 	fi; \
+	for script in tests/test-skill.sh tests/test-install-skill.sh; do \
+		echo "  Running $$(basename $$script)..."; \
+		if $$script; then \
+			echo "    PASS"; \
+		else \
+			echo "    FAIL"; \
+			failed=$$((failed + 1)); \
+		fi \
+	done; \
 	for test in $(TEST_BINS); do \
 		echo "  Running $$(basename $$test)..."; \
 		if LD_LIBRARY_PATH=$(OUTDIR):$(CURDIR)/deps/mcp-glib/build $$test; then \
@@ -265,6 +283,23 @@ test: gsurf modules $(TEST_BINS)
 # Build-system regression tests only (no compile; see the script's header).
 test-build:
 	tests/test-build-config.sh "$(MAKE)" "$(BUILDDIR)"
+
+# The /gsurf agent skill: its structure (tests/test-skill.sh, the checks of
+# agent-skills' validate-skills.sh) and its installer in a temporary HOME
+# (tests/test-install-skill.sh). Neither needs a build and `make test' runs
+# both; test-skill-examples checks the skill's examples against the built
+# library, modules and gsurfctl.
+.PHONY: test-skill test-install-skill
+test-skill:
+	tests/test-skill.sh
+test-install-skill:
+	tests/test-install-skill.sh
+
+# test-skill-examples builds the skill's module template the way the
+# `modules' target builds a module, so it needs the module flags.
+$(OUTDIR)/test-skill-examples: $(OUTDIR)/module-cflags.txt
+$(OUTDIR)/module-cflags.txt: $(GSURF_FLAGS_STAMP) | $(OUTDIR)
+	$(file >$@,$(MODULE_CFLAGS))
 
 # test-tab-tree compiles the tabs module's tree model in directly.
 $(OBJDIR)/tests/test-tab-tree.o: modules/tabs/gsurf-tab-tree.c modules/tabs/gsurf-tab-tree.h
@@ -297,7 +332,7 @@ tests: test
 # Forces GTK onto Xvfb's X display, so running it from a Wayland session
 # never opens test windows on the user's desktop.
 .PHONY: test-gui
-test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit $(OUTDIR)/test-temp-storage-webkit $(OUTDIR)/test-modal-webkit $(OUTDIR)/test-mcp-webkit
+test-gui: gsurf gsurfctl modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit $(OUTDIR)/test-temp-storage-webkit $(OUTDIR)/test-modal-webkit $(OUTDIR)/test-mcp-webkit $(OUTDIR)/test-control-webkit $(OUTDIR)/test-gsurfctl
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	unset WAYLAND_DISPLAY; export GDK_BACKEND=x11; \
@@ -352,6 +387,12 @@ test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-
 	echo "Running MCP tools (views, tree, containers, wmux, modes) tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-mcp-webkit || exit $$?; \
+	echo "Running control socket (core methods, events) tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-control-webkit || exit $$?; \
+	echo "Running gsurfctl against a real gsurf..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-gsurfctl || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \
@@ -373,7 +414,7 @@ appimage: all
 	rm -rf $(APPDIR)
 	$(MAKE) install DESTDIR=$(abspath $(APPDIR)) PREFIX=/usr LIBDIR=/usr/lib \
 		MODULEDIR=/usr/lib/gsurf/modules BUILD_MODULES=1 $(if $(filter 1,$(MCP_AVAILABLE)),MCP=1)
-	printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport LD_LIBRARY_PATH="$$HERE/usr/lib:$$LD_LIBRARY_PATH"\nexport GSURF_MODULE_PATH="$$HERE/usr/lib/gsurf/modules"\nexec "$$HERE/usr/bin/gsurf" "$$@"\n' > $(APPDIR)/AppRun
+	printf '#!/bin/sh\nHERE=$$(dirname "$$(readlink -f "$$0")")\nexport LD_LIBRARY_PATH="$$HERE/usr/lib:$$LD_LIBRARY_PATH"\nexport GSURF_MODULE_PATH="$$HERE/usr/lib/gsurf/modules"\ncase "$$(basename "$${ARGV0:-$$0}")" in gsurfctl*) exec "$$HERE/usr/bin/gsurfctl" "$$@" ;; esac\nif [ "$$1" = ctl ]; then shift; exec "$$HERE/usr/bin/gsurfctl" "$$@"; fi\nexec "$$HERE/usr/bin/gsurf" "$$@"\n' > $(APPDIR)/AppRun
 	chmod +x $(APPDIR)/AppRun
 	cp data/gsurf.desktop $(APPDIR)/gsurf.desktop
 	cp data/logo-256.png $(APPDIR)/gsurf.png
@@ -418,6 +459,7 @@ help:
 	@echo "  all        - Build library, executable, and modules (default)"
 	@echo "  lib        - Build static and shared libraries"
 	@echo "  gsurf      - Build the gsurf executable"
+	@echo "  gsurfctl   - Build the gsurfctl control client"
 	@echo "  gir        - Generate GObject Introspection data"
 	@echo "  modules    - Build all modules"
 	@echo "  test       - Build and run the test suite"
@@ -442,6 +484,11 @@ help:
 	@echo "  check-deps       - Check for required dependencies"
 	@echo "  show-config      - Show current build configuration"
 	@echo "  appimage         - Build a self-contained AppImage"
+	@echo "  install-skill    - Install the /gsurf agent skill into ~/.agents/skills"
+	@echo "                     and link it from ~/.claude and ~/.grok (SKILLS_LINK=1"
+	@echo "                     links this tree instead of copying; also install-skills)"
+	@echo "  uninstall-skill  - Remove the /gsurf agent skill"
+	@echo "  test-skill       - Check the skill's structure (part of test)"
 	@echo "  adblock-lists    - Fetch EasyList + uBlock Origin filter lists"
 	@echo "                     JSON for the adblock content_filters: option"
 	@echo "  help             - Show this help message"

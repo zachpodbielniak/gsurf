@@ -10,8 +10,8 @@
 
 # Version
 VERSION_MAJOR := 0
-VERSION_MINOR := 4
-VERSION_MICRO := 4
+VERSION_MINOR := 5
+VERSION_MICRO := 0
 VERSION := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_MICRO)
 
 # Installation directories
@@ -85,6 +85,15 @@ MKDIR_P := mkdir -p
 # AppImage tool (override: make APPIMAGETOOL=/path/to/appimagetool appimage)
 APPIMAGETOOL ?= appimagetool-x86_64.AppImage
 APPDIR := $(BUILDDIR)/AppDir
+
+# Agent skill install locations (make install-skill; mirrors
+# agent-skills/scripts/install.sh). The skill is copied (or, with
+# SKILLS_LINK=1, symlinked from this tree) into $(AGENTS_HOME)/skills and
+# linked from each agent's skills directory.
+AGENTS_HOME ?= $(HOME)/.agents
+CLAUDE_DIR  ?= $(HOME)/.claude
+GROK_DIR    ?= $(HOME)/.grok
+SKILLS_LINK ?= 0
 
 # C standard and dialect
 CSTD := -std=gnu11
