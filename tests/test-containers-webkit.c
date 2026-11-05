@@ -281,8 +281,15 @@ test_script_worlds(void)
 	for (i = 0; i < 100 && message == NULL; i++)
 		gsurf_webkit_test_spin(20);
 
-	/* The world shares the DOM but not the page's globals. */
-	g_assert_cmpstr(message, ==, "{\"secret\":\"undefined\",\"dom\":\"shared\"}");
+	/* The world shares the DOM but not the page's globals. WebKit's
+	 * JSON serialization does not promise key order (GTK4 builds have
+	 * been seen to emit "dom" first), so check each member instead of
+	 * the whole string. */
+	g_assert_nonnull(message);
+	g_assert_nonnull(strstr(message, "\"secret\":\"undefined\""));
+	g_assert_nonnull(strstr(message, "\"dom\":\"shared\""));
+	g_assert_cmpuint(strlen(message), ==,
+		strlen("{\"secret\":\"undefined\",\"dom\":\"shared\"}"));
 
 	/* And the page cannot see the world's globals either. */
 	page_view = gsurf_webkit_test_eval(gsurf_webkit_test_native(view),
