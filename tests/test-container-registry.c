@@ -237,9 +237,20 @@ test_temporary_lifetime(void)
 	id = g_strdup(gsurf_view_get_container_id(view));
 	g_assert_true(g_str_has_prefix(id, "tmp-"));
 	g_assert_true(gsurf_container_get_temporary(gsurf_container_registry_lookup(registry, id)));
-	/* Ephemeral: the backend gets no data directory. */
+	/* Not ephemeral: the backend gets private directories in this
+	 * process's runtime directory (WebKit's ephemeral sessions put
+	 * IndexedDB blobs in the working directory). */
 	g_assert_cmpuint(fake.created, ==, 1);
-	g_assert_null(fake.last_data_dir);
+	g_assert_nonnull(fake.last_data_dir);
+	{
+		g_autofree gchar *runtime = g_build_filename(g_get_user_runtime_dir(),
+			"gsurf", NULL);
+
+		g_assert_true(g_str_has_prefix(fake.last_data_dir, runtime));
+		g_assert_true(g_str_has_suffix(fake.last_data_dir, "/data"));
+		g_assert_cmpstr(gsurf_container_get_data_dir(
+			gsurf_container_registry_lookup(registry, id)), ==, fake.last_data_dir);
+	}
 	g_assert_true(gsurf_view_get_session(view) != NULL);
 
 	/* A second view in the same temporary container shares the session. */

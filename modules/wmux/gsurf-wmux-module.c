@@ -96,6 +96,56 @@ set_prefix_active(GsurfWmuxModule *self, gboolean active)
 	gsurf_wmux_update_grab(self);
 }
 
+/* Drop what waits for a key — a pending prefix, a repeat window, the pane
+ * numbers — when the user's attention moved: a click (into a page field,
+ * a pane, the address bar), another view becoming active, or the window
+ * losing focus. Otherwise the grab would stay on (prefix_timeout 0 has
+ * no timer) and the next key typed into a field, possibly in another
+ * window first, would run as a wmux command. The chooser stays: it is an
+ * on-screen panel with its own keys and closes on Escape or q. */
+static void
+cancel_pending_keys(GsurfWmuxModule *self, gboolean end_repeat)
+{
+	if (end_repeat)
+		self->repeat_until = 0;
+	if (self->displaying)
+		gsurf_wmux_ui_display_panes(self, FALSE);
+	if (self->prefix_active)
+		set_prefix_active(self, FALSE);
+}
+
+static gboolean
+on_window_button_press(GsurfWindow *window, guint button, guint state, gpointer user_data)
+{
+	(void)window;
+	(void)button;
+	(void)state;
+	cancel_pending_keys(GSURF_WMUX_MODULE(user_data), TRUE);
+	return FALSE;
+}
+
+static void
+on_window_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
+{
+	(void)window;
+	(void)view;
+	/* A repeatable select-pane changes the active view itself: keep its
+	 * repeat window. */
+	cancel_pending_keys(GSURF_WMUX_MODULE(user_data), FALSE);
+}
+
+/* The toplevel (GtkWindow, both toolkits) gained or lost focus. */
+static void
+on_native_is_active(GObject *native, GParamSpec *pspec, gpointer user_data)
+{
+	gboolean active = TRUE;
+
+	(void)pspec;
+	g_object_get(native, "is-active", &active, NULL);
+	if (!active)
+		cancel_pending_keys(GSURF_WMUX_MODULE(user_data), TRUE);
+}
+
 /* ------------------------------------------------------------------ */
 /* Commands                                                            */
 /* ------------------------------------------------------------------ */
@@ -700,6 +750,17 @@ gsurf_wmux_activate(GsurfModule *module)
 		return TRUE;
 	}
 	g_signal_connect(window, "view-replaced", G_CALLBACK(on_view_replaced), self);
+	g_signal_connect(window, "button-press", G_CALLBACK(on_window_button_press), self);
+	g_signal_connect(window, "active-view-changed",
+		G_CALLBACK(on_window_active_view_changed), self);
+	{
+		GObject *native = gsurf_window_get_native_widget(window);
+
+		if (native != NULL && g_object_class_find_property(G_OBJECT_GET_CLASS(native),
+				"is-active") != NULL)
+			g_signal_connect(native, "notify::is-active",
+				G_CALLBACK(on_native_is_active), self);
+	}
 	gsurf_wmux_ui_sync(self);
 	return TRUE;
 }
@@ -713,8 +774,13 @@ gsurf_wmux_deactivate(GsurfModule *module)
 	g_autoptr(GsurfWindow) window = NULL;
 
 	if (self->window != NULL) {
+		GObject *native;
+
 		window = g_object_ref(self->window);
 		g_signal_handlers_disconnect_by_data(window, self);
+		native = gsurf_window_get_native_widget(window);
+		if (native != NULL)
+			g_signal_handlers_disconnect_by_data(native, self);
 		if (self->installed && gsurf_window_get_layout(window) == GSURF_WINDOW_LAYOUT(self))
 			gsurf_window_set_layout(window, NULL);
 		gsurf_window_set_key_grab(window, FALSE);

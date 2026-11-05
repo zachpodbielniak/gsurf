@@ -11,7 +11,8 @@
 #include "gsurf.h"
 
 #include <gdk/gdk.h>
-#include <gdk/gdk.h>
+#include <glib-unix.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
@@ -311,23 +312,30 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	gboolean is_escape = (keyval == GDK_KEY_Escape);
 	g_autofree gchar *keystr = NULL;
 	GsurfAction action;
+	gboolean typing;
 
 	/* While the user is typing — a DOM editable element is focused, or the
 	 * modal module is in INSERT passthrough — bare keys must reach the page
 	 * and not be consumed by any module (e.g. find-bar's n/N) or core
 	 * keybind. Modified keys and Escape still pass through (shortcuts; exit
 	 * insert / blur). A key grab (a module waiting for the key after its
-	 * prefix, e.g. wmux's C-b) skips the guard: that key is a command. */
-	if (!gsurf_window_get_key_grab(window) &&
-	    (gsurf_module_manager_get_input_passthrough(mgr) ||
-	     (view != NULL && gsurf_view_get_editing(view))) &&
-	    !has_mod && !is_escape)
+	 * prefix, e.g. wmux's C-b) lets the modules see the key first: that key
+	 * is a command. */
+	typing = (gsurf_module_manager_get_input_passthrough(mgr) ||
+	          (view != NULL && gsurf_view_get_editing(view))) &&
+	         !has_mod && !is_escape;
+	if (typing && !gsurf_window_get_key_grab(window))
 		return FALSE;
 
 	/* Modules (modal keymap, hints, tabs) get first crack. */
 	if (gsurf_module_manager_dispatch_key_event(mgr, view, keyval, keycode,
 			state, GSURF_MODE_NORMAL))
 		return TRUE;
+
+	/* A grab no module claimed the key for must not turn typing into a
+	 * core command (a bare `o` opening the prompt): it goes to the page. */
+	if (typing)
+		return FALSE;
 
 	/* Escape leaves a focused page field (an autofocused search box, a
 	 * clicked input) so the next key is a command again. Core behaviour,
@@ -441,12 +449,12 @@ load_uri_rewritten(GsurfView *view, const gchar *input)
 static gchar *
 find_module_dir(void)
 {
-	const gchar *env = g_getenv("GSURF_MODULE_PATH");
+	g_autofree gchar *env = gsurf_resolve_path(g_getenv("GSURF_MODULE_PATH"));
 	g_autofree gchar *exe = NULL;
 	gchar *dir;
 
-	if (env != NULL && g_file_test(env, G_FILE_TEST_IS_DIR))
-		return g_strdup(env);
+	if (env != NULL && *env != '\0' && g_file_test(env, G_FILE_TEST_IS_DIR))
+		return g_steal_pointer(&env);
 
 	exe = g_file_read_link("/proc/self/exe", NULL);
 	if (exe != NULL) {
@@ -613,6 +621,30 @@ make_tab_popup(GsurfWindow *window, GsurfView *opener, const gchar *hint)
 	return view;
 }
 
+/* SIGINT/SIGTERM/SIGHUP: quit through the main loop, so exit() runs the
+ * runtime-directory cleanup (temporary containers' data) instead of the
+ * default action killing the process with its data left behind. */
+static gboolean
+on_quit_signal(gpointer user_data)
+{
+	gsurf_application_quit(GSURF_APPLICATION(user_data));
+	return G_SOURCE_CONTINUE;
+}
+
+/* Make a CLI path absolute against the launch directory before the
+ * working directory changes (NULL stays NULL). */
+static void
+resolve_cli_path(gchar **path)
+{
+	gchar *resolved;
+
+	if (*path == NULL)
+		return;
+	resolved = gsurf_resolve_path(*path);
+	g_free(*path);
+	*path = resolved;
+}
+
 /* ===== main ===== */
 
 int
@@ -711,6 +743,23 @@ main(int argc, char *argv[])
 	if (g_strcmp0(g_getenv("GSURF_GVFS"), "1") != 0)
 		g_setenv("GIO_USE_VFS", "local", FALSE);
 #endif
+
+	/* Work in the private runtime directory from here on: WebKit's
+	 * processes inherit the working directory, and WebKitGTK writes some
+	 * files relative to it (IndexedDB blobs of an ephemeral session land
+	 * as "1.blob"), which must never reach the directory gsurf was
+	 * started from. Paths given relative to that directory (the URI
+	 * argument, --config, $GSURF_MODULE_PATH, config file paths) keep
+	 * resolving against it via gsurf_get_launch_dir(). The library never
+	 * does this on its own: embedders opt in by calling it themselves. */
+	resolve_cli_path(&opt_config);
+	resolve_cli_path(&opt_c_config);
+	{
+		g_autoptr(GError) rerr = NULL;
+
+		if (!gsurf_runtime_dir_enter(&rerr))
+			g_warning("gsurf: staying in the launch directory: %s", rerr->message);
+	}
 
 	gsurf_init(&argc, &argv);
 
@@ -864,6 +913,9 @@ main(int argc, char *argv[])
 	g_object_unref(window);
 	g_object_unref(config);
 
+	g_unix_signal_add(SIGINT, on_quit_signal, app);
+	g_unix_signal_add(SIGTERM, on_quit_signal, app);
+	g_unix_signal_add(SIGHUP, on_quit_signal, app);
 	gsurf_application_run(app);
 	g_object_unref(app);
 

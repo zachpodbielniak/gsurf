@@ -247,7 +247,7 @@ tests: test
 # Forces GTK onto Xvfb's X display, so running it from a Wayland session
 # never opens test windows on the user's desktop.
 .PHONY: test-gui
-test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit
+test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit $(OUTDIR)/test-temp-storage-webkit $(OUTDIR)/test-modal-webkit
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	unset WAYLAND_DISPLAY; export GDK_BACKEND=x11; \
@@ -293,6 +293,12 @@ test-gui: gsurf modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-
 	echo "Running wmux pane multiplexer tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-wmux-webkit || exit $$?; \
+	echo "Running temporary-container storage (IndexedDB blobs) tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-temp-storage-webkit || exit $$?; \
+	echo "Running modal (vim modes, typing in fields) tests..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-modal-webkit || exit $$?; \
 	echo "Running headless GUI smoke test..."; \
 	GSURF_MODULE_PATH="$(abspath $(OUTDIR)/modules)" \
 	 LD_LIBRARY_PATH="$(abspath $(OUTDIR)):$(CURDIR)/deps/mcp-glib/build" \

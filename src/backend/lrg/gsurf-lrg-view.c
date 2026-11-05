@@ -314,22 +314,14 @@ on_create(WebKitWebView *wv, WebKitNavigationAction *action, gpointer user_data)
 	return NULL;
 }
 
-static const gchar *FOCUS_TRACKER_JS =
-	"(function(){if(window.__gsurfFT)return;window.__gsurfFT=1;"
-	"function ed(e){if(!e)return false;if(e.isContentEditable)return true;"
-	"var t=e.tagName;if(t==='TEXTAREA'||t==='SELECT')return true;"
-	"if(t==='INPUT'){var ty=(e.getAttribute('type')||'text').toLowerCase();"
-	"return !/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/.test(ty);}return false;}"
-	"function snd(){try{window.webkit.messageHandlers.gsurfFocus.postMessage(ed(document.activeElement));}catch(x){}}"
-	"document.addEventListener('focusin',snd,true);"
-	"document.addEventListener('focusout',function(){setTimeout(snd,0);},true);snd();})()";
-
 static void
 on_focus_message(WebKitUserContentManager *ucm, WebKitJavascriptResult *result,
                  gpointer user_data)
 {
 	JSCValue *value = webkit_javascript_result_get_js_value(result);
-	gsurf_view_set_editing(GSURF_VIEW(user_data), jsc_value_to_boolean(value));
+
+	/* The tracker shared with the GTK backends: per-frame reports. */
+	gsurf_webkit_common_focus_message(GSURF_VIEW(user_data), value);
 }
 
 static void
@@ -380,7 +372,7 @@ lrg_view_wire_signals(GsurfLrgView *self)
 	webkit_user_content_manager_register_script_message_handler(ucm, "gsurfFocus");
 	g_signal_connect(ucm, "script-message-received::gsurfFocus",
 		G_CALLBACK(on_focus_message), self);
-	tracker = webkit_user_script_new(FOCUS_TRACKER_JS,
+	tracker = webkit_user_script_new(gsurf_webkit_focus_tracker_js,
 		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
 		WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
 	webkit_user_content_manager_add_script(ucm, tracker);

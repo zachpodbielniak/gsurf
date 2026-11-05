@@ -165,20 +165,24 @@ Handled by modules (the core table forwards them; each does nothing unless its m
 The =modal= module (enabled by default) provides vim-style navigation. It is
 *focus-aware*, so it never blocks typing:
 
-- When an editable element is focused — a page text field, =textarea=,
-  =contenteditable=, =select=, *or the address bar* — keystrokes go straight to
-  it. You do *not* need to press =i= first. =Escape= blurs a page field, or
-  leaves the address bar, and returns to command context.
+- When an editable element is focused — a page text field (=text=, =search=, =email=, =url=, =tel=, =password=, =number=, =date=, ... inputs), =textarea=, =select=, =contenteditable= or anything inside =role="textbox"= / =searchbox= / =combobox=, in the page itself, inside a shadow DOM component or inside an =iframe= — *or the address bar* — keystrokes go straight to it. You do *not* need to press =i= first, and no bare key (=o=, =a=, =i=, =f=, ...) is ever a command there. =Escape= blurs a page field, or leaves the address bar, and returns to command context.
 - When nothing editable is focused (you're reading a page), bare letters are
   commands: =hjkl= scroll, =gg=/=G= top/bottom, =H=/=L= history, =r= reload,
   =d=/=u= half-page, =f= link hints (=F= follows in a new view).
-- =i= forces INSERT mode (all keys pass to the page until =Escape=) for the rare
-  web app that wants raw keys without a focused field.
-- =Escape= in normal mode cancels a pending =g= chord; otherwise it reaches the
-  core =Escape: stop= binding.
 
-Focus is tracked by a small content script that reports DOM focus changes to the
-browser, so the right behavior happens automatically as you move between the
-page, form fields, and the address bar.
+There are two modes, as in vim:
 
-A module can take the next key away from a focused field with a *key grab* (=gsurf_window_set_key_grab()=): while it is set, every key goes to the keymap first, wherever focus is. =wmux= uses it for the key after its prefix (=C-b %= works while typing in a page field or the address bar); see "Window layouts (panes)" in =architecture.org=.
+| Mode   | Enter with                                                           | Keys                                                                 | Leave with                                                         |
+|--------+----------------------------------------------------------------------+----------------------------------------------------------------------+--------------------------------------------------------------------|
+| NORMAL | start (=start_mode: normal=), =Escape=                               | bare keys are commands; a focused field still gets its keys          | an insert key, =gi=                                                |
+| INSERT | =i= or =a= (=modules.modal.insert_keys=), =gi=, =enter-insert-mode=  | every bare key goes to the page, field or not (web apps' own keys)   | =Escape= (also leaves the focused field) or =enter-normal-mode=   |
+
+- =gi= (vimium) focuses the first visible text field of the page (shadow DOM included), puts the caret at its end and enters INSERT.
+- =Escape= in INSERT returns to NORMAL *and* blurs the focused field, so the next key is a command, as in vim. In NORMAL it blurs a focused field, cancels a pending =g= chord, and otherwise reaches the core =Escape: stop= binding.
+- =modules.modal.insert_keys= is a list of bare key names (default =[i, a]=; =[]= leaves only the =enter-insert-mode= action). The old =key_insert= / =key_normal= options never had an effect and are gone.
+
+Focus is tracked by a small content script in every frame that reports DOM focus changes to the browser, so the right behavior happens automatically as you move between the page, form fields, and the address bar. It looks through open shadow roots (=document.activeElement= is only the shadow host there). Each frame reports on its own; a frame whose focus is in a child =iframe= stays silent, a "not editable" report from a subframe counts only if that frame holds the focused field, and a field reported by any frame wins, so an =iframe= loading late (a captcha, an ad) can no longer clear the state while you type in the page. Closed shadow roots are opaque to page scripts; a field inside one is not detected (use =i=/=a= there).
+
+Even while a module holds the key grab (below) a bare key typed into a field is never a core command: if no module takes it, it goes to the page.
+
+A module can take the next key away from a focused field with a *key grab* (=gsurf_window_set_key_grab()=): while it is set, every key goes to the keymap first, wherever focus is. =wmux= uses it for the key after its prefix (=C-b %= works while typing in a page field or the address bar); see "Window layouts (panes)" in =architecture.org=. =wmux= drops a pending prefix (and the =display-panes= numbers) when you click, when another view becomes active, or when the window loses focus, so the grab can never stay on and turn the next key typed into a field into a command.

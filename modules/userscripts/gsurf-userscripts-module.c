@@ -50,9 +50,8 @@ script_rule_free(gpointer data)
 static gchar *
 expand_path(const gchar *path)
 {
-	if (path != NULL && path[0] == '~' && path[1] == '/')
-		return g_build_filename(g_get_home_dir(), path + 2, NULL);
-	return g_strdup(path);
+	/* "~/" and relative paths (against the launch directory). */
+	return gsurf_resolve_path(path);
 }
 
 static void

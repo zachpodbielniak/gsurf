@@ -7,6 +7,7 @@
 
 #include "core/gsurf-container-registry.h"
 #include "util/gsurf-private-file.h"
+#include "util/gsurf-runtime-dir.h"
 
 #include <string.h>
 
@@ -30,6 +31,9 @@ struct _GsurfContainer
 	gboolean  temporary;
 	guint     n_views;      /* live views using the container */
 	gpointer  native;       /* backend session, created on first acquire */
+	gchar    *data_dir;     /* data directory of the session, if any */
+	gchar    *temp_root;    /* temporary container: its private runtime
+	                         * directory, removed with the session */
 	guint     cleanup_id;   /* pending temporary-container destruction */
 	gpointer  registry;     /* owning GsurfContainerRegistry (borrowed: it
 	                         * outlives every container it holds) */
@@ -57,6 +61,8 @@ gsurf_container_finalize(GObject *object)
 	/* The registry destroys the native session and cancels the cleanup
 	 * timer before it drops its reference; nothing native is left here. */
 	g_clear_handle_id(&self->cleanup_id, g_source_remove);
+	g_free(self->data_dir);
+	g_free(self->temp_root);
 	g_free(self->id);
 	g_free(self->name);
 	g_free(self->color);
@@ -178,6 +184,13 @@ gsurf_container_get_n_views(GsurfContainer *self)
 	return self->n_views;
 }
 
+const gchar *
+gsurf_container_get_data_dir(GsurfContainer *self)
+{
+	g_return_val_if_fail(GSURF_IS_CONTAINER(self), NULL);
+	return self->data_dir;
+}
+
 /* ===================================================================
  * GsurfContainerRegistry
  * =================================================================== */
@@ -213,15 +226,59 @@ static guint signals[N_SIGNALS];
 
 G_DEFINE_FINAL_TYPE(GsurfContainerRegistry, gsurf_container_registry, G_TYPE_OBJECT)
 
-/* Destroy a container's native session (if any) through the backend. */
+/* Destroy a container's native session (if any) through the backend.
+ * A temporary container's data goes with it: its private directory
+ * under the runtime dir is removed once the session is released. */
 static void
 container_drop_native(GsurfContainerRegistry *self, GsurfContainer *container)
 {
-	if (container->native == NULL)
-		return;
-	if (self->backend != NULL && self->backend->destroy != NULL)
-		self->backend->destroy(container->native);
-	container->native = NULL;
+	if (container->native != NULL) {
+		if (self->backend != NULL && self->backend->destroy != NULL)
+			self->backend->destroy(container->native);
+		container->native = NULL;
+	}
+	g_clear_pointer(&container->data_dir, g_free);
+	if (container->temp_root != NULL) {
+		g_autoptr(GError) error = NULL;
+
+		if (!gsurf_runtime_dir_remove_tree(container->temp_root, &error))
+			g_warning("gsurf: container '%s': %s", container->id, error->message);
+		g_clear_pointer(&container->temp_root, g_free);
+	}
+}
+
+/* The private data/cache directories of a temporary container, below
+ * this process's runtime directory. %FALSE (with a warning) when they
+ * cannot be made; the backend then falls back to an ephemeral session. */
+static gboolean
+container_make_temp_dirs(GsurfContainer *container, gchar **data_dir, gchar **cache_dir)
+{
+	g_autofree gchar *root = gsurf_runtime_dir_get_temp_container_dir(container->id);
+	g_autofree gchar *data = NULL;
+	g_autofree gchar *cache = NULL;
+	g_autoptr(GError) error = NULL;
+
+	if (root == NULL) {
+		g_warning("gsurf: container '%s': no runtime directory; "
+			"using an ephemeral session", container->id);
+		return FALSE;
+	}
+	/* A leftover of an earlier container with this id (ids restart in
+	 * every process, and the process dir is fresh, so only after a failed
+	 * removal) must not leak into this one. */
+	gsurf_runtime_dir_remove_tree(root, NULL);
+	data = g_build_filename(root, "data", NULL);
+	cache = g_build_filename(root, "cache", NULL);
+	if (!gsurf_private_mkdir(data, &error) || !gsurf_private_mkdir(cache, &error)) {
+		g_warning("gsurf: container '%s': %s; using an ephemeral session",
+			container->id, error->message);
+		gsurf_runtime_dir_remove_tree(root, NULL);
+		return FALSE;
+	}
+	container->temp_root = g_steal_pointer(&root);
+	*data_dir = g_steal_pointer(&data);
+	*cache_dir = g_steal_pointer(&cache);
+	return TRUE;
 }
 
 /* Remove @container from the registry; emits ::container-removed. */
@@ -607,13 +664,19 @@ gsurf_container_registry_acquire(GsurfContainerRegistry *self, const gchar *id)
 	g_object_notify_by_pspec(G_OBJECT(container), container_props[CONTAINER_PROP_N_VIEWS]);
 
 	/* Create the session on first use. A persistent container gets
-	 * private data/cache directories; a temporary one gets none, which
-	 * tells the backend to make an ephemeral session. */
+	 * private data/cache directories under the XDG dirs; a temporary one
+	 * gets them in this process's runtime directory (a tmpfs, removed
+	 * with the container and at exit). Only if those cannot be made does
+	 * it get none, which tells the backend to make an ephemeral session:
+	 * WebKit's ephemeral sessions have no IndexedDB directory and write
+	 * Blob files relative to the working directory. */
 	if (container->native == NULL && self->backend != NULL && self->backend->create != NULL) {
 		g_autofree gchar *data_dir = NULL;
 		g_autofree gchar *cache_dir = NULL;
 
-		if (!container->temporary) {
+		if (container->temporary) {
+			container_make_temp_dirs(container, &data_dir, &cache_dir);
+		} else {
 			g_autoptr(GError) error = NULL;
 
 			data_dir = gsurf_container_registry_get_data_dir(container->id);
@@ -623,6 +686,8 @@ gsurf_container_registry_acquire(GsurfContainerRegistry *self, const gchar *id)
 				g_warning("gsurf: container '%s': %s", container->id, error->message);
 		}
 		container->native = self->backend->create(container->id, data_dir, cache_dir);
+		if (container->native != NULL)
+			container->data_dir = g_strdup(data_dir);
 		if (container->native != NULL) {
 			if (self->policy_set && self->backend->apply_policy != NULL)
 				self->backend->apply_policy(container->native, self->itp,

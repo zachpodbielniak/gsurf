@@ -7,6 +7,7 @@
 
 #include "config/gsurf-config.h"
 #include "util/gsurf-keys.h"
+#include "util/gsurf-runtime-dir.h"
 
 #include <yaml-glib.h>
 #include <stdio.h>
@@ -16,15 +17,12 @@ G_DEFINE_TYPE(GsurfConfig, gsurf_config, G_TYPE_OBJECT)
 
 static GsurfConfig *default_config = NULL;
 
-/* Expand a leading "~/" to the user's home directory. */
+/* Expand a leading "~/" to the user's home directory and make a relative
+ * path absolute against the launch directory. */
 static gchar *
 expand_config_path(const gchar *path)
 {
-	if (path == NULL)
-		return NULL;
-	if (path[0] == '~' && path[1] == '/')
-		return g_build_filename(g_get_home_dir(), path + 2, NULL);
-	return g_strdup(path);
+	return gsurf_resolve_path(path);
 }
 
 static void

@@ -6,8 +6,12 @@
  *
  * Implements #GsurfInputHandler at high priority and tracks its own mode.
  * NORMAL mode: bare keys are navigation commands (hjkl, gg, G, d/u, H/L,
- * r, and gt/gT to switch tabs); `i` enters INSERT (keys pass to the page);
- * Escape returns to NORMAL.
+ * r, and gt/gT to switch tabs); the insert keys (`i` and `a` by default,
+ * modal.insert_keys) enter INSERT (keys pass to the page), `gi` focuses
+ * the first text field of the page and enters INSERT; Escape returns to
+ * NORMAL and leaves (blurs) a focused field, so the next key is a
+ * command again, as in vim. A focused page field always takes its keys,
+ * whatever the mode.
  * `f` enters FOLLOW mode: vimium-style link hints are overlaid on every
  * clickable element with short chord labels; typing a chord narrows the
  * set and a unique match is clicked. `F` opens the match in a new view.
@@ -30,8 +34,7 @@ struct _GsurfModalModule
 	gboolean pending_g;       /* saw 'g', waiting for the second */
 	gboolean hint_newview;    /* current FOLLOW session opens in a new view */
 	gint scroll_step;
-	gchar *key_insert;
-	gchar *key_normal;
+	GStrv insert_keys;        /* keys that enter INSERT, default {i, a} */
 	gchar *hint_key;          /* default "f" */
 	gchar *hint_key_newview;  /* default "F" */
 	gchar *hint_chars;        /* alphabet, e.g. "asdfghjkl" */
@@ -65,6 +68,44 @@ set_mode(GsurfModalModule *self, GsurfModePolicy mode)
 	gsurf_module_manager_set_input_passthrough(
 		gsurf_module_manager_get_default(), mode == GSURF_MODE_INSERT);
 }
+
+/* Leave INSERT (or FOLLOW) for NORMAL from a key or action: also leave
+ * the focused page field, so the next key is a command (vim's Escape).
+ * The blur is harmless when nothing editable is focused. */
+static void
+leave_to_normal(GsurfModalModule *self, GsurfView *view)
+{
+	set_mode(self, GSURF_MODE_NORMAL);
+	if (view != NULL)
+		gsurf_view_blur_editable(view);
+}
+
+/* Whether @name is one of the configured insert keys. */
+static gboolean
+is_insert_key(GsurfModalModule *self, const gchar *name)
+{
+	return self->insert_keys != NULL &&
+	       g_strv_contains((const gchar * const *)self->insert_keys, name);
+}
+
+/* vimium's `gi`: focus the first visible text field of the page (open
+ * shadow roots included) and put the caret at its end. Returns "ok" or
+ * "none". */
+static const gchar FOCUS_FIRST_INPUT_JS[] =
+	"(function(){var NOT=/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/;"
+	"function ed(e){if(e.isContentEditable)return true;var t=e.tagName;"
+	"if(t==='TEXTAREA')return true;"
+	"if(t==='INPUT')return !NOT.test(String(e.type||'text').toLowerCase());"
+	"var r=e.getAttribute&&e.getAttribute('role');return r==='textbox'||r==='searchbox';}"
+	"function vis(e){var r=e.getBoundingClientRect();var s=getComputedStyle(e);"
+	"return r.width>0&&r.height>0&&s.visibility!=='hidden'&&s.display!=='none'"
+	"&&!e.disabled&&!e.readOnly;}"
+	"function find(root){var all=root.querySelectorAll('*');"
+	"for(var i=0;i<all.length;i++){var e=all[i];if(ed(e)&&vis(e))return e;"
+	"if(e.shadowRoot){var f=find(e.shadowRoot);if(f)return f;}}return null;}"
+	"var e=find(document);if(!e)return 'none';e.focus();"
+	"try{if(typeof e.value==='string'&&e.setSelectionRange){var n=e.value.length;e.setSelectionRange(n,n);}}catch(x){}"
+	"return 'ok';})()";
 
 /* --- synchronous JS (nested main loop) for the hint round-trips --- */
 typedef struct { GMainLoop *loop; GsurfView *view; gchar *result; } JsCtx;
@@ -268,8 +309,8 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	 * (With passthrough published, the host already suppresses bare-key
 	 * dispatch to all modules; this handles Escape and is a safety net.) */
 	if (self->mode == GSURF_MODE_INSERT) {
-		if (g_strcmp0(name, "Escape") == 0) {
-			set_mode(self, GSURF_MODE_NORMAL);
+		if (g_strcmp0(name, "Escape") == 0 && !has_mod) {
+			leave_to_normal(self, view);
 			return TRUE;
 		}
 		return FALSE;
@@ -292,11 +333,21 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		return FALSE;
 	}
 
-	/* Chords beginning with 'g': gg -> top, gt -> next tab, gT -> prev tab. */
+	/* Chords beginning with 'g': gg -> top, gt -> next tab, gT -> prev
+	 * tab, gi -> first text field + INSERT. */
 	if (self->pending_g) {
 		self->pending_g = FALSE;
 		if (g_strcmp0(name, "g") == 0) {
 			scroll(view, "window.scrollTo(0,0)");
+			return TRUE;
+		}
+		if (g_strcmp0(name, "i") == 0) {
+			g_autofree gchar *res = run_js_sync(view, FOCUS_FIRST_INPUT_JS);
+
+			/* The field reports its focus asynchronously; INSERT makes
+			 * the very next key text already. */
+			if (g_strcmp0(res, "ok") == 0)
+				set_mode(self, GSURF_MODE_INSERT);
 			return TRUE;
 		}
 		if (g_strcmp0(name, "t") == 0) {
@@ -320,7 +371,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		return TRUE;
 	}
 
-	if (g_strcmp0(name, "i") == 0) { set_mode(self, GSURF_MODE_INSERT); return TRUE; }
+	if (is_insert_key(self, name)) { set_mode(self, GSURF_MODE_INSERT); return TRUE; }
 	/* Escape cancels a pending `g` chord; otherwise it falls through to the
 	 * core keymap (Escape: stop). */
 	if (g_strcmp0(name, "Escape") == 0) {
@@ -377,9 +428,12 @@ gsurf_modal_handle_action(GsurfActionHandler *handler, GsurfView *view,
 		set_mode(self, GSURF_MODE_INSERT);
 		return TRUE;
 	case GSURF_ACTION_ENTER_NORMAL_MODE:
-		if (self->mode == GSURF_MODE_FOLLOW)
+		if (self->mode == GSURF_MODE_FOLLOW) {
 			g_free(run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()"));
-		set_mode(self, GSURF_MODE_NORMAL);
+			set_mode(self, GSURF_MODE_NORMAL);
+		} else {
+			leave_to_normal(self, view);
+		}
 		return TRUE;
 	default:
 		return FALSE;
@@ -401,10 +455,17 @@ gsurf_modal_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
 		"Follow link hints", "modal", "follow-hints");
 	gsurf_keybind_help_append(entries, self->hint_key_newview,
 		"Follow a hint in a new view", "modal", "follow-hints-new-view");
-	gsurf_keybind_help_append(entries, "i",
-		"Enter insert mode", "modal", "enter-insert-mode");
+	if (self->insert_keys != NULL) {
+		gchar **k;
+
+		for (k = self->insert_keys; *k != NULL; k++)
+			gsurf_keybind_help_append(entries, *k,
+				"Enter insert mode", "modal", "enter-insert-mode");
+	}
+	gsurf_keybind_help_append(entries, "gi",
+		"Focus the first text field (insert mode)", "modal", "focus-input");
 	gsurf_keybind_help_append(entries, "Escape",
-		"Return to normal mode / blur", "modal", "enter-normal-mode");
+		"Return to normal mode and leave the field", "modal", "enter-normal-mode");
 	gsurf_keybind_help_append(entries, "h", "Scroll left", "modal", "scroll-left");
 	gsurf_keybind_help_append(entries, "j", "Scroll down", "modal", "scroll-down");
 	gsurf_keybind_help_append(entries, "k", "Scroll up", "modal", "scroll-up");
@@ -449,6 +510,45 @@ dup_member(gchar **dst, YamlMapping *m, const gchar *key)
 	}
 }
 
+/* modules.modal.insert_keys: a list of bare key names (or one name).
+ * An empty list disables them (the enter-insert-mode action remains);
+ * anything that is not a string is reported and the default kept. */
+static void
+configure_insert_keys(GsurfModalModule *self, YamlNode *node)
+{
+	g_autoptr(GStrvBuilder) builder = g_strv_builder_new();
+	YamlSequence *seq;
+	guint i;
+
+	if (node == NULL)
+		return;
+	if (yaml_node_get_node_type(node) == YAML_NODE_SCALAR) {
+		const gchar *one = yaml_node_get_string(node);
+
+		if (one != NULL && *one != '\0')
+			g_strv_builder_add(builder, one);
+	} else if (yaml_node_get_node_type(node) == YAML_NODE_SEQUENCE) {
+		seq = yaml_node_get_sequence(node);
+		for (i = 0; i < yaml_sequence_get_length(seq); i++) {
+			YamlNode *e = yaml_sequence_get_element(seq, i);
+			const gchar *key = (e != NULL && yaml_node_get_node_type(e) == YAML_NODE_SCALAR)
+				? yaml_node_get_string(e) : NULL;
+
+			if (key == NULL || *key == '\0') {
+				g_warning("modal.insert_keys: entry %u is not a key name; keeping %s",
+					i, "the previous keys");
+				return;
+			}
+			g_strv_builder_add(builder, key);
+		}
+	} else {
+		g_warning("modal.insert_keys must be a list of key names; keeping the previous keys");
+		return;
+	}
+	g_strfreev(self->insert_keys);
+	self->insert_keys = g_strv_builder_end(builder);
+}
+
 static void
 gsurf_modal_configure(GsurfModule *module, gpointer config_ptr)
 {
@@ -472,6 +572,8 @@ gsurf_modal_configure(GsurfModule *module, gpointer config_ptr)
 		set_mode(self, g_strcmp0(start, "insert") == 0
 			? GSURF_MODE_INSERT : GSURF_MODE_NORMAL);
 	}
+	if (yaml_mapping_has_member(m, "insert_keys"))
+		configure_insert_keys(self, yaml_mapping_get_member(m, "insert_keys"));
 	dup_member(&self->hint_key, m, "hint_key");
 	dup_member(&self->hint_key_newview, m, "hint_key_newview");
 	dup_member(&self->hint_chars, m, "hint_chars");
@@ -494,8 +596,7 @@ gsurf_modal_module_finalize(GObject *object)
 {
 	GsurfModalModule *self = GSURF_MODAL_MODULE(object);
 
-	g_clear_pointer(&self->key_insert, g_free);
-	g_clear_pointer(&self->key_normal, g_free);
+	g_clear_pointer(&self->insert_keys, g_strfreev);
 	g_clear_pointer(&self->hint_key, g_free);
 	g_clear_pointer(&self->hint_key_newview, g_free);
 	g_clear_pointer(&self->hint_chars, g_free);
@@ -524,8 +625,11 @@ gsurf_modal_module_init(GsurfModalModule *self)
 	self->mode = GSURF_MODE_NORMAL;
 	self->pending_g = FALSE;
 	self->scroll_step = 40;
-	self->key_insert = g_strdup("i");
-	self->key_normal = g_strdup("Escape");
+	{
+		const gchar *defaults[] = { "i", "a", NULL };
+
+		self->insert_keys = g_strdupv((gchar **)defaults);
+	}
 	self->hint_key = g_strdup("f");
 	self->hint_key_newview = g_strdup("F");
 	self->hint_chars = g_strdup("asdfghjkl");

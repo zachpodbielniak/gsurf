@@ -6,6 +6,7 @@
  */
 
 #include "util/gsurf-private-file.h"
+#include "util/gsurf-runtime-dir.h"
 
 #include <errno.h>
 #include <gio/gio.h>
@@ -107,11 +108,8 @@ gsurf_private_file_is_private(const gchar *path, GError **error)
 gchar *
 gsurf_expand_home(const gchar *path)
 {
-	if (path == NULL)
-		return NULL;
-	if (g_strcmp0(path, "~") == 0)
-		return g_strdup(g_get_home_dir());
-	if (g_str_has_prefix(path, "~/"))
-		return g_build_filename(g_get_home_dir(), path + 2, NULL);
-	return g_strdup(path);
+	/* "~" expansion plus relative paths against the launch directory:
+	 * the gsurf binary works in its runtime directory, so a relative
+	 * config path must not silently move there. */
+	return gsurf_resolve_path(path);
 }

@@ -125,12 +125,13 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state, gpoi
 	H *h = user_data;
 	GsurfView *view = gsurf_window_get_active_view(window);
 	gboolean has_mod = (state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0;
+	gboolean typing = (gsurf_module_manager_get_input_passthrough(h->mgr) ||
+	                   (view != NULL && gsurf_view_get_editing(view))) &&
+	                  !has_mod && keyval != GDK_KEY_Escape;
 
-	if (!gsurf_window_get_key_grab(window) &&
-	    (gsurf_module_manager_get_input_passthrough(h->mgr) ||
-	     (view != NULL && gsurf_view_get_editing(view))) &&
-	    !has_mod && keyval != GDK_KEY_Escape)
+	if (typing && !gsurf_window_get_key_grab(window))
 		return FALSE;
+	/* (main.c then never runs a core binding for a typed key.) */
 	return gsurf_module_manager_dispatch_key_event(h->mgr, view, keyval, keycode, state,
 		GSURF_MODE_NORMAL);
 }
@@ -328,6 +329,15 @@ press(H *h, guint keyval, GdkModifierType mods)
 #else
 #define ALT   GDK_MOD1_MASK
 #endif
+
+/* Make sure no prefix is pending (Escape cancels one). */
+static void
+set_prefix_off(H *h)
+{
+	if (h->w->prefix_active)
+		press(h, GDK_KEY_Escape, 0);
+	g_assert_false(gsurf_window_get_key_grab(h->window));
+}
 
 /* The prefix (C-b by default), then one key. */
 static void
@@ -665,6 +675,7 @@ test_split_navigate(void)
 	GdkRectangle ra, rb, rc;
 	g_autofree gchar *new_uri = page("new");
 	g_autofree gchar *input = NULL;
+	GsurfView *before;
 	g_autofree gchar *status = NULL;
 	g_autofree gchar *value = NULL;
 	guint i;
@@ -777,6 +788,36 @@ test_split_navigate(void)
 	value = gsurf_webkit_test_eval(gsurf_webkit_test_native(a), "document.getElementById('f').value");
 	g_assert_cmpstr(value, ==, "");
 	check_invariants(&h);
+
+	/* 8b. A pending prefix never lingers: a click, another active view
+	 *     or the window losing focus drops it and the key grab, so the
+	 *     next letter typed into the field is the page's again. */
+	before = gsurf_window_get_active_view(h.window);
+	gsurf_window_set_active_view(h.window, a);
+	WAIT_UNTIL(gsurf_view_get_editing(a));
+	g_assert_true(press(&h, GDK_KEY_b, CTRL));
+	g_assert_true(gsurf_window_get_key_grab(h.window));
+	gsurf_window_emit_button_press(h.window, 1, 0);
+	g_assert_false(h.w->prefix_active);
+	g_assert_false(gsurf_window_get_key_grab(h.window));
+	i = gsurf_window_get_n_views(h.window);
+	press(&h, GDK_KEY_percent, SHIFT); /* typing again, not a split */
+	g_assert_cmpuint(gsurf_window_get_n_views(h.window), ==, i);
+
+	g_assert_true(press(&h, GDK_KEY_b, CTRL));
+	g_assert_true(gsurf_window_get_key_grab(h.window));
+	g_signal_emit_by_name(h.window, "active-view-changed", a);
+	g_assert_false(gsurf_window_get_key_grab(h.window));
+
+	g_assert_true(press(&h, GDK_KEY_b, CTRL));
+	g_assert_true(gsurf_window_get_key_grab(h.window));
+	g_object_notify(G_OBJECT(h.toplevel), "is-active"); /* headless: not active */
+	if (!gtk_window_is_active(GTK_WINDOW(h.toplevel)))
+		g_assert_false(gsurf_window_get_key_grab(h.window));
+	set_prefix_off(&h);
+	g_assert_cmpuint(gsurf_window_get_n_views(h.window), ==, i);
+	check_invariants(&h);
+	gsurf_window_set_active_view(h.window, before);
 
 	/* 9. The status line: one window named after its active page, the
 	 *    active pane (the second) of six. */

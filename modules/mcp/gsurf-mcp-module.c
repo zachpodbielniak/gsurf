@@ -546,8 +546,7 @@ tool_get_history(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	if (file == NULL)
 		return error_result("history file not configured");
 
-	expanded = (file[0] == '~' && file[1] == '/')
-		? g_build_filename(g_get_home_dir(), file + 2, NULL) : g_strdup(file);
+	expanded = gsurf_resolve_path(file);
 	if (!g_file_get_contents(expanded, &contents, NULL, NULL))
 		return text_result("");
 
