@@ -232,6 +232,26 @@ libgsurf keeps per-process scratch data in =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX=
 
 The =gsurf= binary also calls =gsurf_runtime_dir_enter()=, which records the launch directory and =chdir()=s into the runtime directory, so a relative write by WebKit cannot reach the user's directory. *The library never changes an embedder's working directory*: a host such as cmacs keeps its own, and =gsurf_get_launch_dir()= then simply returns the current directory. A host that wants the same protection calls =gsurf_runtime_dir_enter()= itself before creating its first view. Relative paths from users or config files resolve with =gsurf_resolve_path()= (also used by =gsurf_expand_home()= and =gsurf_view_normalize_uri()=), which works either way.
 
+* Control socket
+
+The library never opens a control socket on its own. An embedder that wants =gsurfctl= (or any JSON-RPC client) to reach it starts one after activating its modules:
+
+#+begin_src c
+#include <gsurf/control/gsurf-control.h>   /* needs json-glib-1.0 */
+
+g_autoptr(GError) error = NULL;
+GsurfControlServer *control = gsurf_control_server_new(app);   /* or NULL: the module manager's */
+
+gsurf_control_server_set_name(control, "cmacs");               /* optional: gsurfctl -i cmacs */
+if (!gsurf_control_server_start(control, NULL, &error))         /* <runtime dir>/control.sock */
+	g_warning("control socket: %s", error->message);
+/* ... */
+gsurf_control_server_stop(control);
+g_object_unref(control);
+#+end_src
+
+The socket goes into the runtime directory (=gsurf_runtime_dir_get()=), so it disappears with it. =open= creates views as the gsurf binary does and relies on the host's =view-added= wiring; =action.run= performs the core actions only when the host registered an action executor (=gsurf_module_manager_set_action_executor()=). Extra methods come from =GsurfControlProvider= modules or =gsurf_control_server_add_method()=; =gsurf_control_server_dispatch()= runs a request in-process without a socket. =GsurfControlClient= and =gsurf_control_list_instances()= let a host talk to other gsurf instances. See [[file:control.org][control.org]].
+
 * GObject Introspection
 
 =make BUILD_GIR=1= produces =Gsurf-0.2.gir= / =Gsurf-0.2.typelib=, so gsurf can be

@@ -59,6 +59,7 @@ from the directory). Add an =enabled:= block under =modules:= in
 | =GsurfActionHandler=   | =handle_action=                           | a core keybind action with no built-in implementation (open-prompt → chromebar, find → find_bar, tab-* → tabs, follow-hints → modal) | first TRUE wins |
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
 | =GsurfTabTreeProvider= | =get_parent=, =get_collapsed=, =set_collapsed=, =move_view= | not dispatched: code that needs the tab tree (the =mcp= module) looks for an active module implementing it (=tabs=, since 0.4.4) | — |
+| =GsurfControlProvider= | =register_methods= | the control server asks every active implementer at start, after =modules.toggle= and on =gsurf_control_server_refresh_providers()=; their methods go when they deactivate (since 0.5; header =control/gsurf-control-provider.h=, see [[file:control.org][control.org]]) | — |
 | =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed=, =decide_main_response= | navigation lifecycle (history, homepage, containers); =before_navigate= also fires for iframe navigations and popup requests, =decide_main_response= only for the main frame's displayable response | =before=, =decide_main_response=: veto |
 
 More interfaces (request-filter, download-handler, status-provider,

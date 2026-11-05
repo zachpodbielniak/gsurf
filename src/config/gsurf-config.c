@@ -230,6 +230,19 @@ parse_root(GsurfConfig *self, YamlMapping *root)
 	if (m != NULL && yaml_mapping_has_member(m, "strict"))
 		self->tls_strict = yaml_mapping_get_boolean_member(m, "strict");
 
+	/* control: (the control socket, docs/control.org) */
+	m = yaml_mapping_get_mapping_member(root, "control");
+	if (m != NULL) {
+		if (yaml_mapping_has_member(m, "enabled"))
+			self->control_enabled = yaml_mapping_get_boolean_member(m, "enabled");
+		if (yaml_mapping_has_member(m, "name")) {
+			const gchar *name = yaml_mapping_get_string_member(m, "name");
+
+			g_free(self->control_name);
+			self->control_name = (name != NULL && *name != '\0') ? g_strdup(name) : NULL;
+		}
+	}
+
 	/* modules: (retained for module code to parse its own section) */
 	m = yaml_mapping_get_mapping_member(root, "modules");
 	if (m != NULL) {
@@ -439,6 +452,7 @@ gsurf_config_finalize(GObject *object)
 	g_clear_pointer(&self->cache_dir, g_free);
 	g_clear_pointer(&self->proxy_mode, g_free);
 	g_clear_pointer(&self->proxy_uri, g_free);
+	g_clear_pointer(&self->control_name, g_free);
 	g_clear_pointer(&self->modules_mapping, yaml_mapping_unref);
 	g_clear_object(&self->settings);
 
@@ -482,6 +496,8 @@ gsurf_config_init(GsurfConfig *self)
 	self->do_not_track = FALSE;  /* sent only by the hardening module */
 	self->tls_strict = TRUE;
 	self->ephemeral = FALSE;
+	self->control_enabled = TRUE;
+	self->control_name = NULL;
 }
 
 GsurfConfig *

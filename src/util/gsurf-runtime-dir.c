@@ -126,6 +126,33 @@ process_dir_is_stale(const gchar *path)
 	return stale;
 }
 
+gboolean
+gsurf_runtime_dir_is_live(const gchar *path)
+{
+	g_autofree gchar *lock = NULL;
+	gboolean live;
+	gint fd;
+
+	g_return_val_if_fail(path != NULL, FALSE);
+
+	lock = g_build_filename(path, LOCK_NAME, NULL);
+	fd = g_open(lock, O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0);
+	if (fd < 0)
+		return FALSE;
+	/* Taking the lock proves the owner is gone (closing the descriptor
+	 * releases it again); EWOULDBLOCK means someone holds it. */
+	live = flock(fd, LOCK_EX | LOCK_NB) != 0 && errno == EWOULDBLOCK;
+	close(fd);
+	return live;
+}
+
+gboolean
+gsurf_runtime_dir_is_process_dir_name(const gchar *name)
+{
+	g_return_val_if_fail(name != NULL, FALSE);
+	return is_process_dir_name(name);
+}
+
 guint
 gsurf_runtime_dir_sweep(const gchar *base)
 {

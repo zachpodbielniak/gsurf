@@ -23,6 +23,8 @@ and link =libgsurf= directly.
 | =GsurfContainerRegistry= | final GObject (singleton) | Containers: placement policy, native sessions. |
 | =GsurfContainer=      | final GObject       | One container: id, name, colour, temporary, views. |
 | =GsurfHostRules=      | final GObject       | Ordered per-host regex rules with YAML settings.  |
+| =GsurfControlServer=  | final GObject       | The control socket: JSON-RPC methods and events (since 0.5). |
+| =GsurfControlClient=  | final GObject       | Instance discovery and a control client (since 0.5). |
 
 The abstract =GsurfView= exposes =load_uri=, =reload=, =go_back/forward=,
 =get_uri/title=, =run_javascript_async=, =apply_settings=, =get_native_widget=
@@ -133,6 +135,10 @@ The tab tree lives in the =tabs= module; since 0.4.4 it is reachable through the
 ** Code shared by the WebKit backends
 
 =src/backend/webkit/= holds what GTK3/4.1 and GTK4/6.0 share: content filters and web-process extensions (=gsurf-webkit-content.c=), gopher/gemini (=gsurf-webkit-protocol.c=), per-container sessions (=gsurf-webkit-session.c=), and the module-facing signal handling (=gsurf-webkit-common.c=: context-menu entries, download destinations, TLS exceptions — scoped to the view's own session — permission requests, hovered links, popup creation). Both backends therefore offer the same features: popups, favicons, downloads, TLS exceptions, context-menu entries, snapshots and clipboard on GTK4 as on GTK3.
+
+* Control socket
+
+=src/control/= (since 0.5) holds the scripting interface: =GsurfControlServer= listens on =<runtime dir>/control.sock= and answers newline-delimited JSON-RPC 2.0, with a method registry (core methods in =gsurf-control-methods.c=, module methods through =GsurfControlProvider=), asynchronous answers through =GsurfControlInvocation=, and an event stream fed by the application's window and view signals, =GsurfModuleManager::mode-changed= and =GsurfModuleManager::download-started=. The core methods use the same public seams as the =mcp= module (stable view ids, =GsurfWindowLayout= vfuncs, =GsurfTabTreeProvider=, the container registry, =gsurf_module_manager_execute_action()=), never a module's internals. =GsurfControlClient= and =gsurf_control_list_instances()= find instances by their runtime directories' held =lock= files (=gsurf_runtime_dir_is_live()=). The =gsurf= binary starts the server after activating the modules (=control.enabled=); =tools/gsurfctl= is a thin client over the library. These headers stay out of =<gsurf.h>= because they use json-glib. See [[file:control.org][control.org]].
 
 * Event flow
 

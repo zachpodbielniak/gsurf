@@ -1,0 +1,134 @@
+#+TITLE: gsurfctl
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+=gsurfctl= drives a running gsurf from the shell: open tabs, list them and the tab tree, read the page, run JavaScript and actions, switch modes, drive wmux panes and windows, read the config, toggle modules, and follow events. It talks to the control socket every gsurf opens (see [[file:control.org][control.org]] for the protocol); it is a thin binary over =libgsurf=, installed next to =gsurf=.
+
+=gsurf URL= still starts a new browser process; =gsurfctl open URL= opens a tab in a running one.
+
+#+begin_example
+gsurfctl [OPTION...] COMMAND [ARGUMENTS...]
+#+end_example
+
+* Choosing an instance
+
+In this order:
+
+1. =-S, --socket PATH=: that socket.
+2. =-i, --instance ID= (else =$GSURF_INSTANCE=): a pid, a =control.name=, or a runtime directory id (=<pid>-XXXXXX=). Unknown: exit 3.
+3. The only running instance.
+4. Of several, the most recently focused one (=instance.info= =focused_at=: the last time one of its windows gained focus or saw a key or button press).
+
+=-a, --all= sends the command to every running instance; the output is prefixed (=[NAME]= lines, or one ={"instance":..,"result":..}= JSON line each), and the exit status is the last failure.
+
+Name an instance in its config (=control.name: work=) to address it as =gsurfctl -i work=. =gsurfctl list= shows the running instances.
+
+* Options
+
+| Option               | Effect                                                         |
+|----------------------+----------------------------------------------------------------|
+| =-i, --instance ID=  | The instance (pid, name, directory id)                         |
+| =-S, --socket PATH=  | A socket path instead of an instance                           |
+| =-a, --all=          | Every running instance                                         |
+| =-j, --json=         | Print results as JSON, one line                                |
+| =-p, --pretty=       | Indent JSON                                                    |
+| =-T, --timeout S=    | Seconds to wait for a reply (default 30; 0 waits forever)      |
+| =-q, --quiet=        | Print nothing on success                                       |
+| =--completion bash=  | Print the bash completion script                               |
+| =-V, --version=      | Print the version                                              |
+| =--license=          | Print the license (AGPL-3.0-or-later)                          |
+| =-h, --help=         | Help, with the commands and examples                           |
+
+Options may come before or after the command; =--= ends them. After =wmux=, =eval= and =call= every word is the command's own (so =gsurfctl wmux split-window -h= works; put gsurfctl's options before the command). Command flags (=--bg=, =--view=, ...) come after the command.
+
+* Commands
+
+=VIEW= is a view id (=gsurfctl tabs= shows them). Commands that act on a view take =--view VIEW= and default to the active view.
+
+| Command                                              | Method                | What it does |
+|------------------------------------------------------+-----------------------+--------------|
+| =list [--names]=                                     | (local)               | The running instances: pid, name, views, active page; =--names= for completion |
+| =info=                                               | =instance.info=       | pid, version, backend, name, kiosk, windows, views, focus time |
+| =open [URL] [--bg] [--container ID] [--child-of VIEW]= | =open=              | A new tab; an existing file path opens as =file://= (relative to your shell's directory); =--child-of= puts it under =VIEW= in the tab tree |
+| =nav URL=                                            | =navigate=            | Load URL in the view |
+| =back=, =forward=, =stop=, =reload [--hard]=         | =back= ...            | History and loading |
+| =tabs=                                               | =views.list=          | =ID TITLE URI= per view; =*= active, =+= on screen |
+| =tab VIEW=                                           | =views.activate=      | Switch to a view |
+| =close [VIEW]=                                       | =views.close=         | Close a view (default the active one; never the last) |
+| =tree=                                               | =tree.get=            | The tab tree, indented |
+| =move VIEW --parent P/--before V/--after V/--index N= | =tree.move=          | Move a view and its subtree (=--parent 0=: a root at the end) |
+| =collapse VIEW [on/off]=                             | =tree.collapse=       | Fold a subtree in the tab sidebar |
+| =containers=                                         | =containers.list=     | =ID NAME N views= |
+| =reopen VIEW CONTAINER=                              | =containers.reopen=   | Reopen in a container (an id, =temporary=, =default=); prints the new view |
+| =title=, =uri=, =text=                               | =page.*=              | The page's title, URI, rendered text |
+| =eval JS=                                            | =page.eval=           | Run JavaScript; strings print as they are, other values as JSON |
+| =screenshot FILE=                                    | =page.screenshot=     | A PNG of the visible page (relative to your shell's directory) |
+| =actions [--names]=                                  | =actions.list=        | Every action name |
+| =action NAME=                                        | =action.run=          | Run an action as its key binding would (=zoom-in=, =tab-next=, =pane-split-right=) |
+| =mode [normal/insert]=                               | =mode.get= / =mode.set= | Print or set the vim-style mode (needs =modal=) |
+| =panes [N] [--window N]=                             | =layout.panes=        | The panes of the current (or Nth) wmux window |
+| =windows=                                            | =layout.groups=       | The wmux windows and their panes |
+| =wmux 'COMMAND'=                                     | =layout.command=      | Any wmux command line |
+| =select-window N=                                    | =layout.select_group= | Show wmux window N |
+| =rename-window N [NAME]=                             | =layout.rename_group= | Rename it (no NAME: automatic naming) |
+| =config [KEY]=                                       | =config.get=          | A config value: =browser.homepage=, =control.name=, =modules.wmux.prefix= ...; no KEY: the core keys |
+| =modules [--names]=                                  | =modules.list=        | The loaded modules |
+| =module NAME [on/off]=                               | =modules.toggle=      | Switch a module (no on/off: flip) |
+| =methods [--names]=                                  | =methods.list=        | Every method of the socket |
+| =watch [TOPIC...]=                                   | =events.subscribe=    | Print events until interrupted: =[topic] event key: value ...=, or JSON lines with =-j=; ends quietly when gsurf quits |
+| =call METHOD [JSON/K=V...]=                          | any                   | A raw call; =K=V= values are JSON when they parse (=n=3=, =b=true=), else strings; a ={...}= argument merges in |
+| =help [COMMAND/--names]=                             | (local)               | The help, one command's usage, or the command names one per line (works without an instance) |
+
+* Exit status
+
+| Code | Meaning |
+|------+---------|
+| 0    | ok |
+| 1    | the command failed (the instance said why, on stderr; with =-j= also as an =error= object on stdout) |
+| 2    | usage error |
+| 3    | no instance, or it could not be reached (or closed the connection) |
+| 4    | refused by kiosk mode |
+
+* Examples
+
+#+begin_example
+gsurfctl list
+gsurfctl open https://example.org --bg
+gsurfctl open ./notes.html
+gsurfctl -j tabs | yq -p json '.[] | .id + " " + .uri'
+gsurfctl tree
+gsurfctl tab 4 && gsurfctl title
+gsurfctl move 7 --parent 3
+gsurfctl reopen 7 temporary
+gsurfctl text --view 7 | less
+gsurfctl eval 'document.querySelectorAll("a").length'
+gsurfctl screenshot page.png
+gsurfctl action zoom-in
+gsurfctl mode insert
+gsurfctl wmux 'split-window -h https://github.com'
+gsurfctl select-window 1 && gsurfctl panes
+gsurfctl config modules.wmux.prefix
+gsurfctl module wmux off
+gsurfctl watch view uri
+gsurfctl -i work open https://mail.example.org
+gsurfctl -a reload
+gsurfctl call views.list
+gsurfctl call open uri=https://example.org background=true
+source <(gsurfctl --completion bash)
+#+end_example
+
+* Shell completion
+
+=make install= installs the completion to =$(DATADIR)/bash-completion/completions/gsurfctl= (generated by =gsurfctl --completion bash=). It completes options, command names (=gsurfctl help --names=), instances after =-i= (=gsurfctl list --names=), action names, module names, method names after =call=, modes, topics and files.
+
+* Environment
+
+| Variable           | Effect |
+|--------------------+--------|
+| =GSURF_INSTANCE=   | The default for =-i= |
+| =XDG_RUNTIME_DIR=  | Where instances are found (=gsurf/<pid>-XXXXXX/control.sock=, =gsurf/<name>.sock=) |
+
+* AppImage
+
+The AppImage bundles =gsurfctl= as well: run it as =gsurf-x86_64.AppImage ctl COMMAND ...=, or through a symlink whose name starts with =gsurfctl=.

@@ -8,6 +8,7 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 ** Getting started
 - [[file:quickstart.org][Quickstart]] — install, build, first run.
 - [[file:cli.org][CLI reference]] — command-line options.
+- [[file:gsurfctl.org][gsurfctl]] — drive a running gsurf from the shell (tabs, pages, actions, wmux, events).
 
 - [[file:kiosk-pwa.org][Kiosk and PWA]] — restricted site windows and desktop installation.
 
@@ -27,6 +28,7 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:wmux.org][wmux]] — tmux-style panes, windows and a status line in one browser window.
 - [[file:form-autofill.org][Form autofill]] — identity, address and card profiles filled from an isolated script world.
 - [[file:hardening.org][Privacy hardening]] — LibreWolf-style protections with per-site exemptions.
+- [[file:control.org][Control socket]] — the JSON-RPC protocol, methods, events, the provider interface and security.
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
 - [[file:embedding.org][Embedding]] — using libgsurf in another application.
 
