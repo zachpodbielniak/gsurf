@@ -27,7 +27,9 @@
  * itself (wmux: show the tab in a pane, or split one).
  *
  * The strip and sidebar widgets live in gsurf-tabs-ui.c. Implements
- * #GsurfInputHandler, #GsurfKeybindProvider and #GsurfActionHandler.
+ * #GsurfInputHandler, #GsurfKeybindProvider, #GsurfActionHandler and
+ * #GsurfTabTreeProvider (the tree for the MCP server and other code that
+ * does not link against this module).
  * Builds on GTK3 and GTK4.
  */
 
@@ -39,12 +41,14 @@
 static void gsurf_tabs_input_init(GsurfInputHandlerInterface *iface);
 static void gsurf_tabs_keybind_init(GsurfKeybindProviderInterface *iface);
 static void gsurf_tabs_action_init(GsurfActionHandlerInterface *iface);
+static void gsurf_tabs_tree_provider_init(GsurfTabTreeProviderInterface *iface);
 
 G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfTabsModule, gsurf_tabs_module,
 	GSURF_TYPE_MODULE,
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_INPUT_HANDLER, gsurf_tabs_input_init)
 	G_IMPLEMENT_INTERFACE(GSURF_TYPE_KEYBIND_PROVIDER, gsurf_tabs_keybind_init)
-	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_tabs_action_init))
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_ACTION_HANDLER, gsurf_tabs_action_init)
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_TAB_TREE_PROVIDER, gsurf_tabs_tree_provider_init))
 
 /* Default keys (docs/tabs.org lists them with their conflict check). */
 #define DEFAULT_KEY_NEW       "Ctrl+t"
@@ -849,6 +853,117 @@ static void
 gsurf_tabs_action_init(GsurfActionHandlerInterface *iface)
 {
 	iface->handle_action = gsurf_tabs_handle_action;
+}
+
+/* ------------------------------------------------------------------ */
+/* GsurfTabTreeProvider                                                */
+/* ------------------------------------------------------------------ */
+
+/* The id of @view when it is a tab of our window in the tree, else 0. */
+static guint64
+provider_tab(GsurfTabsModule *self, GsurfWindow *window, GsurfView *view)
+{
+	guint64 id;
+
+	if (self->tree == NULL || self->window == NULL || window != self->window)
+		return 0;
+	id = gsurf_view_get_id(view);
+	return gsurf_tab_tree_contains(self->tree, id) ? id : 0;
+}
+
+static guint64
+gsurf_tabs_provider_get_parent(GsurfTabTreeProvider *provider, GsurfWindow *window,
+                               GsurfView *view)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(provider);
+	guint64 id = provider_tab(self, window, view);
+
+	return id != 0 ? gsurf_tab_tree_get_parent(self->tree, id) : 0;
+}
+
+static gboolean
+gsurf_tabs_provider_get_collapsed(GsurfTabTreeProvider *provider, GsurfWindow *window,
+                                  GsurfView *view)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(provider);
+	guint64 id = provider_tab(self, window, view);
+
+	return id != 0 && gsurf_tab_tree_get_collapsed(self->tree, id);
+}
+
+/* Like a click on the twisty (gsurf_tabs_toggle_collapse()), but to a
+ * given state. */
+static gboolean
+gsurf_tabs_provider_set_collapsed(GsurfTabTreeProvider *provider, GsurfWindow *window,
+                                  GsurfView *view, gboolean collapsed)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(provider);
+	guint64 id = provider_tab(self, window, view);
+
+	if (id == 0 || gsurf_tab_tree_get_n_children(self->tree, id) == 0)
+		return FALSE;
+	if (gsurf_tab_tree_get_collapsed(self->tree, id) != collapsed)
+		gsurf_tabs_toggle_collapse(self, id);
+	return TRUE;
+}
+
+/*
+ * A sidebar drop without the drag (gsurf_tabs_drop()): @view and its
+ * subtree go before, after or under @target, or, for a NULL @target,
+ * after the last root's subtree as a root. The window order follows.
+ */
+static gboolean
+gsurf_tabs_provider_move_view(GsurfTabTreeProvider *provider, GsurfWindow *window,
+                              GsurfView *view, GsurfView *target,
+                              GsurfTabTreePosition position)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(provider);
+	guint64 id = provider_tab(self, window, view);
+	guint64 target_id;
+	GsurfTabTreeDrop where;
+	guint n;
+
+	if (id == 0)
+		return FALSE;
+
+	/* 1. The target: a given tab, or the last root. */
+	if (target != NULL) {
+		target_id = provider_tab(self, window, target);
+		if (target_id == 0)
+			return FALSE;
+		switch (position) {
+		case GSURF_TAB_TREE_POSITION_BEFORE: where = GSURF_TAB_TREE_DROP_BEFORE; break;
+		case GSURF_TAB_TREE_POSITION_AFTER:  where = GSURF_TAB_TREE_DROP_AFTER; break;
+		case GSURF_TAB_TREE_POSITION_CHILD:
+		default:                             where = GSURF_TAB_TREE_DROP_CHILD; break;
+		}
+	} else {
+		n = gsurf_tab_tree_get_n_tabs(self->tree);
+		target_id = gsurf_tab_tree_get_nth(self->tree, n - 1);
+		while (gsurf_tab_tree_get_parent(self->tree, target_id) != 0)
+			target_id = gsurf_tab_tree_get_parent(self->tree, target_id);
+		/* Already the last root. */
+		if (target_id == id)
+			return TRUE;
+		where = GSURF_TAB_TREE_DROP_AFTER;
+	}
+
+	/* 2. Move in the model (refused into its own subtree), then the
+	 *    window order and the sidebar. */
+	if (!gsurf_tab_tree_move_to(self->tree, id, target_id, where))
+		return FALSE;
+	apply_tree_order(self);
+	gsurf_tabs_ui_sync(self);
+	return TRUE;
+}
+
+static void
+gsurf_tabs_tree_provider_init(GsurfTabTreeProviderInterface *iface)
+{
+	iface->get_parent = gsurf_tabs_provider_get_parent;
+	iface->get_collapsed = gsurf_tabs_provider_get_collapsed;
+	iface->set_collapsed = gsurf_tabs_provider_set_collapsed;
+	iface->move_view = gsurf_tabs_provider_move_view;
 }
 
 static void

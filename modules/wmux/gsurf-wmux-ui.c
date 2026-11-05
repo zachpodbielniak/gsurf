@@ -242,6 +242,17 @@ overlay_unset_main(GtkWidget *overlay, GtkWidget *child)
 /* Grid callbacks                                                      */
 /* ------------------------------------------------------------------ */
 
+void
+gsurf_wmux_ui_area(GsurfWmuxModule *self, gint *width, gint *height)
+{
+	*width = 0;
+	*height = 0;
+	if (self->grid == NULL)
+		return;
+	*width = MAX(gsurf_chrome_widget_get_width(self->grid), 0);
+	*height = MAX(gsurf_chrome_widget_get_height(self->grid), 0);
+}
+
 static GArray *
 grid_geometry(gpointer data, gint width, gint height)
 {

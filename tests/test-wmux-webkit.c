@@ -1172,6 +1172,17 @@ test_windows(void)
 	status = status_text(&h);
 	g_assert_cmpstr(status, ==, "[gsurf] 0:first 1:my docs- 2:mail*  1/1");
 	g_clear_pointer(&status, g_free);
+	/* A command that parses but cannot run says why (0.4.4). */
+	cmd(&h, GDK_KEY_colon, SHIFT);
+	WAIT_UNTIL(prompt_focused(&h));
+	prompt_set_text(&h, "select-window -t 9");
+	g_test_expect_message(NULL, G_LOG_LEVEL_MESSAGE, "*can't find window 9*");
+	prompt_key(&h, GDK_KEY_Return);
+	g_test_assert_expected_messages();
+	g_assert_true(gtk_widget_get_visible(h.w->message));
+	g_assert_nonnull(strstr(gtk_label_get_text(GTK_LABEL(h.w->message)),
+		"select-window: can't find window 9 (there are 3)"));
+	g_assert_cmpuint(h.w->current, ==, 2);
 
 	/* 6. o (open prompt) then Enter loads into the active pane. */
 	cmd(&h, GDK_KEY_percent, SHIFT);

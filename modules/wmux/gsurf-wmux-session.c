@@ -336,6 +336,7 @@ gsurf_wmux_select_window(GsurfWmuxModule *self, guint index)
  * @uri: (nullable): the address for a new tab
  * @existing: (nullable): show this view in the new pane instead of a new
  *   tab (pane-split-* for a tab that is not on screen)
+ * @error: (nullable): why the split was refused
  *
  * Splits @pane. The new view goes into the new pane *before* it joins the
  * window, so the window's add_view and the activation that follows find
@@ -346,16 +347,19 @@ gsurf_wmux_select_window(GsurfWmuxModule *self, guint index)
 gboolean
 gsurf_wmux_split(GsurfWmuxModule *self, guint pane, GsurfWmuxSplit split, gboolean before,
                  gboolean keep_active, guint pct, gboolean duplicate, const gchar *uri,
-                 GsurfView *existing)
+                 GsurfView *existing, GError **error)
 {
 	GsurfWmuxWin *win = gsurf_wmux_current(self);
-	g_autoptr(GError) error = NULL;
+	g_autoptr(GError) local = NULL;
 	g_autofree gchar *load = NULL;
 	g_autoptr(GsurfView) view = NULL;
 	guint new_pane;
 
-	if (win == NULL || self->window == NULL)
+	if (win == NULL || self->window == NULL) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+			"wmux is not attached to a window");
 		return FALSE;
+	}
 
 	/* 1. A view shown elsewhere leaves its old pane first. */
 	if (existing != NULL)
@@ -363,10 +367,11 @@ gsurf_wmux_split(GsurfWmuxModule *self, guint pane, GsurfWmuxSplit split, gboole
 
 	/* 2. The new pane, refused when either side would get too small. */
 	new_pane = gsurf_wmux_layout_split(win->layout, pane, split, before,
-		pct > 0 ? pct : (guint)self->split_ratio, &error);
+		pct > 0 ? pct : (guint)self->split_ratio, &local);
 	if (new_pane == GSURF_WMUX_PANE_NONE) {
-		gsurf_wmux_ui_message(self, error->message);
+		gsurf_wmux_ui_message(self, local->message);
 		gsurf_wmux_ui_sync(self);
+		g_propagate_error(error, g_steal_pointer(&local));
 		return FALSE;
 	}
 
@@ -379,6 +384,8 @@ gsurf_wmux_split(GsurfWmuxModule *self, guint pane, GsurfWmuxSplit split, gboole
 		if (view == NULL) {
 			gsurf_wmux_layout_remove(win->layout, new_pane, NULL);
 			gsurf_wmux_ui_sync(self);
+			g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+				"split-window: could not create a view");
 			return FALSE;
 		}
 	}
@@ -513,19 +520,23 @@ gsurf_wmux_new_window(GsurfWmuxModule *self, const gchar *name, const gchar *uri
 	gsurf_view_load_uri(view, load);
 }
 
-void
-gsurf_wmux_break_pane(GsurfWmuxModule *self)
+gboolean
+gsurf_wmux_break_pane(GsurfWmuxModule *self, GError **error)
 {
 	GsurfWmuxWin *win = gsurf_wmux_current(self);
 	GsurfWmuxWin *fresh;
 	guint pane;
 	guint64 id;
 
-	if (win == NULL)
-		return;
+	if (win == NULL) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+			"wmux is not attached to a window");
+		return FALSE;
+	}
 	if (gsurf_wmux_layout_get_n_panes(win->layout) <= 1) {
-		gsurf_wmux_ui_message(self, "break-pane: the window has only one pane");
-		return;
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_FAILED,
+			"break-pane: the window has only one pane");
+		return FALSE;
 	}
 
 	/* The active pane's view leaves its window for a new one of its own;
@@ -539,6 +550,7 @@ gsurf_wmux_break_pane(GsurfWmuxModule *self)
 	self->last_win = (gint)self->current;
 	self->current = self->wins->len - 1;
 	gsurf_wmux_show_active(self);
+	return TRUE;
 }
 
 /*
@@ -599,7 +611,7 @@ gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view, GsurfView *targe
 			(zone == GSURF_WMUX_DROP_LEFT || zone == GSURF_WMUX_DROP_RIGHT)
 				? GSURF_WMUX_SPLIT_H : GSURF_WMUX_SPLIT_V,
 			zone == GSURF_WMUX_DROP_LEFT || zone == GSURF_WMUX_DROP_TOP,
-			FALSE, 0, FALSE, NULL, view);
+			FALSE, 0, FALSE, NULL, view, NULL);
 
 	/* 4. The centre: swap with the tab's old pane, or replace. */
 	if (gsurf_wmux_find_view(self, id, &vw, &vp)) {
@@ -1051,6 +1063,9 @@ wmux_list_groups(GsurfWindowLayout *layout, GsurfWindow *window)
 		g_autofree gchar *name = gsurf_wmux_win_display_name(self, i);
 		GsurfLayoutGroup *group = gsurf_layout_group_new(i, name, i == self->current);
 
+		gsurf_layout_group_set_last(group, self->last_win >= 0 && (guint)self->last_win == i);
+		gsurf_layout_group_set_zoomed(group,
+			gsurf_wmux_layout_get_zoomed(win->layout) != GSURF_WMUX_PANE_NONE);
 		for (j = 0; j < panes->len; j++) {
 			GsurfView *view = gsurf_wmux_pane_view(self, win, g_array_index(panes, guint, j));
 
@@ -1128,6 +1143,144 @@ wmux_end_view_drag(GsurfWindowLayout *layout, GsurfWindow *window)
 	gsurf_wmux_ui_set_drag(self, NULL);
 }
 
+/* The rectangle of @pane in @rects (from gsurf_wmux_layout_geometry()). */
+static const GsurfWmuxRect *
+find_rect(GArray *rects, guint pane)
+{
+	guint i;
+
+	for (i = 0; rects != NULL && i < rects->len; i++) {
+		const GsurfWmuxRect *r = &g_array_index(rects, GsurfWmuxRect, i);
+
+		if (r->pane == pane)
+			return r;
+	}
+	return NULL;
+}
+
+/* The fractions use a large virtual area without gaps, so they do not
+ * depend on the window size or on rounding to whole pixels. */
+#define WMUX_FRACTION_AREA (1000000)
+
+/*
+ * wmux_list_panes:
+ * @group: a tmux window index
+ *
+ * The panes of tmux window @group in layout order (what select-pane -t
+ * counts), each with its view, whether it is the window's active pane,
+ * and its rectangle. Rectangles are the unzoomed arrangement, in pixels
+ * of the grid (its current size, with the configured gap) and as
+ * fractions of it; a zoomed pane gets the whole area instead (that is
+ * what is on screen while the zoom lasts).
+ */
+static GPtrArray *
+wmux_list_panes(GsurfWindowLayout *layout, GsurfWindow *window, guint group)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+	g_autoptr(GsurfWmuxLayout) flat = NULL;
+	g_autoptr(GArray) panes = NULL;
+	g_autoptr(GArray) pixels = NULL;
+	g_autoptr(GArray) fractions = NULL;
+	GsurfWmuxWin *win;
+	GPtrArray *out;
+	guint active;
+	guint zoomed;
+	gint width;
+	gint height;
+	guint i;
+
+	if (!self->attached || window != self->window || self->wins == NULL ||
+	    group >= self->wins->len)
+		return NULL;
+	win = g_ptr_array_index(self->wins, group);
+	active = gsurf_wmux_layout_get_active(win->layout);
+	zoomed = gsurf_wmux_layout_get_zoomed(win->layout);
+
+	/* 1. Geometry of the unzoomed arrangement, in pixels and fractions. */
+	gsurf_wmux_ui_area(self, &width, &height);
+	flat = gsurf_wmux_layout_copy(win->layout);
+	gsurf_wmux_layout_set_zoomed(flat, GSURF_WMUX_PANE_NONE);
+	pixels = gsurf_wmux_layout_geometry(flat, width, height, self->gap);
+	fractions = gsurf_wmux_layout_geometry(flat, WMUX_FRACTION_AREA, WMUX_FRACTION_AREA, 0);
+
+	/* 2. One GsurfLayoutPane per pane, in layout order. */
+	out = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_layout_pane_unref);
+	panes = gsurf_wmux_layout_list_panes(win->layout);
+	for (i = 0; i < panes->len; i++) {
+		guint pane = g_array_index(panes, guint, i);
+		GsurfView *view = gsurf_wmux_pane_view(self, win, pane);
+		GsurfLayoutPane *p = gsurf_layout_pane_new(i, pane,
+			view != NULL ? gsurf_view_get_id(view) : 0, pane == active);
+		const GsurfWmuxRect *px = find_rect(pixels, pane);
+		const GsurfWmuxRect *fr = find_rect(fractions, pane);
+
+		gsurf_layout_pane_set_zoomed(p, pane == zoomed);
+		if (pane == zoomed) {
+			gsurf_layout_pane_set_rect(p, 0, 0, width, height);
+			gsurf_layout_pane_set_fraction(p, 0.0, 0.0, 1.0, 1.0);
+		} else {
+			if (px != NULL)
+				gsurf_layout_pane_set_rect(p, px->x, px->y, px->width, px->height);
+			if (fr != NULL)
+				gsurf_layout_pane_set_fraction(p,
+					(gdouble)fr->x / WMUX_FRACTION_AREA,
+					(gdouble)fr->y / WMUX_FRACTION_AREA,
+					(gdouble)fr->width / WMUX_FRACTION_AREA,
+					(gdouble)fr->height / WMUX_FRACTION_AREA);
+		}
+		g_ptr_array_add(out, p);
+	}
+	return out;
+}
+
+/* Any command of the command language, as typed at the prompt, but the
+ * error goes back to the caller instead of the status line (the MCP
+ * server's wmux_command). */
+static gboolean
+wmux_run_command(GsurfWindowLayout *layout, GsurfWindow *window, const gchar *command,
+                 GError **error)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+	g_autoptr(GsurfWmuxCommand) cmd = NULL;
+
+	if (!self->attached || window != self->window) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+			"wmux is not attached to this window");
+		return FALSE;
+	}
+	cmd = gsurf_wmux_command_parse(command, NULL, error);
+	if (cmd == NULL)
+		return FALSE;
+	return gsurf_wmux_run(self, cmd, error);
+}
+
+/* What an agent needs to know before driving wmux: the prefix key, the
+ * status line and mouse options, the pane area and the windows. */
+static GVariant *
+wmux_describe(GsurfWindowLayout *layout, GsurfWindow *window)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+	GVariantBuilder b;
+	gint width;
+	gint height;
+
+	if (window != self->window)
+		return NULL;
+	gsurf_wmux_ui_area(self, &width, &height);
+	g_variant_builder_init(&b, G_VARIANT_TYPE_VARDICT);
+	g_variant_builder_add(&b, "{sv}", "name", g_variant_new_string("wmux"));
+	g_variant_builder_add(&b, "{sv}", "prefix",
+		g_variant_new_string(self->prefix != NULL ? self->prefix : ""));
+	g_variant_builder_add(&b, "{sv}", "status", g_variant_new_boolean(self->status));
+	g_variant_builder_add(&b, "{sv}", "mouse", g_variant_new_boolean(self->mouse));
+	g_variant_builder_add(&b, "{sv}", "width", g_variant_new_int32(width));
+	g_variant_builder_add(&b, "{sv}", "height", g_variant_new_int32(height));
+	g_variant_builder_add(&b, "{sv}", "windows",
+		g_variant_new_uint32(self->wins != NULL ? self->wins->len : 0));
+	g_variant_builder_add(&b, "{sv}", "current", g_variant_new_uint32(self->current));
+	return g_variant_builder_end(&b);
+}
+
 void
 gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface)
 {
@@ -1146,4 +1299,7 @@ gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->begin_view_drag = wmux_begin_view_drag;
 	iface->end_view_drag = wmux_end_view_drag;
 	iface->rename_group = wmux_rename_group;
+	iface->list_panes = wmux_list_panes;
+	iface->run_command = wmux_run_command;
+	iface->describe = wmux_describe;
 }
