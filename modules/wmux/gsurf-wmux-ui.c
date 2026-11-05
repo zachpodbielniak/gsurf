@@ -145,6 +145,14 @@ build_css(GsurfWmuxModule *self)
 		self->status_bg, self->status_fg, self->active_border_color, self->status_fg,
 		self->active_border_color, self->status_bg);
 
+	/* 2b. The mode indicator. */
+	g_string_append_printf(css,
+		".wmux-status label.wmux-status-mode { font-weight: bold; }\n"
+		".wmux-status label.wmux-mode-normal { color: %s; }\n"
+		".wmux-status label.wmux-mode-insert { color: %s; }\n"
+		".wmux-status label.wmux-mode-follow { color: %s; }\n",
+		self->mode_normal_color, self->mode_insert_color, self->mode_follow_color);
+
 	/* 3. Container colours: the frame border (dim, or brightened and full
 	 *    for the active pane) and the chooser stripe. */
 	if (self->container_colors && self->registry != NULL) {
@@ -770,6 +778,35 @@ right_text(GsurfWmuxModule *self)
 		gsurf_wmux_layout_get_zoomed(win->layout) != GSURF_WMUX_PANE_NONE ? " Z" : "");
 }
 
+/* The status line's mode indicator follows the published input mode. */
+void
+gsurf_wmux_ui_update_mode(GsurfWmuxModule *self, GsurfModePolicy mode)
+{
+	static const gchar *const classes[] = {
+		"wmux-mode-normal", "wmux-mode-insert", "wmux-mode-follow",
+		"wmux-mode-find", "wmux-mode-passthrough", NULL
+	};
+	const gchar *label = gsurf_mode_policy_get_label(mode);
+	g_autofree gchar *text = NULL;
+	guint i;
+
+	if (self->status_mode == NULL)
+		return;
+	text = g_strdup_printf("-- %s --", label != NULL ? label : "?");
+	gtk_label_set_text(GTK_LABEL(self->status_mode), text);
+	for (i = 0; classes[i] != NULL; i++)
+		gsurf_chrome_widget_set_class(self->status_mode, classes[i], (guint)mode == i);
+	gtk_widget_set_visible(self->status_mode,
+		!(self->mode_hide_normal && mode == GSURF_MODE_NORMAL));
+}
+
+static void
+on_mode_changed(GsurfModuleManager *manager, GsurfModePolicy mode, gpointer user_data)
+{
+	(void)manager;
+	gsurf_wmux_ui_update_mode(GSURF_WMUX_MODULE(user_data), mode);
+}
+
 void
 gsurf_wmux_ui_update_status(GsurfWmuxModule *self)
 {
@@ -1267,6 +1304,12 @@ gsurf_wmux_ui_build(GsurfWmuxModule *self)
 	spacer = gtk_label_new("");
 	gtk_widget_set_hexpand(spacer, TRUE);
 	box_append(self->status_box, spacer, TRUE);
+	if (self->mode_indicator) {
+		self->status_mode = gtk_label_new("");
+		gtk_widget_set_name(self->status_mode, GSURF_WMUX_STATUS_MODE_NAME);
+		gsurf_chrome_widget_add_class(self->status_mode, "wmux-status-mode");
+		box_append(self->status_box, self->status_mode, FALSE);
+	}
 	self->status_right = gtk_label_new("");
 	gtk_widget_set_name(self->status_right, GSURF_WMUX_STATUS_RIGHT_NAME);
 	box_append(self->status_box, self->status_right, FALSE);
@@ -1286,6 +1329,14 @@ gsurf_wmux_ui_build(GsurfWmuxModule *self)
 	gsurf_chrome_widget_start_hidden(self->prompt_box);
 	gsurf_chrome_widget_manage_visibility(self->status_box);
 	gtk_widget_set_visible(self->status_box, self->status);
+
+	/* 6. The mode indicator follows the published input mode. */
+	if (self->status_mode != NULL) {
+		gsurf_chrome_widget_manage_visibility(self->status_mode);
+		self->mode_source = g_object_ref(gsurf_module_manager_get_default());
+		g_signal_connect(self->mode_source, "mode-changed", G_CALLBACK(on_mode_changed), self);
+		gsurf_wmux_ui_update_mode(self, gsurf_module_manager_get_mode(self->mode_source));
+	}
 }
 
 void
@@ -1305,6 +1356,10 @@ gsurf_wmux_ui_free(GsurfWmuxModule *self)
 	g_clear_pointer(&self->prompt_template, g_free);
 	g_clear_pointer(&self->prompt_command, g_free);
 	g_clear_pointer(&self->chooser_items, g_array_unref);
+	if (self->mode_source != NULL) {
+		g_signal_handlers_disconnect_by_data(self->mode_source, self);
+		g_clear_object(&self->mode_source);
+	}
 
 	/* Frames first: their web views must never die with the root. */
 	g_clear_pointer(&self->frames, g_hash_table_unref);
@@ -1326,6 +1381,7 @@ gsurf_wmux_ui_free(GsurfWmuxModule *self)
 	self->status_box = NULL;
 	self->status_windows = NULL;
 	self->status_right = NULL;
+	self->status_mode = NULL;
 	self->message = NULL;
 	self->prompt_box = NULL;
 	self->prompt_label = NULL;

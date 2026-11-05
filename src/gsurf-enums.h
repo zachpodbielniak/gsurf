@@ -418,6 +418,20 @@ GType gsurf_action_get_type(void) G_GNUC_CONST;
 #define GSURF_TYPE_ACTION             (gsurf_action_get_type())
 
 /**
+ * gsurf_mode_policy_get_label:
+ * @mode: a #GsurfModePolicy
+ *
+ * The mode's name as a mode indicator shows it: "NORMAL", "INSERT",
+ * "FOLLOW", "FIND" or "PASSTHROUGH".
+ *
+ * Returns: (transfer none) (nullable): the label, or %NULL for an
+ *   unknown value
+ *
+ * Since: 0.4.2
+ */
+const gchar *gsurf_mode_policy_get_label(GsurfModePolicy mode);
+
+/**
  * gsurf_action_from_string:
  * @str: an action name (e.g. "reload", "scroll-down"; underscores accepted)
  *

@@ -165,6 +165,17 @@ Handled by modules (the core table forwards them; each does nothing unless its m
 The =modal= module (enabled by default) provides vim-style navigation. It is
 *focus-aware*, so it never blocks typing:
 
+*Mode indicator (since 0.4.2).* The address bar (=chromebar=) shows the current mode at its left, vim style: =-- NORMAL --=, =-- INSERT --= while keys go to the page, =-- FOLLOW --= while link hints are up; the =wmux= status line shows the same, left of the pane counter. =modal= publishes the mode on the module manager (=gsurf_module_manager_set_mode()=, the =GsurfModuleManager:mode= property and =mode-changed= signal) and resets it to NORMAL when it is disabled, so any chrome can follow it. Both indicators take =mode_indicator: false= (leave it out), =mode_hide_normal: true= (show it only outside NORMAL) and per-mode colours =mode_normal_color= (=#89b4fa=), =mode_insert_color= (=#a6e3a1=), =mode_follow_color= (=#f9e2af=), in their own module section; an invalid colour warns and keeps the default. FIND and PASSTHROUGH, which no shipped module publishes, show in =#fab387=.
+
+#+begin_src yaml
+modules:
+  chromebar:
+    mode_hide_normal: true         # only "-- INSERT --" / "-- FOLLOW --"
+    mode_insert_color: "#f38ba8"
+  wmux:
+    mode_indicator: false          # not in the status line
+#+end_src
+
 - When an editable element is focused — a page text field (=text=, =search=, =email=, =url=, =tel=, =password=, =number=, =date=, ... inputs), =textarea=, =select=, =contenteditable= or anything inside =role="textbox"= / =searchbox= / =combobox=, in the page itself, inside a shadow DOM component or inside an =iframe= — *or the address bar* — keystrokes go straight to it. You do *not* need to press =i= first, and no bare key (=o=, =a=, =i=, =f=, ...) is ever a command there. =Escape= blurs a page field, or leaves the address bar, and returns to command context.
 - When nothing editable is focused (you're reading a page), bare letters are
   commands: =hjkl= scroll, =gg=/=G= top/bottom, =H=/=L= history, =r= reload,

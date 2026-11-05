@@ -60,6 +60,9 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_DEFAULT_STATUS_FG           "#cdd6f4"
 #define GSURF_WMUX_DEFAULT_STATUS_CURRENT_FG   "#89b4fa"
 #define GSURF_WMUX_DEFAULT_WINDOW_NAME_MAX     (20)
+#define GSURF_WMUX_DEFAULT_MODE_NORMAL_COLOR   "#89b4fa"
+#define GSURF_WMUX_DEFAULT_MODE_INSERT_COLOR   "#a6e3a1"
+#define GSURF_WMUX_DEFAULT_MODE_FOLLOW_COLOR   "#f9e2af"
 
 /* The session name the status line shows ("[gsurf]"). */
 #define GSURF_WMUX_SESSION_NAME "gsurf"
@@ -73,6 +76,7 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_STATUS_NAME         "gsurf-wmux-status"
 #define GSURF_WMUX_STATUS_WINDOWS_NAME "gsurf-wmux-status-windows"
 #define GSURF_WMUX_STATUS_RIGHT_NAME   "gsurf-wmux-status-right"
+#define GSURF_WMUX_STATUS_MODE_NAME    "gsurf-wmux-status-mode"
 #define GSURF_WMUX_MESSAGE_NAME        "gsurf-wmux-message"
 #define GSURF_WMUX_PROMPT_NAME         "gsurf-wmux-prompt"
 #define GSURF_WMUX_PROMPT_LABEL_NAME   "gsurf-wmux-prompt-label"
@@ -187,6 +191,11 @@ struct _GsurfWmuxModule
 	gchar             *status_fg;
 	gchar             *status_current_fg;
 	gint               window_name_max;
+	gboolean           mode_indicator;    /* "-- INSERT --" in the status line */
+	gboolean           mode_hide_normal;
+	gchar             *mode_normal_color;
+	gchar             *mode_insert_color;
+	gchar             *mode_follow_color;
 
 	/* --- Runtime (activate() .. deactivate()) --- */
 	GsurfWindow       *window;            /* weak: cleanup when it finalizes */
@@ -220,6 +229,8 @@ struct _GsurfWmuxModule
 	GtkWidget         *status_box;
 	GtkWidget         *status_windows;    /* box of window buttons */
 	GtkWidget         *status_right;      /* "2/3 Z" */
+	GtkWidget         *status_mode;       /* "-- INSERT --", or NULL */
+	GsurfModuleManager *mode_source;      /* whose mode we show (ref) */
 	GtkWidget         *message;           /* a command error */
 	GtkWidget         *prompt_box;
 	GtkWidget         *prompt_label;
@@ -308,6 +319,8 @@ G_GNUC_INTERNAL void      gsurf_wmux_ui_drop_frame(GsurfWmuxModule *self, guint6
 G_GNUC_INTERNAL void      gsurf_wmux_ui_clear_frames(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_update_status(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_update_css(GsurfWmuxModule *self);
+/* Show @mode ("-- INSERT --") in the status line's mode indicator. */
+G_GNUC_INTERNAL void      gsurf_wmux_ui_update_mode(GsurfWmuxModule *self, GsurfModePolicy mode);
 /* The status line as plain text: "[gsurf] 0:a* 1:b-" + "  " + "2/3 Z". */
 G_GNUC_INTERNAL gchar    *gsurf_wmux_ui_status_text(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_message(GsurfWmuxModule *self, const gchar *text);

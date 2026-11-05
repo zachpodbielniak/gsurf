@@ -334,6 +334,54 @@ test_passthrough_flag(void)
 }
 
 static void
+count_mode(GsurfModuleManager *mgr, GsurfModePolicy mode, gpointer user_data)
+{
+	GString *log = user_data;
+
+	(void)mgr;
+	g_string_append_printf(log, "%s,", gsurf_mode_policy_get_label(mode));
+}
+
+static void
+count_notify(GObject *object, GParamSpec *pspec, gpointer user_data)
+{
+	(void)object;
+	(void)pspec;
+	(*(guint *)user_data)++;
+}
+
+/* The published input mode: NORMAL at first; a change notifies
+ * GsurfModuleManager:mode and emits mode-changed once; the same mode
+ * again is silent; the property sets it too; it is independent of the
+ * passthrough flag. */
+static void
+test_mode(void)
+{
+	g_autoptr(GsurfModuleManager) mgr = gsurf_module_manager_new();
+	g_autoptr(GString) log = g_string_new(NULL);
+	GsurfModePolicy read = GSURF_MODE_FIND;
+	guint notifies = 0;
+
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_signal_connect(mgr, "mode-changed", G_CALLBACK(count_mode), log);
+	g_signal_connect(mgr, "notify::mode", G_CALLBACK(count_notify), &notifies);
+
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_INSERT);
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_INSERT);
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_FOLLOW);
+	g_object_set(mgr, "mode", GSURF_MODE_NORMAL, NULL);
+	g_assert_cmpstr(log->str, ==, "INSERT,FOLLOW,NORMAL,");
+	g_assert_cmpuint(notifies, ==, 3);
+	g_object_get(mgr, "mode", &read, NULL);
+	g_assert_cmpint(read, ==, GSURF_MODE_NORMAL);
+	g_assert_false(gsurf_module_manager_get_input_passthrough(mgr));
+
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*GSURF_IS_MODULE_MANAGER*");
+	g_assert_cmpint(gsurf_module_manager_get_mode(NULL), ==, GSURF_MODE_NORMAL);
+	g_test_assert_expected_messages();
+}
+
+static void
 test_load_bad_path(void)
 {
 	GsurfModuleManager *mgr = gsurf_module_manager_new();
@@ -670,6 +718,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/manager/defaults-no-modules", test_defaults_no_modules);
 	g_test_add_func("/gsurf/manager/new-hook-defaults", test_new_hook_defaults);
 	g_test_add_func("/gsurf/manager/passthrough-flag", test_passthrough_flag);
+	g_test_add_func("/gsurf/manager/mode", test_mode);
 	g_test_add_func("/gsurf/manager/action-dispatch", test_action_dispatch);
 	g_test_add_func("/gsurf/manager/main-response-dispatch", test_main_response_dispatch);
 	g_test_add_func("/gsurf/manager/priority-set-in-activate", test_priority_set_in_activate);

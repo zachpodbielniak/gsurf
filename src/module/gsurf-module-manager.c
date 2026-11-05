@@ -36,9 +36,25 @@ struct _GsurfModuleManager
 	GsurfApplication *app;      /* weak */
 	GsurfConfig *config;        /* ref */
 	gboolean     input_passthrough; /* INSERT mode: bare keys go to the page */
+	GsurfModePolicy mode;           /* the published input mode */
 };
 
 G_DEFINE_FINAL_TYPE(GsurfModuleManager, gsurf_module_manager, G_TYPE_OBJECT)
+
+enum {
+	PROP_0,
+	PROP_MODE,
+	N_PROPS
+};
+
+static GParamSpec *props[N_PROPS];
+
+enum {
+	SIG_MODE_CHANGED,
+	N_SIGNALS
+};
+
+static guint signals[N_SIGNALS];
 
 static GsurfModuleManager *default_manager = NULL;
 
@@ -122,6 +138,25 @@ gsurf_module_manager_get_input_passthrough(GsurfModuleManager *self)
 {
 	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), FALSE);
 	return self->input_passthrough;
+}
+
+void
+gsurf_module_manager_set_mode(GsurfModuleManager *self, GsurfModePolicy mode)
+{
+	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
+
+	if (self->mode == mode)
+		return;
+	self->mode = mode;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_MODE]);
+	g_signal_emit(self, signals[SIG_MODE_CHANGED], 0, mode);
+}
+
+GsurfModePolicy
+gsurf_module_manager_get_mode(GsurfModuleManager *self)
+{
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), GSURF_MODE_NORMAL);
+	return self->mode;
 }
 
 /* --- Loading / registration --- */
@@ -760,9 +795,69 @@ gsurf_module_manager_dispose(GObject *object)
 }
 
 static void
+gsurf_module_manager_get_property(GObject *object, guint prop_id, GValue *value,
+                                  GParamSpec *pspec)
+{
+	GsurfModuleManager *self = GSURF_MODULE_MANAGER(object);
+
+	switch (prop_id) {
+	case PROP_MODE:
+		g_value_set_enum(value, self->mode);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
+static void
+gsurf_module_manager_set_property(GObject *object, guint prop_id, const GValue *value,
+                                  GParamSpec *pspec)
+{
+	GsurfModuleManager *self = GSURF_MODULE_MANAGER(object);
+
+	switch (prop_id) {
+	case PROP_MODE:
+		gsurf_module_manager_set_mode(self, g_value_get_enum(value));
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
+
+static void
 gsurf_module_manager_class_init(GsurfModuleManagerClass *klass)
 {
-	G_OBJECT_CLASS(klass)->dispose = gsurf_module_manager_dispose;
+	GObjectClass *object_class = G_OBJECT_CLASS(klass);
+
+	object_class->dispose = gsurf_module_manager_dispose;
+	object_class->get_property = gsurf_module_manager_get_property;
+	object_class->set_property = gsurf_module_manager_set_property;
+
+	/**
+	 * GsurfModuleManager:mode:
+	 *
+	 * The input mode published by the module that owns the keyboard
+	 * modes (gsurf_module_manager_set_mode()).
+	 *
+	 * Since: 0.4.2
+	 */
+	props[PROP_MODE] = g_param_spec_enum("mode", NULL, NULL,
+		GSURF_TYPE_MODE_POLICY, GSURF_MODE_NORMAL,
+		G_PARAM_READWRITE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+	g_object_class_install_properties(object_class, N_PROPS, props);
+
+	/**
+	 * GsurfModuleManager::mode-changed:
+	 * @manager: the module manager
+	 * @mode: the new #GsurfModePolicy
+	 *
+	 * Emitted when gsurf_module_manager_set_mode() changes the mode.
+	 *
+	 * Since: 0.4.2
+	 */
+	signals[SIG_MODE_CHANGED] = g_signal_new("mode-changed",
+		G_TYPE_FROM_CLASS(klass), G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 1, GSURF_TYPE_MODE_POLICY);
 }
 
 static void

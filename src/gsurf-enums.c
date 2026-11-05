@@ -268,6 +268,19 @@ gsurf_action_to_string(GsurfAction action)
 }
 
 const gchar *
+gsurf_mode_policy_get_label(GsurfModePolicy mode)
+{
+	switch (mode) {
+	case GSURF_MODE_NORMAL:      return "NORMAL";
+	case GSURF_MODE_INSERT:      return "INSERT";
+	case GSURF_MODE_FOLLOW:      return "FOLLOW";
+	case GSURF_MODE_FIND:        return "FIND";
+	case GSURF_MODE_PASSTHROUGH: return "PASSTHROUGH";
+	default:                     return NULL;
+	}
+}
+
+const gchar *
 gsurf_action_get_description(GsurfAction action)
 {
 	switch (action) {

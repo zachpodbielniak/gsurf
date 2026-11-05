@@ -2603,6 +2603,75 @@ test_opened_children(void)
 	h_free(&h);
 }
 
+/* Feature: the vim mode indicator in the status line (and the chromebar),
+ * driven end to end by the modal module's keys. */
+static void
+test_mode_indicator(void)
+{
+	static const gchar *const modules[] = { "modal", "chromebar", NULL };
+	H h;
+	GtkWidget *bar_mode;
+	g_autofree gchar *links = g_strdup_printf("http://127.0.0.1:%u/links", port);
+
+	if (!gsurf_webkit_test_init() ||
+	    !h_init(&h, "    mode_insert_color: \"#ff0000\"\n",
+			"  modal:\n    enabled: true\n  chromebar:\n    enabled: true\n", modules))
+		return;
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	g_assert_nonnull(h.w->status_mode);
+	bar_mode = find_named(h.toplevel, "gsurf-chromebar-mode");
+	g_assert_nonnull(bar_mode);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_true(gtk_widget_get_visible(h.w->status_mode));
+	{
+		g_autofree gchar *css = gtk_css_provider_to_string(h.w->css);
+		g_autofree gchar *red = NULL;
+		GdkRGBA rgba;
+
+		g_assert_true(gdk_rgba_parse(&rgba, "#ff0000"));
+		red = gdk_rgba_to_string(&rgba);
+		g_assert_nonnull(strstr(css, "wmux-mode-insert"));
+		g_assert_nonnull(strstr(css, red));
+	}
+
+	/* 1. i: INSERT, in both indicators; Escape: NORMAL. */
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(h.first));
+	g_assert_true(press(&h, GDK_KEY_i, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- INSERT --");
+	g_assert_true(has_class(h.w->status_mode, "wmux-mode-insert"));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- INSERT --");
+	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- NORMAL --");
+
+	/* 2. Hints: FOLLOW while they are up. */
+	gsurf_view_load_uri(h.first, links);
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(h.first));
+	g_assert_true(gsurf_module_manager_dispatch_action(h.mgr, h.first,
+		GSURF_ACTION_FOLLOW_HINTS));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- FOLLOW --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- FOLLOW --");
+	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	h_free(&h);
+
+	/* 3. mode_hide_normal hides it in NORMAL; mode_indicator: false
+	 *    leaves it out. */
+	if (!h_init(&h, "    mode_hide_normal: true\n", NULL, NULL))
+		return;
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	g_assert_false(gtk_widget_get_visible(h.w->status_mode));
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_INSERT);
+	g_assert_true(gtk_widget_get_visible(h.w->status_mode));
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	h_free(&h);
+	if (!h_init(&h, "    mode_indicator: false\n", NULL, NULL))
+		return;
+	g_assert_null(h.w->status_mode);
+	g_assert_null(find_named(h.toplevel, "gsurf-wmux-status-mode"));
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2630,6 +2699,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/wmux/webkit/drag-into-pane", test_drag_into_pane);
 	g_test_add_func("/gsurf/wmux/webkit/grouped-tree", test_grouped_tree);
 	g_test_add_func("/gsurf/wmux/webkit/opened-children", test_opened_children);
+	g_test_add_func("/gsurf/wmux/webkit/mode-indicator", test_mode_indicator);
 
 	ret = g_test_run();
 	g_clear_object(&server);

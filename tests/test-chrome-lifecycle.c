@@ -458,6 +458,22 @@ find_bar_entry(GtkWidget *bar)
 	return entry;
 }
 
+/* The address bar is [mode indicator][entry]: its entry is the last
+ * child, the indicator (when configured) the first. */
+static GtkWidget *
+address_entry(GtkWidget *bar)
+{
+	GtkWidget *first;
+	GtkWidget *entry;
+	guint n = box_children(bar, &first, &entry);
+
+	g_assert_cmpuint(n, >=, 1);
+	g_assert_true(GTK_IS_ENTRY(entry));
+	if (n == 2)
+		g_assert_cmpstr(gtk_widget_get_name(first), ==, "gsurf-chromebar-mode");
+	return entry;
+}
+
 /* Set up an application with one model window holding two model views,
  * the first still loading, and load the named real shared module.
  * Returns FALSE (after marking the test skipped) without a display. */
@@ -537,19 +553,21 @@ test_chrome_lifetime(gconstpointer data)
 		g_assert_false(gtk_widget_get_visible(widget));
 		entry = find_bar_entry(widget);
 	}
+	if (is_address)
+		entry = address_entry(widget);
 
 	/* Completed tabs must not inherit the previous tab's loading percentage. */
 	gsurf_window_set_active_view(c.window, c.second);
 	if (is_status)
 		g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(widget)), ==, "https://example.net/");
 	else if (is_address)
-		g_assert_cmpstr(entry_text(widget), ==, "https://example.net/");
+		g_assert_cmpstr(entry_text(entry), ==, "https://example.net/");
 	gsurf_window_remove_view(c.window, c.first);
 	gsurf_window_remove_view(c.window, c.second);
 	if (is_status)
 		g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(widget)), ==, "");
 	else if (is_address)
-		g_assert_cmpstr(entry_text(widget), ==, "");
+		g_assert_cmpstr(entry_text(entry), ==, "");
 	gsurf_window_add_view(c.window, c.first);
 
 	/* Keep native objects alive to catch callbacks surviving deactivation. */
@@ -575,6 +593,8 @@ test_chrome_lifetime(gconstpointer data)
 	widget = g_object_ref(only_child(c.window));
 	if (is_find)
 		entry = g_object_ref(find_bar_entry(widget));
+	if (is_address)
+		entry = g_object_ref(address_entry(widget));
 
 	/* Repeated disposal must release all resources even without deactivate. */
 	g_object_run_dispose(G_OBJECT(module));
@@ -622,7 +642,7 @@ test_address_bar_keys(void)
 		return;
 	first = (TestChromeView *)c.first;
 	g_assert_true(gsurf_module_activate(module));
-	entry = only_child(c.window);
+	entry = address_entry(only_child(c.window));
 	g_assert_cmpstr(entry_text(entry), ==, "https://example.org/");
 
 	/* The open-prompt action is the address bar's. */
@@ -660,6 +680,79 @@ test_address_bar_keys(void)
 	gsurf_module_deactivate(module);
 	assert_disconnected(entry, module);
 	g_object_unref(entry);
+	chrome_teardown(&c);
+}
+
+static gboolean has_class(GtkWidget *widget, const gchar *css_class);
+
+/* The address bar's mode indicator follows the mode published on the
+ * default module manager; mode_hide_normal hides it in NORMAL;
+ * mode_indicator: false leaves it out; a bad colour warns. */
+static void
+test_address_bar_mode(void)
+{
+	GsurfModuleManager *mgr;
+	g_autoptr(GsurfConfig) config = NULL;
+	g_autoptr(GError) error = NULL;
+	Chrome c;
+	GsurfModule *module;
+	GtkWidget *bar;
+	GtkWidget *mode;
+	GtkWidget *entry;
+
+	if (!chrome_setup(&c, "chromebar", &module))
+		return;
+	mgr = gsurf_module_manager_get_default();
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_NORMAL);
+
+	/* 1. Default: shown, "-- NORMAL --", following every change. */
+	g_assert_true(gsurf_module_activate(module));
+	bar = only_child(c.window);
+	g_assert_cmpuint(box_children(bar, &mode, &entry), ==, 2);
+	g_assert_cmpstr(gtk_widget_get_name(mode), ==, "gsurf-chromebar-mode");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(mode)), ==, "-- NORMAL --");
+	g_assert_true(gtk_widget_get_visible(mode));
+	g_assert_true(has_class(mode, "gsurf-mode-normal"));
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_INSERT);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(mode)), ==, "-- INSERT --");
+	g_assert_true(has_class(mode, "gsurf-mode-insert"));
+	g_assert_false(has_class(mode, "gsurf-mode-normal"));
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_FOLLOW);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(mode)), ==, "-- FOLLOW --");
+	g_assert_true(has_class(mode, "gsurf-mode-follow"));
+	gsurf_module_deactivate(module);
+	assert_disconnected(mgr, module);
+
+	/* 2. mode_hide_normal: hidden in NORMAL only; colours validated. */
+	config = gsurf_config_new();
+	g_assert_true(gsurf_config_load_from_data(config,
+		"modules:\n  chromebar:\n    mode_hide_normal: true\n"
+		"    mode_insert_color: \"#ff0000\"\n    mode_follow_color: nope\n", -1, &error));
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*chromebar.mode_follow_color*");
+	gsurf_module_configure(module, config);
+	g_test_assert_expected_messages();
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_NORMAL);
+	g_assert_true(gsurf_module_activate(module));
+	box_children(only_child(c.window), &mode, NULL);
+	g_assert_false(gtk_widget_get_visible(mode));
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_INSERT);
+	g_assert_true(gtk_widget_get_visible(mode));
+	gsurf_module_manager_set_mode(mgr, GSURF_MODE_NORMAL);
+	g_assert_false(gtk_widget_get_visible(mode));
+	gsurf_module_deactivate(module);
+
+	/* 3. mode_indicator: false: the entry alone; nothing follows the
+	 *    manager. */
+	g_clear_object(&config);
+	config = gsurf_config_new();
+	g_assert_true(gsurf_config_load_from_data(config,
+		"modules:\n  chromebar:\n    mode_indicator: false\n", -1, &error));
+	gsurf_module_configure(module, config);
+	g_assert_true(gsurf_module_activate(module));
+	g_assert_cmpuint(box_children(only_child(c.window), NULL, &entry), ==, 1);
+	g_assert_true(GTK_IS_ENTRY(entry));
+	assert_disconnected(mgr, module);
+	gsurf_module_deactivate(module);
 	chrome_teardown(&c);
 }
 
@@ -1930,6 +2023,7 @@ main(int argc, char **argv)
 	g_test_add_data_func("/gsurf/chrome/address-bar", "chromebar", test_chrome_lifetime);
 	g_test_add_data_func("/gsurf/chrome/find-bar", "find_bar", test_chrome_lifetime);
 	g_test_add_func("/gsurf/chrome/address-bar-keys", test_address_bar_keys);
+	g_test_add_func("/gsurf/chrome/address-bar-mode", test_address_bar_mode);
 	g_test_add_func("/gsurf/chrome/find-bar-keys", test_find_bar_keys);
 	g_test_add_func("/gsurf/chrome/tabs", test_tabs_lifetime);
 	g_test_add_func("/gsurf/chrome/tabs-sidebar", test_tabs_sidebar_tree);

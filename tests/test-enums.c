@@ -84,6 +84,14 @@ test_enum_types(void)
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_MODE_POLICY));
 	g_assert_true(G_TYPE_IS_FLAGS(GSURF_TYPE_KEY_MOD));
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_LAYOUT_DROP_ZONE));
+
+	/* The mode indicator labels. */
+	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_NORMAL), ==, "NORMAL");
+	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_INSERT), ==, "INSERT");
+	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_FOLLOW), ==, "FOLLOW");
+	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_FIND), ==, "FIND");
+	g_assert_cmpstr(gsurf_mode_policy_get_label(GSURF_MODE_PASSTHROUGH), ==, "PASSTHROUGH");
+	g_assert_null(gsurf_mode_policy_get_label((GsurfModePolicy)99));
 }
 
 static void

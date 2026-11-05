@@ -140,6 +140,11 @@ assert_defaults(GsurfModule *module)
 	g_assert_cmpstr(w->status_fg, ==, "#cdd6f4");
 	g_assert_cmpstr(w->status_current_fg, ==, "#89b4fa");
 	g_assert_cmpint(w->window_name_max, ==, 20);
+	g_assert_true(w->mode_indicator);
+	g_assert_false(w->mode_hide_normal);
+	g_assert_cmpstr(w->mode_normal_color, ==, "#89b4fa");
+	g_assert_cmpstr(w->mode_insert_color, ==, "#a6e3a1");
+	g_assert_cmpstr(w->mode_follow_color, ==, "#f9e2af");
 
 	/* The tables: 53 prefix bindings plus the prefix itself, 4 root. */
 	g_assert_cmpuint(g_hash_table_size(help), ==, 1 + 53 + 4);
@@ -227,6 +232,11 @@ static const gchar *every_key_yaml =
 	"    status_fg: \"white\"\n"
 	"    status_current_fg: \"#f38ba8\"\n"
 	"    window_name_max: 8\n"
+	"    mode_indicator: false\n"
+	"    mode_hide_normal: true\n"
+	"    mode_normal_color: \"#ffffff\"\n"
+	"    mode_insert_color: red\n"
+	"    mode_follow_color: \"rgb(0,0,255)\"\n"
 	"    bindings: {}\n"
 	"    root_bindings: {}\n"
 	"    repeatable: []\n";
@@ -269,6 +279,11 @@ test_every_key(void)
 	g_assert_cmpstr(w->status_fg, ==, "rgb(255,255,255)");
 	g_assert_cmpstr(w->status_current_fg, ==, "rgb(243,139,168)");
 	g_assert_cmpint(w->window_name_max, ==, 8);
+	g_assert_false(w->mode_indicator);
+	g_assert_true(w->mode_hide_normal);
+	g_assert_cmpstr(w->mode_normal_color, ==, "rgb(255,255,255)");
+	g_assert_cmpstr(w->mode_insert_color, ==, "rgb(255,0,0)");
+	g_assert_cmpstr(w->mode_follow_color, ==, "rgb(0,0,255)");
 
 	/* A second configure() with nothing set: every default is back. */
 	reconfigure(m, "modules:\n  wmux:\n    enabled: true\n");
@@ -309,6 +324,11 @@ test_invalid_values(void)
 		{ "status_fg: \"\"", "*wmux.status_fg*not a CSS colour*" },
 		{ "status_current_fg: nope", "*wmux.status_current_fg*not a CSS colour*" },
 		{ "window_name_max: 0", "*wmux.window_name_max must be an integer from 1 to 200*" },
+		{ "mode_indicator: maybe", "*wmux.mode_indicator must be true or false*" },
+		{ "mode_hide_normal: 2", "*wmux.mode_hide_normal must be true or false*" },
+		{ "mode_normal_color: nope", "*wmux.mode_normal_color*not a CSS colour*" },
+		{ "mode_insert_color: \"#1\"", "*wmux.mode_insert_color*not a CSS colour*" },
+		{ "mode_follow_color: []", "*wmux.mode_follow_color*not a CSS colour*" },
 		{ "bindings: [a, b]", "*wmux.bindings must be a mapping*" },
 		{ "root_bindings: \"C-h\"", "*wmux.root_bindings must be a mapping*" },
 		{ "repeatable: o", "*wmux.repeatable must be a list*" },
