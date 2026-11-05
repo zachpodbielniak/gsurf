@@ -116,9 +116,10 @@ modules:
 ## Driving wmux from outside
 
 ```bash
-gsurfctl wmux 'split-window -h https://docs.gtk.org/'   # any command line
+gsurfctl wmux 'split-window -h https://docs.gtk.org/'   # any command line (words after wmux are literal)
 gsurfctl panes                       # panes of the current tmux window: index, view id, active, zoomed, rectangle
-gsurfctl windows                     # tmux windows: index, name, current, last
+gsurfctl windows                     # tmux windows with their panes
+gsurfctl panes --window 1            # another window's panes
 gsurfctl select-window 1
 gsurfctl rename-window 1 research
 ```

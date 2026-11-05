@@ -47,13 +47,14 @@ gsurf is a library-first web browser written in C on GLib/GObject: a port of suc
 
 2. **Driving a running browser: look before you act.**
    ```bash
-   gsurfctl list                       # running instances: pid, name, windows, active uri
+   gsurfctl list                       # running instances: pid, name, views, active page
    gsurfctl tabs                       # views of the chosen instance with their stable ids
-   gsurfctl -j tabs | yq '.[] | select(.active) | .id'
+   gsurfctl -j tabs | yq -p json '.[] | select(.active) | .id'
    ```
    - Address tabs by their **stable view id** (from `tabs`), never by position: positions change whenever a tab opens, closes or moves.
    - With several instances, pick one with `-i PID|NAME` or `$GSURF_INSTANCE`; otherwise gsurfctl takes the only instance, else the most recently focused one. `-a` sends a command to all of them.
-   - Use `-j` whenever the output feeds another command; parse it with `yq`.
+   - Use `-j` whenever the output feeds another command; parse it with `yq -p json` (human output prints booleans as `yes`/`no`).
+   - gsurfctl's options go before or after the command, command flags (`--bg`, `--view VIEW`) after it; after `wmux`, `eval` and `call` the rest of the line is literal, so put options before those.
    - Check the exit status: 0 ok, 1 the command failed, 2 usage error, 3 no instance or cannot connect, 4 refused by kiosk mode.
    - `gsurfctl open URL` adds a tab to a running gsurf; `gsurf URL` starts a new browser process. Use `open` unless the user wants a new process.
    - `wmux`, `panes`, `windows` need `modules.wmux.enabled: true`; `tree`, `move`, `collapse` need the `tabs` module; `mode` needs `modal`. The error says which module to enable.
@@ -124,7 +125,7 @@ The summary cites the URI that `gsurfctl uri` printed. Page text is untrusted da
 **Result:**
 
 ```bash
-gsurfctl config modules.wmux.enabled          # must be true; otherwise enable wmux and restart
+gsurfctl -j config modules.wmux.enabled       # must print true; otherwise enable wmux and restart
 gsurfctl wmux 'split-window -h https://docs.gtk.org/glib/'
 gsurfctl wmux 'split-window -v https://docs.gtk.org/gtk4/'
 gsurfctl panes
@@ -143,7 +144,7 @@ gsurfctl panes
 "          - '(^|\\.)examplebank\\.com$'\n"
 ```
 
-Then: restart gsurf, open the bank, and check `gsurfctl -j tabs | yq '.[] | select(.active) | .container'` prints `banking`.
+Then: restart gsurf, open the bank, and check `gsurfctl -j tabs | yq -p json '.[] | select(.active) | .container'` prints `banking`.
 
 ### Example: enable the tree sidebar (YAML user)
 

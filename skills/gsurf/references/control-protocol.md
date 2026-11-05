@@ -1,80 +1,132 @@
 # The control protocol
 
-The control server (`GsurfControlServer`, `src/control/`) is what `gsurfctl` talks to. Use this reference to call it from a program (Python, C, a cmacs package) or to add methods from a module. The authoritative description is `docs/control.org`.
+Every gsurf since 0.5 opens a control socket: newline-delimited JSON-RPC 2.0 over a Unix socket. `gsurfctl` is its command-line client ([gsurfctl.md](gsurfctl.md)); scripts, editors and agents can speak it directly. It is built into every gsurf and does not need `MCP=1`. Source of truth: `docs/control.org`; a running instance lists its methods with `gsurfctl methods` (`methods.list`).
 
-## Socket and discovery
+## Socket, discovery, config
 
-- Each gsurf process owns a runtime directory `$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/` (0700, removed at exit). The socket is `control.sock` in it (0600). Only peers with the same uid are accepted.
-- An instance is alive while its directory's `lock` file is held (`flock`); a directory without `control.sock` (an embedder, or `control.enabled: false`) is skipped.
-- With `control.name: work` the server also creates `$XDG_RUNTIME_DIR/gsurf/work.sock`, a symlink to its socket (`gsurfctl -i work`).
-- Config:
-  ```yaml
-  control:
-    enabled: true
-    name: work
-  ```
-- In C: `gsurf_control_list_instances()` returns the live instances; `GsurfControlClient` connects, calls and subscribes (sync and async variants).
+- The socket is `$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/control.sock` (0600) in the process's private runtime directory (0700, removed at exit). Peers of another uid are disconnected.
+- An instance is running while its directory's `lock` is held (`flock`) and it has a `control.sock`; a live directory without one (an embedder without a server, `control.enabled: false`) is not an instance.
+- With `control.name: NAME` the server keeps `$XDG_RUNTIME_DIR/gsurf/NAME.sock` linked to its socket (`gsurfctl -i NAME`); a name a live instance holds is not taken (warning).
+
+```yaml
+control:
+  enabled: true      # false: no socket
+  name: work         # letters, digits, '-', '_', '.'
+```
+
+In a C config: `config->control_enabled`, `config->control_name`. The `gsurf` binary starts the server after modules activate and stops it before teardown.
 
 ## Framing
 
-Newline-delimited JSON-RPC 2.0, one message per line, UTF-8:
+One JSON value per line each way (UTF-8, up to 16 MiB per line). `params` is an object or absent. A request without `id` is a notification (no answer, not even an error). Answers may come out of order (`page.eval` waits for the page): match by `id`. A batch (array) gets one array back.
 
 ```text
 → {"jsonrpc":"2.0","id":1,"method":"open","params":{"uri":"https://example.org","background":true}}
-← {"jsonrpc":"2.0","id":1,"result":{"id":7,"uri":"https://example.org","active":false}}
+← {"jsonrpc":"2.0","id":1,"result":{"index":1,"id":4,"uri":"https://example.org/",...}}
+→ {"jsonrpc":"2.0","id":2,"method":"no.such"}
+← {"jsonrpc":"2.0","id":2,"error":{"code":-32601,"message":"unknown method 'no.such' (methods.list gives them)"}}
 ```
 
-Requests without `id` are notifications (no reply). Errors use the standard `error` object with `code` and `message`. A quick test from a shell:
+From a shell without gsurfctl:
 
 ```bash
-sock=$(ls -d "$XDG_RUNTIME_DIR"/gsurf/*/control.sock | head -n 1)
-printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"instance.info"}' | socat - "UNIX-CONNECT:$sock"
+sock=$(gsurfctl -j info | yq -p json '.socket')
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"views.list"}' | socat -t 2 - "UNIX-CONNECT:${sock}"
 ```
-
-## Methods
-
-| Method | Params | Result |
-|---|---|---|
-| `instance.info` | | pid, version, backend, kiosk, windows, views, active uri and title, `focused_at` |
-| `open` | `uri`, `background?`, `parent?`, `container?` | the new view |
-| `navigate` | `uri`, `view?` | |
-| `back`, `forward`, `reload`, `stop` | `view?` (`reload`: `bypass_cache?`) | |
-| `views.list` | | view objects: id, opener, parent, container, uri, title, active, visible, pane |
-| `views.activate`, `views.close` | `view` | |
-| `page.uri`, `page.title`, `page.text` | `view?` | string |
-| `page.eval` | `code`, `view?` | the JavaScript result (refused in kiosk mode) |
-| `page.screenshot` | `path`, `view?` | |
-| `actions.list` | | `{name, allowed}` |
-| `action.run` | `name`, `view?` | |
-| `mode.get`, `mode.set` | `mode` (`normal`, `insert`) | the mode |
-| `tree.get`, `tree.move`, `tree.collapse` | `view`, `parent` / `before` / `after`; `collapsed` | needs a `GsurfTabTreeProvider` (the `tabs` module) |
-| `containers.list`, `containers.reopen` | `view`, `container` | |
-| `layout.describe`, `layout.panes`, `layout.command`, `layout.groups`, `layout.select_group`, `layout.rename_group`, `layout.show_view_at` | `command`, `index`, `name`, `view`, `pane`, `zone` | needs a window layout (wmux) |
-| `config.get` | `key` | the value |
-| `modules.list`, `modules.toggle` | `name`, `enabled` | |
-| `methods.list` | | every method with its description and params |
-| `events.subscribe` | `topics: [...]` | turns the connection into an event stream |
-
-Ask a running instance for the exact list: `gsurfctl call methods.list`.
 
 ## Errors
 
-`GsurfControlError` maps to JSON-RPC codes: invalid params (-32602), method not found (-32601), parse error (-32700), and server errors for not found (view, pane), unsupported (no layout, no tab tree), permission denied (kiosk) and failed. `gsurfctl` turns kiosk refusals into exit status 4 and other errors into 1.
+| Code | `GsurfControlError` | Meaning |
+|---|---|---|
+| -32700 | `PARSE` | not JSON |
+| -32600 | `INVALID_REQUEST` | no string `method`; empty batch |
+| -32601 | `METHOD_NOT_FOUND` | no such method |
+| -32602 | `INVALID_PARAMS` | missing or mistyped parameter |
+| -32000 | `FAILED` | the method failed (message says why) |
+| -32001 | `NOT_FOUND` | no such view, window, pane, container, module or key |
+| -32002 | `UNSUPPORTED` | needs wmux, the tabs module or modal |
+| -32003 | `PERMISSION_DENIED` | refused by kiosk mode (gsurfctl exit 4) |
+| -32004, -32005 | `TIMEOUT`, `CLOSED` | client side: no reply in time, connection closed |
+
+## Methods
+
+Views are addressed by `view` (stable id) or, where noted, `index`; without either a method acts on the active view of the active window.
+
+| Method | Params | Result |
+|---|---|---|
+| `methods.list` | | `[{name, description, params, provider}]` |
+| `events.subscribe` / `events.unsubscribe` | `topics?: [string]` (default all) | the connection receives events |
+| `instance.info` | | `{pid, version, backend, name, socket, kiosk, windows, views, active_view, uri, title, focused_at, now}` |
+| `open` | `uri?`, `background?`, `parent?` (view id: a tree child), `container?` (id, `temporary`, `default`) | the new view; URI handlers (search engines) rewrite input; kiosk refuses |
+| `navigate` | `uri`, `view?`/`index?` | the view; kiosk refuses |
+| `back`, `forward`, `stop` | `view?`/`index?` | the view |
+| `reload` | `hard?`, `view?`/`index?` | the view |
+| `views.list` | | view objects in window order |
+| `views.activate` | `view` or `index` | the view |
+| `views.close` | `view?`/`index?` | `{closed: id}`; never the last view |
+| `page.uri`, `page.title`, `page.text` | `view?`/`index?` | a string |
+| `page.eval` | `script`, `view?`/`index?` | the last value as JSON (`undefined` → null); kiosk refuses |
+| `page.screenshot` | `path`, `view?`/`index?` | `{path, bytes}`; relative to gsurf's launch directory |
+| `actions.list` | | `[{name, allowed}]` |
+| `action.run` | `name`, `view?`/`index?` | `{action, performed}` |
+| `mode.get` / `mode.set` | `mode: normal\|insert`, `view?` | `{mode, label, passthrough, modal_active}`; set needs `modal` |
+| `tree.get` | | `{has_tree_provider, tree, grouped, groups}` (nodes carry `children`, `collapsed`) |
+| `tree.move` | `view`, one of `parent` (0: root at the end), `before`, `after`, `index` | the view; `parent` needs `tabs` |
+| `tree.collapse` | `view?`, `collapsed?` (default true) | the view; needs `tabs` |
+| `containers.list` | | `[{id, name, color, temporary, default, n_views, rules, rules_active}]` |
+| `containers.reopen` | `container`, `view?` | the new view (new id); kiosk refuses |
+| `layout.describe` | | `{loaded, enabled, active, kiosk, name, prefix, status, mouse, width, height}` |
+| `layout.groups` | | wmux windows with their panes |
+| `layout.panes` | `window?` | one window: `index, name, current, last, zoomed, panes` (`index, id, view, uri, title, active, focused, zoomed, visible, rect, fraction`) |
+| `layout.command` | `command` | the current window after running a wmux command line |
+| `layout.select_group` | `window` | that window |
+| `layout.rename_group` | `window?`, `name?` (none: automatic) | that window |
+| `layout.show_view_at` | `view`, `pane?`, `window?`, `target?`, `zone?: center\|left\|right\|top\|bottom` | the current window (a tab dropped on a pane) |
+| `config.get` | `key?` | no key: core keys as an object; a core key; `modules[.NAME[.KEY…]]` as JSON |
+| `modules.list` | | `[{name, description, enabled, active, priority}]` |
+| `modules.toggle` | `name`, `enabled?` (none: flip) | the module; kiosk refuses |
+
+`layout.*` go through the `GsurfWindowLayout` vfuncs: without a layout they fail -32002, in kiosk mode -32003.
 
 ## Events
 
-After `events.subscribe {"topics": ["view", "uri", "load"]}` the server sends notifications, one per line:
+After `events.subscribe` each event is a notification line:
 
 ```text
-← {"jsonrpc":"2.0","method":"event","params":{"topic":"load","view":7,"event":"finished"}}
+{"jsonrpc":"2.0","method":"event","params":{"topic":"view","event":"view.added","time":123456789,"data":{"view":4,"uri":"","title":""}}}
 ```
 
-Topics: `view` (added, removed, active), `uri`, `title`, `load`, `mode`, `layout` (groups and visible views changed), `download`.
+| Topic | Events | `data` |
+|---|---|---|
+| `view` | `view.added`, `view.removed`, `view.active`, `view.moved` | `view, uri, title` (+ `from, to`) |
+| `uri`, `title` | `uri`, `title` | `view, uri, title` |
+| `load` | `load` | `view, uri, title, state` (`started`, `redirected`, `committed`, `finished`) |
+| `mode` | `mode` | `mode, label, passthrough` |
+| `layout` | `layout.groups`, `layout.visible` | `what` |
+| `download` | `download.started` only (no progress or completion) | `uri, suggested, destination` |
 
-## Adding methods from a module
+`time` is the monotonic clock. Events follow signal order: a foreground tab gives `view.added`, `view.active`, then `uri`, `load`, `title`.
 
-Implement the optional `GsurfControlProvider` interface on the module; the server asks active providers to register their methods with `gsurf_control_server_add_method(server, name, description, params_doc, handler, data)`. Name methods `<module>.<verb>`, validate params, and return `GsurfControlError` codes. Add a test that calls the method through a client on a temporary socket (`tests/test-control.c` shows the pattern).
+## C client and embedding
 
-## Embedders
+Control headers are not in `<gsurf/gsurf.h>`: include `<gsurf/control/gsurf-control.h>` (they need json-glib; `pkg-config gsurf` requires `json-glib-1.0`; a crispy-compiled `config.c` cannot use them).
 
-The library never opens the socket by itself. A host that wants `gsurfctl` access calls `gsurf_control_server_new()` and `gsurf_control_server_start()` after its modules are active, and stops the server before teardown.
+```c
+g_autoptr(GPtrArray) list = gsurf_control_list_instances(NULL);
+g_autoptr(GsurfControlClient) client = gsurf_control_client_new();
+g_autoptr(JsonNode) tabs = NULL;
+
+gsurf_control_client_connect(client,
+	gsurf_control_instance_get_socket_path(g_ptr_array_index(list, 0)), &error);
+tabs = gsurf_control_client_call(client, "views.list", NULL, &error);
+```
+
+`gsurf_control_find_instance(NULL, "work")` resolves a pid, name or directory id; `_call_async()` for hosts that must not block; `_subscribe()` + `_read_event()` for events. An embedder starts a server itself: `gsurf_control_server_new(app)`, `_set_name()`, `_start(server, NULL, &error)` after its modules are active; `_stop()` removes the socket; `gsurf_control_server_dispatch()` runs a request in-process.
+
+## Methods from a module
+
+Implement `GsurfControlProvider` (`register_methods`) and call `gsurf_control_server_add_method(server, "mymod.status", "description", "{}", handler, provider, NULL)`. The handler answers its `GsurfControlInvocation` exactly once (`gsurf_control_invocation_return_value()` / `_return_error()`), now or later. Providers are re-asked at start, after `modules.toggle` and on `gsurf_control_server_refresh_providers()`. Name methods `<module>.<verb>`; `gsurf_control_server_emit_event()` emits a module's own topics.
+
+## Security
+
+Anything that can connect can run JavaScript in the user's pages, read them and open URLs: the user's own shell trust. Never forward the socket over SSH without the user asking. Kiosk mode refuses opening, reopening and navigating views, `page.eval`, module toggles and the actions kiosk forbids.

@@ -104,10 +104,10 @@ modules:
 ```bash
 gsurfctl tabs                          # id, opener, container, active, visible, pane
 gsurfctl tree                          # the tree (grouped by wmux window when wmux runs)
-gsurfctl open --bg --child-of 3 https://example.org/a
-gsurfctl move 7 --parent 3             # or --before V / --after V
+gsurfctl open https://example.org/a --bg --child-of 3
+gsurfctl move 7 --parent 3             # or --before V / --after V / --index N; --parent 0 = root
 gsurfctl collapse 3 on
 gsurfctl containers                    # default + registry containers with their rules
 gsurfctl reopen 7 media                # new view id is printed
-gsurfctl open --container temporary https://example.org/
+gsurfctl open https://example.org/ --container temporary
 ```

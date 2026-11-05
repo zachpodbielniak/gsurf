@@ -79,7 +79,7 @@ Key strings use the syntax in [keybindings-and-modes.md](keybindings-and-modes.m
 ```bash
 gsurf --list-modules                                   # the registry, alphabetical
 ls "${GSURF_MODULE_PATH:-/usr/local/lib64/gsurf/modules}"   # the .so files found
-gsurfctl modules                                       # loaded, enabled, active (running gsurf)
+gsurfctl modules                                       # loaded modules: active or off (running gsurf)
 ```
 
 A module that is listed but not loaded is missing its `.so` (check `GSURF_MODULE_PATH`, or the binary's `modules/` directory in a source tree). `mcp` exists only in `MCP=1` builds.

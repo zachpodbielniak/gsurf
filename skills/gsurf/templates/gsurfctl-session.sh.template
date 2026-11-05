@@ -66,14 +66,14 @@ main () {
 	done
 	[[ $# -ge 1 ]] || { usage >&2; exit 2; }
 	command -v gsurfctl > /dev/null || die 'gsurfctl is not on PATH'
-	gsurfctl -q list || die 'no running gsurf (exit 3); start gsurf first'
+	gsurfctl -q info || die 'no running gsurf (exit 3); start gsurf first'
 	mkdir -p -- "${out}"
 
 	# The first page gets its own active tab; the rest go into panes.
 	first="$(gsurfctl -j open "${1}" | yq -p json '.id')"
 	views+=("${first}")
 	shift
-	wmux_on="$(gsurfctl config modules.wmux.enabled 2> /dev/null || printf 'false')"
+	wmux_on="$(gsurfctl -j config modules.wmux.enabled 2> /dev/null || printf 'false')"
 	for url in "$@"
 	do
 		if [[ "${wmux_on}" == true ]]
@@ -81,7 +81,7 @@ main () {
 			gsurfctl -q wmux "split-window -h ${url}"
 			view="$(gsurfctl -j tabs | yq -p json '.[] | select(.active) | .id')"
 		else
-			view="$(gsurfctl -j open --bg --child-of "${first}" "${url}" | yq -p json '.id')"
+			view="$(gsurfctl -j open "${url}" --bg --child-of "${first}" | yq -p json '.id')"
 		fi
 		views+=("${view}")
 	done
@@ -90,11 +90,10 @@ main () {
 	for view in "${views[@]}"
 	do
 		wait_loaded "${view}" || continue
-		gsurfctl tab "${view}"
-		gsurfctl text > "${out}/${view}.txt"
-		printf '%s\t%s\n' "${view}" "$(gsurfctl uri)"
+		gsurfctl text --view "${view}" > "${out}/${view}.txt"
+		printf '%s\t%s\n' "${view}" "$(gsurfctl uri --view "${view}")"
 	done
-	gsurfctl tab "${first}"
+	gsurfctl -q tab "${first}"
 }
 
 main "$@"

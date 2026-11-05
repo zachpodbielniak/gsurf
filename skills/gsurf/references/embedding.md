@@ -52,7 +52,7 @@ The library uses the default GLib main context; it makes no GTK-main assumption,
 | Concern | The host does |
 |---|---|
 | Load modules | `gsurf_module_manager_set_application()`, `_set_config()`, `_add_search_path(dir)` (or `_set_search_paths`), `_load_modules()`, then `_activate_all()` after the window and view exist. `GSURF_MODULE_PATH` and the system module directory are the `gsurf` binary's policy, never consulted by the library. `gsurf_module_manager_get_system_module_dir()` returns the system directory for hosts that opt in. |
-| Control socket (`gsurfctl`) | `gsurf_control_server_new()` and `_start()` after modules are active; stop it before teardown. No server, no `gsurfctl` access. See [control-protocol.md](control-protocol.md). |
+| Control socket (`gsurfctl`) | `gsurf_control_server_new(app)`, optionally `_set_name()`, and `_start(server, NULL, &error)` after modules are active; `_stop()` before teardown. No server, no `gsurfctl` access. Include `<gsurf/control/gsurf-control.h>` (not part of `<gsurf/gsurf.h>`; needs json-glib). See [control-protocol.md](control-protocol.md). |
 | Change the working directory | `gsurf_runtime_dir_enter()` before the first view if you want WebKit's relative writes kept out of your directory. |
 | Kiosk | set `config->kiosk = TRUE` before creating windows and views; enforce your own action policy with `gsurf_kiosk_allows_action()`. |
 | Actions from keys | register an executor with `gsurf_module_manager_set_action_executor()` so `execute_action` (MCP `run_action`, `gsurfctl action`) can perform built-in actions. |
