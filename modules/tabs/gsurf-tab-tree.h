@@ -128,6 +128,45 @@ G_GNUC_INTERNAL void     gsurf_tab_tree_sync(GsurfTabTree *tree, const guint64 *
 G_GNUC_INTERNAL gboolean gsurf_tab_tree_move_subtree(GsurfTabTree *tree, guint64 id,
                                                      gint direction);
 
+/**
+ * GsurfTabTreeDrop:
+ * @GSURF_TAB_TREE_DROP_BEFORE: the moved tab becomes the target's
+ *   previous sibling
+ * @GSURF_TAB_TREE_DROP_AFTER: the moved tab becomes the target's next
+ *   sibling (after the target's whole subtree)
+ * @GSURF_TAB_TREE_DROP_CHILD: the moved tab becomes the target's last
+ *   child
+ *
+ * Where gsurf_tab_tree_move_to() puts a tab, relative to the tab it was
+ * dropped on.
+ */
+typedef enum {
+	GSURF_TAB_TREE_DROP_BEFORE,
+	GSURF_TAB_TREE_DROP_AFTER,
+	GSURF_TAB_TREE_DROP_CHILD
+} GsurfTabTreeDrop;
+
+/*
+ * gsurf_tab_tree_move_to:
+ * @id: the tab to move, with its subtree
+ * @target: the tab it was dropped on
+ * @where: before, after or under @target
+ *
+ * Moves @id's block (itself and its descendants) next to @target or to
+ * the end of @target's block, and re-parents @id (to @target's parent,
+ * or to @target). A tab cannot move into its own subtree.
+ *
+ * Returns: %TRUE when the tree changed (the caller re-applies the order
+ * to the window); %FALSE for unknown ids, @id == @target, or a @target
+ * inside @id's subtree
+ */
+G_GNUC_INTERNAL gboolean gsurf_tab_tree_move_to(GsurfTabTree *tree, guint64 id,
+                                                guint64 target, GsurfTabTreeDrop where);
+
+/* Whether @id is @ancestor or lies inside @ancestor's subtree. */
+G_GNUC_INTERNAL gboolean gsurf_tab_tree_is_in_subtree(GsurfTabTree *tree, guint64 id,
+                                                      guint64 ancestor);
+
 /* --- Queries --- */
 
 /* The derived parent (0 for a root); the opener id given at add/sync
@@ -158,6 +197,103 @@ G_GNUC_INTERNAL void     gsurf_tab_tree_set_collapsed(GsurfTabTree *tree, guint6
                                                       gboolean collapsed);
 G_GNUC_INTERNAL gboolean gsurf_tab_tree_is_visible(GsurfTabTree *tree, guint64 id);
 G_GNUC_INTERNAL gboolean gsurf_tab_tree_expand_ancestors(GsurfTabTree *tree, guint64 id);
+
+/* --- Display rows --- */
+
+/**
+ * GsurfTabRowKind:
+ * @GSURF_TAB_ROW_TAB: a tab (its view id in @id)
+ * @GSURF_TAB_ROW_GROUP: a group heading (a window layout's group, or the
+ *   background group)
+ *
+ * The kinds of sidebar rows.
+ */
+typedef enum {
+	GSURF_TAB_ROW_TAB,
+	GSURF_TAB_ROW_GROUP
+} GsurfTabRowKind;
+
+/* The group index of the "background tabs" group. */
+#define GSURF_TAB_GROUP_BACKGROUND (G_MAXUINT)
+
+/* The row key of a group heading: view ids never set the top bit. */
+#define GSURF_TAB_GROUP_KEY(index) (G_GUINT64_CONSTANT(0x8000000000000000) | (guint64)(index))
+
+/**
+ * GsurfTabDisplayRow:
+ * @kind: tab or group heading
+ * @key: the row's identity: the view id of a tab, GSURF_TAB_GROUP_KEY()
+ *   of a group
+ * @group: the group the row belongs to (its own index for a heading;
+ *   GSURF_TAB_GROUP_BACKGROUND for the background group; 0 in a flat
+ *   tree)
+ * @depth: the indentation level (a heading is 0, its tabs 1 and deeper)
+ * @has_children: rows nested under it follow
+ * @collapsed: it hides the rows nested under it (only with children)
+ * @visible: no row it is nested under is collapsed
+ *
+ * One line of the tab sidebar, in display order.
+ */
+typedef struct {
+	GsurfTabRowKind kind;
+	guint64         key;
+	guint           group;
+	guint           depth;
+	gboolean        has_children;
+	gboolean        collapsed;
+	gboolean        visible;
+} GsurfTabDisplayRow;
+
+/**
+ * GsurfTabGroupSpec:
+ * @ids: (array length=n_ids): the views a group's panes show, in pane
+ *   order
+ * @n_ids: their number
+ * @index: the group's index (its heading's key)
+ * @collapsed: whether the group's heading is collapsed
+ *
+ * One group for gsurf_tab_tree_build_grouped_rows().
+ */
+typedef struct {
+	const guint64 *ids;
+	guint          n_ids;
+	guint          index;
+	gboolean       collapsed;
+} GsurfTabGroupSpec;
+
+/*
+ * gsurf_tab_tree_build_rows:
+ *
+ * The opener tree as rows, in tree order: every tab at its depth, its
+ * collapse state and visibility as the tree has them.
+ *
+ * Returns: (transfer full) (element-type GsurfTabDisplayRow): the rows
+ */
+G_GNUC_INTERNAL GArray *gsurf_tab_tree_build_rows(GsurfTabTree *tree);
+
+/*
+ * gsurf_tab_tree_build_grouped_rows:
+ * @groups: (array length=n_groups): the layout's groups, in order
+ * @background_collapsed: whether the background heading is collapsed
+ *
+ * The tree grouped by a window layout's groups (wmux windows):
+ *   1. for each group, a heading (depth 0), then each tab its panes show
+ *      (depth 1, pane order), each followed by its descendants in the
+ *      opener tree that no pane shows (relative depth below it); a
+ *      descendant shown in a pane is skipped with its whole subtree (it
+ *      is listed under its own pane);
+ *   2. a final background heading (only when there are such tabs) with
+ *      every tab not listed yet, in tree order, at 1 + its tree depth.
+ * Ids that are not in the tree, or listed by an earlier group, are
+ * ignored. A tab's collapse flag (the tree's) hides the rows nested under
+ * it; a collapsed heading hides its whole group.
+ *
+ * Returns: (transfer full) (element-type GsurfTabDisplayRow): the rows
+ */
+G_GNUC_INTERNAL GArray *gsurf_tab_tree_build_grouped_rows(GsurfTabTree *tree,
+                                                          const GsurfTabGroupSpec *groups,
+                                                          guint n_groups,
+                                                          gboolean background_collapsed);
 
 G_END_DECLS
 

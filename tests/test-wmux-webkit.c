@@ -30,6 +30,17 @@
  * tab, the grid's children are exactly the current window's panes, the
  * window's active view is the active pane's.
  *
+ * The tab sidebar's side of wmux is covered too: tabs dragged from the
+ * sidebar onto panes (drag source and drop target handlers driven
+ * directly: centre, edges, swap, join, a pane's own tab, the highlight),
+ * the sidebar grouped by wmux window (split, background children, new
+ * window, rename, a heading click selecting its window, collapse, kill,
+ * wmux off and wmux_groups: false back to the opener tree), and every way
+ * of opening a tab from a tab making it a child (the context menu's
+ * "Open Link in New Tab", foreground link tabs, popups, the modal F
+ * hints, a background child replaced in another container), with the
+ * gsurf binary's host handlers copied here like its key guard.
+ *
  * Runs only with GSURF_TEST_GUI=1 (make test-gui), on both toolkits.
  */
 
@@ -68,6 +79,10 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 	if (g_strcmp0(path, "/input") == 0)
 		body = g_strdup("<!doctype html><html><head><title>input</title></head>"
 			"<body><input id=\"f\" autofocus></body></html>");
+	else if (g_strcmp0(path, "/links") == 0)
+		body = g_strdup_printf("<!doctype html><html><head><title>links</title></head>"
+			"<body><a href=\"http://127.0.0.1:%u/p/hinted\" style=\"font-size:40px\">go</a>"
+			"</body></html>", port);
 	else
 		body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 			"<body>%s</body></html>", g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -1286,7 +1301,10 @@ click_row(H *h, GsurfView *view, guint button)
 #ifdef GSURF_BACKEND_GTK4
 	{
 		g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(row);
-		g_autofree gchar *name = g_strdup_printf("gsurf-chrome-click-%u", button);
+		/* The primary button acts on release (its press may start a
+		 * drag); the others on press. */
+		g_autofree gchar *name = g_strdup_printf("%s%u",
+			button == 1 ? "gsurf-chrome-release-" : "gsurf-chrome-click-", button);
 		GtkEventController *found = NULL;
 		GtkWidget *title;
 		graphene_rect_t bounds;
@@ -1307,17 +1325,18 @@ click_row(H *h, GsurfView *view, guint button)
 		for (i = 0; i < 200 && gtk_widget_get_width(title) == 0; i++)
 			gsurf_webkit_test_spin(25);
 		g_assert_true(gtk_widget_compute_bounds(title, row, &bounds));
-		g_signal_emit_by_name(found, "pressed", 1,
+		g_signal_emit_by_name(found, button == 1 ? "released" : "pressed", 1,
 			(gdouble)(bounds.origin.x + bounds.size.width / 2),
 			(gdouble)(bounds.origin.y + bounds.size.height / 2));
 	}
 #else
 	{
-		GdkEvent *event = gdk_event_new(GDK_BUTTON_PRESS);
+		GdkEvent *event = gdk_event_new(button == 1 ? GDK_BUTTON_RELEASE : GDK_BUTTON_PRESS);
 		gboolean handled = FALSE;
 
 		event->button.button = button;
-		g_signal_emit_by_name(row, "button-press-event", event, &handled);
+		g_signal_emit_by_name(row, button == 1 ? "button-release-event" : "button-press-event",
+			event, &handled);
 		gdk_event_free(event);
 		g_assert_true(handled);
 	}
@@ -1854,6 +1873,805 @@ test_stress(void)
 	h_free(&h);
 }
 
+/* ------------------------------------------------------------------ */
+/* Sidebar: grouped tree, drag and drop, opened-from-tab children      */
+/* ------------------------------------------------------------------ */
+
+/* Depth-first search for a widget by name under @root. */
+static GtkWidget *
+find_named(GtkWidget *root, const gchar *name)
+{
+	GtkWidget *found = NULL;
+
+	if (g_strcmp0(gtk_widget_get_name(root), name) == 0)
+		return root;
+#ifdef GSURF_BACKEND_GTK4
+	{
+		GtkWidget *child;
+
+		for (child = gtk_widget_get_first_child(root); child != NULL && found == NULL;
+		     child = gtk_widget_get_next_sibling(child))
+			found = find_named(child, name);
+	}
+#else
+	if (GTK_IS_CONTAINER(root)) {
+		g_autoptr(GList) children = gtk_container_get_children(GTK_CONTAINER(root));
+		GList *l;
+
+		for (l = children; l != NULL && found == NULL; l = l->next)
+			found = find_named(l->data, name);
+	}
+#endif
+	return found;
+}
+
+/* The sidebar's visible rows as text: a heading "[0:name*]", a tab
+ * "title@depth" (its indentation over the default 14 px per level). */
+static gchar *
+sidebar_text(H *h)
+{
+	GtkWidget *list = find_named(h->toplevel, "gsurf-tab-sidebar-list");
+	g_autoptr(GPtrArray) rows = NULL;
+	GString *out = g_string_new(NULL);
+	guint i;
+
+	g_assert_nonnull(list);
+	rows = g_ptr_array_new();
+#ifdef GSURF_BACKEND_GTK4
+	{
+		GtkWidget *child;
+
+		for (child = gtk_widget_get_first_child(list); child != NULL;
+		     child = gtk_widget_get_next_sibling(child))
+			g_ptr_array_add(rows, child);
+	}
+#else
+	{
+		g_autoptr(GList) children = gtk_container_get_children(GTK_CONTAINER(list));
+		GList *l;
+
+		for (l = children; l != NULL; l = l->next)
+			g_ptr_array_add(rows, l->data);
+	}
+#endif
+	for (i = 0; i < rows->len; i++) {
+		GtkWidget *row = g_ptr_array_index(rows, i);
+		GtkWidget *title = find_named(row, "gsurf-tab-title");
+		GtkWidget *box = find_named(row, "gsurf-tab-row-box");
+
+		if (!gtk_widget_get_visible(row))
+			continue;
+		if (out->len > 0)
+			g_string_append_c(out, ' ');
+		if (has_class(row, "gsurf-tab-group"))
+			g_string_append_printf(out, "[%s]", gtk_label_get_text(GTK_LABEL(title)));
+		else
+			g_string_append_printf(out, "%s@%d", gtk_label_get_text(GTK_LABEL(title)),
+				gtk_widget_get_margin_start(box) / 14);
+	}
+	return g_string_free(out, FALSE);
+}
+
+/* Wait (bounded) until the sidebar reads @expected. */
+#define ASSERT_SIDEBAR(h, expected) G_STMT_START { \
+	gchar *got_ = NULL; \
+	guint try_; \
+	for (try_ = 0; try_ < 200; try_++) { \
+		g_free(got_); \
+		got_ = sidebar_text(h); \
+		if (g_strcmp0(got_, (expected)) == 0) \
+			break; \
+		gsurf_webkit_test_spin(25); \
+	} \
+	g_assert_cmpstr(got_, ==, (expected)); \
+	g_free(got_); \
+} G_STMT_END
+
+/* The heading row of group @index. */
+static GtkWidget *
+group_row(H *h, guint index)
+{
+	GtkWidget *row = find_row(h->toplevel, G_GUINT64_CONSTANT(0x8000000000000000) | index);
+
+	g_assert_nonnull(row);
+	return row;
+}
+
+/* A primary click (released) on a sidebar row widget. */
+static void
+click_row_widget(GtkWidget *row, guint button)
+{
+#ifdef GSURF_BACKEND_GTK4
+	g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(row);
+	g_autofree gchar *name = g_strdup_printf("gsurf-chrome-release-%u", button);
+	GtkEventController *found = NULL;
+	GtkWidget *title = find_named(row, "gsurf-tab-title");
+	graphene_rect_t bounds;
+	guint i;
+
+	for (i = 0; i < g_list_model_get_n_items(controllers) && found == NULL; i++) {
+		g_autoptr(GtkEventController) c = g_list_model_get_item(controllers, i);
+
+		if (g_strcmp0(gtk_event_controller_get_name(c), name) == 0)
+			found = c;
+	}
+	g_assert_nonnull(found);
+	WAIT_UNTIL(gtk_widget_get_width(title) > 0);
+	g_assert_true(gtk_widget_compute_bounds(title, row, &bounds));
+	g_signal_emit_by_name(found, "released", 1,
+		(gdouble)(bounds.origin.x + bounds.size.width / 2),
+		(gdouble)(bounds.origin.y + bounds.size.height / 2));
+#else
+	GdkEvent *event = gdk_event_new(GDK_BUTTON_RELEASE);
+	gboolean handled = FALSE;
+
+	event->button.button = button;
+	g_signal_emit_by_name(row, "button-release-event", event, &handled);
+	gdk_event_free(event);
+	g_assert_true(handled);
+#endif
+}
+
+/* A named controller of @widget (GTK4), still owned by it. */
+#ifdef GSURF_BACKEND_GTK4
+static GtkEventController *
+controller_named(GtkWidget *widget, const gchar *name)
+{
+	g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(widget);
+	GtkEventController *found = NULL;
+	guint i;
+
+	for (i = 0; i < g_list_model_get_n_items(controllers) && found == NULL; i++) {
+		g_autoptr(GtkEventController) c = g_list_model_get_item(controllers, i);
+
+		if (g_strcmp0(gtk_event_controller_get_name(c), name) == 0)
+			found = c;
+	}
+	g_assert_nonnull(found);
+	return found;
+}
+#endif
+
+/* Start or end a drag of @view's sidebar row through its drag source
+ * handlers (GTK3: the row's drag-begin / drag-end; GTK4: its
+ * GtkDragSource's). */
+static void
+row_drag(H *h, GsurfView *view, gboolean begin)
+{
+	GtkWidget *row = find_row(h->toplevel, gsurf_view_get_id(view));
+
+	g_assert_nonnull(row);
+#ifdef GSURF_BACKEND_GTK4
+	if (begin)
+		g_signal_emit_by_name(controller_named(row, "gsurf-chrome-drag-source"),
+			"drag-begin", NULL);
+	else
+		g_signal_emit_by_name(controller_named(row, "gsurf-chrome-drag-source"),
+			"drag-end", NULL, FALSE);
+#else
+	g_signal_emit_by_name(row, begin ? "drag-begin" : "drag-end", NULL);
+#endif
+}
+
+/* A drag over @widget at (@x, @y), then (when @drop) a drop there,
+ * through its drop target handlers. Returns what the handler answered
+ * (accepted / taken). */
+static gboolean
+drag_over(GtkWidget *widget, gint x, gint y, gboolean drop)
+{
+#ifdef GSURF_BACKEND_GTK4
+	GtkEventController *target = controller_named(widget, "gsurf-chrome-drop-target");
+	GdkDragAction action = 0;
+	gboolean taken = FALSE;
+
+	g_signal_emit_by_name(target, "drag-motion", NULL, (gdouble)x, (gdouble)y, &action);
+	if (!drop)
+		return action != 0;
+	g_signal_emit_by_name(target, "drop", NULL, (gdouble)x, (gdouble)y, &taken);
+	return taken;
+#else
+	gboolean ok = FALSE;
+
+	g_signal_emit_by_name(widget, "drag-motion", NULL, x, y, 0u, &ok);
+	if (!drop)
+		return ok;
+	g_signal_emit_by_name(widget, "drag-drop", NULL, x, y, 0u, &ok);
+	return ok;
+#endif
+}
+
+/* Where to drop on a pane: its centre or 5 px inside an edge. */
+typedef enum { AT_CENTER, AT_LEFT, AT_RIGHT, AT_TOP, AT_BOTTOM } At;
+
+/* Drag @view's row and drop it on @target's pane at @at. */
+static gboolean
+drop_on_pane(H *h, GsurfView *view, GsurfView *target, At at)
+{
+	GsurfWmuxFrame *f = frame_of(h, target);
+	gint w;
+	gint hh;
+	gint x;
+	gint y;
+	gboolean done;
+
+	g_assert_nonnull(f);
+	row_drag(h, view, TRUE);
+	g_assert_cmpuint(h->w->drag_view, ==, gsurf_view_get_id(view));
+	WAIT_UNTIL(gtk_widget_get_visible(f->drop) && width_of(f->drop) > 20);
+	w = width_of(f->drop);
+	hh = gsurf_chrome_widget_get_height(f->drop);
+	x = at == AT_LEFT ? 5 : at == AT_RIGHT ? w - 5 : w / 2;
+	y = at == AT_TOP ? 5 : at == AT_BOTTOM ? hh - 5 : hh / 2;
+	/* Hovering highlights the zone the drop would use. */
+	g_assert_true(drag_over(f->drop, x, y, FALSE));
+	g_assert_true(gtk_widget_get_visible(f->zone));
+	g_assert_cmpint(f->zone_shown, ==, (gint)at);
+	done = drag_over(f->drop, x, y, TRUE);
+	row_drag(h, view, FALSE);
+	g_assert_cmpuint(h->w->drag_view, ==, 0);
+	return done;
+}
+
+/* Every pane's drop target is hidden (no drag in progress). */
+static void
+assert_no_drop_targets(H *h)
+{
+	GHashTableIter iter;
+	gpointer value;
+
+	g_hash_table_iter_init(&iter, h->w->frames);
+	while (g_hash_table_iter_next(&iter, NULL, &value))
+		g_assert_false(gtk_widget_get_visible(((GsurfWmuxFrame *)value)->drop));
+}
+
+/* A background tab of the window opened from @opener (or none). */
+static GsurfView *
+background_tab(H *h, GsurfView *opener, const gchar *name)
+{
+	g_autofree gchar *uri = page(name);
+	GsurfView *view = gsurf_view_new_full(opener, NULL, uri, FALSE);
+
+	gsurf_window_add_view(h->window, view);
+	g_object_unref(view);
+	gsurf_view_load_uri(view, uri);
+	return view;
+}
+
+/* Feature: a tab dragged from the sidebar onto a pane. */
+static void
+test_drag_into_pane(void)
+{
+	static const gchar *const modules[] = { "tabs", NULL };
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+	H h;
+	GsurfView *a, *b, *c, *work;
+	g_autofree gchar *work_uri = page("work");
+	gpointer weak_c;
+	guint pane;
+	guint n;
+
+	if (!gsurf_webkit_test_init())
+		return;
+	g_assert_nonnull(gsurf_container_registry_define(registry, "work", "Work", "#f38ba8", NULL));
+	if (!h_init(&h, NULL, "  tabs:\n    enabled: true\n    sidebar: true\n", modules)) {
+		gsurf_container_registry_undefine(registry, "work", NULL);
+		return;
+	}
+	a = h.first;
+	cmd(&h, GDK_KEY_percent, SHIFT);
+	b = active_view(&h);
+	c = background_tab(&h, NULL, "c");
+	weak_c = c;
+	g_object_add_weak_pointer(G_OBJECT(c), &weak_c);
+	settle();
+	assert_no_drop_targets(&h);
+
+	/* 1. The drag shows a drop target over each pane on screen only. */
+	row_drag(&h, c, TRUE);
+	WAIT_UNTIL(gtk_widget_get_visible(frame_of(&h, a)->drop));
+	g_assert_true(gtk_widget_get_visible(frame_of(&h, b)->drop));
+	g_assert_false(gtk_widget_get_visible(frame_of(&h, c)->drop));
+	/* Hovering the dragged tab over its own row is refused; the sidebar
+	 * is no target for itself. */
+	g_assert_false(drag_over(find_row(h.toplevel, gsurf_view_get_id(c)), 1, 1, FALSE));
+	row_drag(&h, c, FALSE);
+	assert_no_drop_targets(&h);
+
+	/* 2. A background tab on a pane's centre: shown there, active; the
+	 *    tab the pane showed becomes a background tab. */
+	g_assert_true(drop_on_pane(&h, c, a, AT_CENTER));
+	g_assert_true(active_view(&h) == c);
+	g_assert_true(gsurf_window_get_view_visible(h.window, c));
+	g_assert_false(gsurf_window_get_view_visible(h.window, a));
+	g_assert_cmpuint(n_panes(&h), ==, 2);
+	assert_no_drop_targets(&h);
+	check_invariants(&h);
+
+	/* 3. A tab shown in another pane on a pane's centre: they swap. */
+	pane = gsurf_wmux_layout_find_payload(cur(&h)->layout, gsurf_view_get_id(c));
+	g_assert_true(drop_on_pane(&h, c, b, AT_CENTER));
+	g_assert_cmpuint(gsurf_wmux_layout_get_payload(cur(&h)->layout, pane), ==,
+		gsurf_view_get_id(b));
+	g_assert_true(gsurf_window_get_view_visible(h.window, b));
+	g_assert_true(active_view(&h) == c);
+	g_assert_cmpuint(n_panes(&h), ==, 2);
+	check_invariants(&h);
+
+	/* 4. A background tab on an edge: that pane splits on that side, the
+	 *    new pane shows it. */
+	g_assert_true(drop_on_pane(&h, a, c, AT_RIGHT));
+	g_assert_cmpuint(n_panes(&h), ==, 3);
+	g_assert_true(active_view(&h) == a);
+	g_assert_cmpuint(gsurf_wmux_layout_neighbor(cur(&h)->layout,
+		gsurf_wmux_layout_find_payload(cur(&h)->layout, gsurf_view_get_id(c)),
+		GSURF_WMUX_DIR_RIGHT, FALSE), ==,
+		gsurf_wmux_layout_find_payload(cur(&h)->layout, gsurf_view_get_id(a)));
+	check_invariants(&h);
+
+	/* 5. A shown tab on another pane's edge: it moves (join-pane), its
+	 *    old pane closes, it lands above the target. */
+	g_assert_true(drop_on_pane(&h, a, b, AT_TOP));
+	g_assert_cmpuint(n_panes(&h), ==, 3);
+	g_assert_cmpuint(gsurf_wmux_layout_neighbor(cur(&h)->layout,
+		gsurf_wmux_layout_find_payload(cur(&h)->layout, gsurf_view_get_id(a)),
+		GSURF_WMUX_DIR_DOWN, FALSE), ==,
+		gsurf_wmux_layout_find_payload(cur(&h)->layout, gsurf_view_get_id(b)));
+	check_invariants(&h);
+	g_assert_true(drop_on_pane(&h, c, a, AT_LEFT));
+	g_assert_true(drop_on_pane(&h, b, c, AT_BOTTOM));
+	check_invariants(&h);
+
+	/* 6. A pane's own tab: the centre selects its pane, an edge does
+	 *    nothing. */
+	n = n_panes(&h);
+	gsurf_window_set_active_view(h.window, a);
+	g_assert_true(drop_on_pane(&h, b, b, AT_CENTER));
+	g_assert_true(active_view(&h) == b);
+	/* (GTK3's drag-drop always claims the drop; the layout's answer is
+	 *  only visible on GTK4, the arrangement on both.) */
+#ifdef GSURF_BACKEND_GTK4
+	g_assert_false(drop_on_pane(&h, b, b, AT_LEFT));
+#else
+	drop_on_pane(&h, b, b, AT_LEFT);
+#endif
+	g_assert_cmpuint(n_panes(&h), ==, n);
+	g_assert_false(gsurf_window_layout_show_view_at(GSURF_WINDOW_LAYOUT(h.module), h.window,
+		b, b, GSURF_LAYOUT_DROP_RIGHT));
+
+	/* 7. Through the core seam directly: a target off screen refuses. */
+	cmd(&h, GDK_KEY_c, 0);
+	g_assert_false(gsurf_window_layout_show_view_at(GSURF_WINDOW_LAYOUT(h.module), h.window,
+		active_view(&h), a, GSURF_LAYOUT_DROP_CENTER));
+	cmd(&h, GDK_KEY_p, 0);
+
+	/* 8. The highlight wears the dragged tab's container colour. */
+	work = gsurf_view_new_full(NULL, "work", work_uri, FALSE);
+	gsurf_window_add_view(h.window, work);
+	g_object_unref(work);
+	row_drag(&h, work, TRUE);
+	WAIT_UNTIL(gtk_widget_get_visible(frame_of(&h, a)->drop));
+	g_assert_true(has_class(frame_of(&h, a)->zone, "wmux-ctr-work"));
+	{
+		g_autofree gchar *css = gtk_css_provider_to_string(h.w->css);
+
+		g_assert_nonnull(strstr(css, "box.wmux-ctr-work.wmux-drop-zone"));
+	}
+	row_drag(&h, work, FALSE);
+	g_assert_false(has_class(frame_of(&h, a)->zone, "wmux-ctr-work") &&
+		gtk_widget_get_visible(frame_of(&h, a)->drop));
+	assert_no_drop_targets(&h);
+	check_invariants(&h);
+
+	h_free(&h);
+	gsurf_container_registry_undefine(registry, "work", NULL);
+	WAIT_UNTIL(weak_c == NULL);
+}
+
+/* Feature: the sidebar grouped by wmux window. */
+static void
+test_grouped_tree(void)
+{
+	static const gchar *const modules[] = { "tabs", NULL };
+	H h;
+	GsurfView *a, *b, *child, *grand, *d, *m;
+	GsurfModule *tabs;
+
+	if (!gsurf_webkit_test_init() ||
+	    !h_init(&h, NULL, "  tabs:\n    enabled: true\n    sidebar: true\n"
+			"    background_label: Hidden\n", modules))
+		return;
+	tabs = gsurf_module_manager_get_module(h.mgr, "tabs");
+	a = h.first;
+	ASSERT_SIDEBAR(&h, "[0:first*] first@1");
+
+	/* 1. A split: the window's panes in pane order; the window name
+	 *    follows its active pane. */
+	cmd(&h, GDK_KEY_percent, SHIFT);
+	b = active_view(&h);
+	ASSERT_SIDEBAR(&h, "[0:new*] first@1 new@1");
+
+	/* 2. Background tabs opened from a pane tab nest under it; one that
+	 *    descends from no pane tab goes to the background group. */
+	child = background_tab(&h, a, "child");
+	grand = background_tab(&h, child, "grand");
+	d = background_tab(&h, NULL, "d");
+	ASSERT_SIDEBAR(&h, "[0:new*] first@1 child@2 grand@3 new@1 [Hidden] d@1");
+
+	/* 3. A new window: a second heading, current. Renaming it. */
+	cmd(&h, GDK_KEY_c, 0);
+	m = active_view(&h);
+	ASSERT_SIDEBAR(&h, "[0:new] first@1 child@2 grand@3 new@1 [1:new*] new@1 [Hidden] d@1");
+	cmd(&h, GDK_KEY_comma, 0);
+	prompt_set_text(&h, "mail");
+	prompt_key(&h, GDK_KEY_Return);
+	ASSERT_SIDEBAR(&h, "[0:new] first@1 child@2 grand@3 new@1 [1:mail*] new@1 [Hidden] d@1");
+
+	/* 4. A click on a heading selects that window. */
+	click_row_widget(group_row(&h, 0), 1);
+	WAIT_UNTIL(h.w->current == 0);
+	ASSERT_SIDEBAR(&h, "[0:new*] first@1 child@2 grand@3 new@1 [1:mail] new@1 [Hidden] d@1");
+
+	/* 5. A pane tab's child shown in a pane (it takes the active pane;
+	 *    the tab there goes to the background) is listed under its own
+	 *    pane, not its parent's; collapsing a heading hides its group. */
+	gsurf_window_set_active_view(h.window, child);
+	ASSERT_SIDEBAR(&h, "[0:child*] first@1 child@1 grand@2 [1:mail] new@1 [Hidden] new@1 d@1");
+	gsurf_window_set_active_view(h.window, b);
+	gsurf_window_set_active_view(h.window, a);
+	g_assert_true(gsurf_wmux_layout_get_payload(cur(&h)->layout,
+		gsurf_wmux_layout_get_active(cur(&h)->layout)) == gsurf_view_get_id(a));
+	ASSERT_SIDEBAR(&h, "[0:first*] first@1 child@2 grand@3 new@1 [1:mail] new@1 [Hidden] d@1");
+	gsurf_window_set_active_view(h.window, b);
+	{
+		GtkWidget *twisty = find_named(group_row(&h, 1), "gsurf-tab-twisty");
+
+		g_signal_emit_by_name(twisty, "clicked");
+		ASSERT_SIDEBAR(&h, "[0:new*] first@1 child@2 grand@3 new@1 [1:mail] [Hidden] d@1");
+		g_signal_emit_by_name(twisty, "clicked");
+	}
+
+	/* 6. Killing a window drops its heading. */
+	cmd(&h, GDK_KEY_1, 0);
+	g_assert_true(active_view(&h) == m);
+	cmd(&h, GDK_KEY_ampersand, SHIFT);
+	prompt_key(&h, GDK_KEY_y);
+	gsurf_window_set_active_view(h.window, b);
+	ASSERT_SIDEBAR(&h, "[0:new*] first@1 child@2 grand@3 new@1 [Hidden] d@1");
+
+	/* 7. wmux off: the plain opener tree, exactly as without wmux. */
+	gsurf_module_deactivate(h.module);
+	g_assert_null(gsurf_window_get_layout(h.window));
+	ASSERT_SIDEBAR(&h, "first@0 child@1 grand@2 new@0 d@0");
+	g_assert_true(gsurf_module_activate(h.module));
+	h.w = (GsurfWmuxModule *)h.module;
+	ASSERT_SIDEBAR(&h, "[0:new*] new@1 [Hidden] first@1 child@2 grand@3 d@1");
+
+	/* 8. wmux_groups: false keeps the opener tree under wmux too. */
+	{
+		g_autoptr(GsurfConfig) flat = gsurf_config_new();
+
+		g_assert_true(gsurf_config_load_from_data(flat,
+			"modules:\n  tabs:\n    enabled: true\n    sidebar: true\n"
+			"    wmux_groups: false\n", -1, NULL));
+		gsurf_module_configure(tabs, flat);
+		gsurf_module_deactivate(tabs);
+		g_assert_true(gsurf_module_activate(tabs));
+		ASSERT_SIDEBAR(&h, "first@0 child@1 grand@2 new@0 d@0");
+		gsurf_module_configure(tabs, h.config);
+	}
+	(void)grand;
+	(void)d;
+	h_free(&h);
+}
+
+/* --- Opened-from-tab children (main.c's host handlers, copied) --- */
+
+/* main.c's make_tab_full(): a new view of @opener, active or not. */
+static GsurfView *
+host_make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri, gboolean related,
+              gboolean activate)
+{
+	GsurfView *view = gsurf_view_new_full(opener, NULL, uri, related);
+
+	gsurf_window_add_view(window, view);
+	if (activate)
+		gsurf_window_set_active_view(window, view);
+	if (uri != NULL)
+		gsurf_view_load_uri(view, uri);
+	g_object_unref(view);
+	return view;
+}
+
+/* main.c's on_new_view_requested(). */
+static gboolean
+host_new_view_requested(GsurfView *source, const gchar *uri, gboolean background,
+                        gpointer user_data)
+{
+	H *h = user_data;
+
+	return host_make_tab(h->window, source, uri, FALSE, !background) != NULL;
+}
+
+/* main.c's on_create_view() (a popup: related, active, WebKit loads it). */
+static GsurfView *
+host_create_view(GsurfView *source, const gchar *uri, gpointer user_data)
+{
+	H *h = user_data;
+
+	(void)uri;
+	return host_make_tab(h->window, source, NULL, TRUE, TRUE);
+}
+
+/* The page context menu of @view on a link to @uri, as WebKit builds it
+ * (with its "Open Link in New Window"), run through the backend's
+ * context-menu handler; returns the menu (transfer full). */
+static WebKitContextMenu *
+link_context_menu(GsurfView *view, const gchar *uri)
+{
+	WebKitWebView *wv = WEBKIT_WEB_VIEW(gsurf_webkit_test_native(view));
+	WebKitContextMenu *menu = webkit_context_menu_new();
+	g_autoptr(WebKitHitTestResult) hit = g_object_new(WEBKIT_TYPE_HIT_TEST_RESULT,
+		"context", WEBKIT_HIT_TEST_RESULT_CONTEXT_LINK | WEBKIT_HIT_TEST_RESULT_CONTEXT_DOCUMENT,
+		"link-uri", uri, NULL);
+	gboolean handled = FALSE;
+
+	webkit_context_menu_append(menu,
+		webkit_context_menu_item_new_from_stock_action(WEBKIT_CONTEXT_MENU_ACTION_OPEN_LINK));
+	webkit_context_menu_append(menu, webkit_context_menu_item_new_from_stock_action(
+		WEBKIT_CONTEXT_MENU_ACTION_OPEN_LINK_IN_NEW_WINDOW));
+	webkit_context_menu_append(menu, webkit_context_menu_item_new_from_stock_action(
+		WEBKIT_CONTEXT_MENU_ACTION_COPY_LINK_TO_CLIPBOARD));
+#ifdef GSURF_BACKEND_GTK4
+	g_signal_emit_by_name(wv, "context-menu", menu, hit, &handled);
+#else
+	g_signal_emit_by_name(wv, "context-menu", menu, NULL, hit, &handled);
+#endif
+	g_assert_false(handled);
+	return menu;
+}
+
+/* The item of @menu whose action is @name, or NULL; its position. */
+static WebKitContextMenuItem *
+menu_item_for(WebKitContextMenu *menu, const gchar *name, guint *position)
+{
+	GList *l;
+	guint i = 0;
+
+	for (l = webkit_context_menu_get_items(menu); l != NULL; l = l->next, i++) {
+		GAction *action = webkit_context_menu_item_get_gaction(l->data);
+
+		if (action != NULL && g_strcmp0(g_action_get_name(action), name) == 0) {
+			if (position != NULL)
+				*position = i;
+			return l->data;
+		}
+	}
+	return NULL;
+}
+
+/* The views of the window not in @before (a new one). */
+static GsurfView *
+new_view_since(H *h, GPtrArray *before)
+{
+	GPtrArray *views = gsurf_window_get_views(h->window);
+	guint i;
+
+	for (i = 0; i < views->len; i++) {
+		if (!g_ptr_array_find(before, g_ptr_array_index(views, i), NULL))
+			return g_ptr_array_index(views, i);
+	}
+	return NULL;
+}
+
+static GPtrArray *
+snapshot_views(H *h)
+{
+	GPtrArray *views = gsurf_window_get_views(h->window);
+	GPtrArray *copy = g_ptr_array_new();
+	guint i;
+
+	for (i = 0; i < views->len; i++)
+		g_ptr_array_add(copy, g_ptr_array_index(views, i));
+	return copy;
+}
+
+/* Feature: every way of opening a tab from a tab makes it a child (with
+ * wmux on: a background child stays a background tab, nested under its
+ * parent's pane tab in the grouped tree). */
+static void
+test_opened_children(void)
+{
+	static const gchar *const modules[] = { "tabs", "modal", NULL };
+	H h;
+	GsurfView *a, *bg, *fg, *popup, *hinted, *fresh, *kept;
+	g_autofree gchar *link = page("linked");
+	g_autofree gchar *links = g_strdup_printf("http://127.0.0.1:%u/links", port);
+	g_autoptr(GPtrArray) before = NULL;
+	guint64 opener_id;
+
+	if (!gsurf_webkit_test_init() ||
+	    !h_init(&h, NULL, "  tabs:\n    enabled: true\n    sidebar: true\n"
+			"  modal:\n    enabled: true\n", modules))
+		return;
+	a = h.first;
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(a));
+	g_signal_connect(a, "new-view-requested", G_CALLBACK(host_new_view_requested), &h);
+	g_signal_connect(a, "create-view", G_CALLBACK(host_create_view), &h);
+
+	/* 1. The context menu: "Open Link in New Window" became "Open Link
+	 *    in New Tab", in its place; it opens a background child. */
+	{
+		g_autoptr(WebKitContextMenu) menu = link_context_menu(a, link);
+		WebKitContextMenuItem *item;
+		GList *l;
+		guint position = 99;
+
+		for (l = webkit_context_menu_get_items(menu); l != NULL; l = l->next)
+			g_assert_cmpint(webkit_context_menu_item_get_stock_action(l->data), !=,
+				WEBKIT_CONTEXT_MENU_ACTION_OPEN_LINK_IN_NEW_WINDOW);
+		item = menu_item_for(menu, "gsurf-open-link-new-tab", &position);
+		g_assert_nonnull(item);
+		g_assert_cmpuint(position, ==, 1);
+		before = snapshot_views(&h);
+		g_action_activate(webkit_context_menu_item_get_gaction(item), NULL);
+	}
+	bg = new_view_since(&h, before);
+	g_assert_nonnull(bg);
+	g_assert_true(gsurf_view_get_opener(bg) == a);
+	g_assert_false(gsurf_view_get_related(bg));
+	g_assert_true(active_view(&h) == a);
+	g_assert_false(gsurf_window_get_view_visible(h.window, bg));
+	ASSERT_SIDEBAR(&h, "[0:first*] first@1 linked@2");
+	check_invariants(&h);
+
+	/* 2. Without a host handler the stock item stays. */
+	{
+		GsurfView *other = background_tab(&h, NULL, "other");
+		g_autoptr(WebKitContextMenu) menu = NULL;
+		guint i = 0;
+		GList *l;
+
+		gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(other));
+		menu = link_context_menu(other, link);
+		g_assert_null(menu_item_for(menu, "gsurf-open-link-new-tab", NULL));
+		for (l = webkit_context_menu_get_items(menu); l != NULL; l = l->next)
+			i += webkit_context_menu_item_get_stock_action(l->data) ==
+				WEBKIT_CONTEXT_MENU_ACTION_OPEN_LINK_IN_NEW_WINDOW;
+		g_assert_cmpuint(i, ==, 1);
+		gsurf_window_remove_view(h.window, other);
+	}
+
+	/* 3. A foreground link tab (open-new-view): a child that takes the
+	 *    active pane; its parent becomes a background tab. */
+	fg = host_make_tab(h.window, a, link, FALSE, TRUE);
+	g_assert_true(active_view(&h) == fg);
+	g_assert_cmpuint(gsurf_view_get_opener_id(fg), ==, gsurf_view_get_id(a));
+	ASSERT_SIDEBAR(&h, "[0:linked*] linked@1 [Background] first@1 linked@2");
+	gsurf_window_remove_view(h.window, fg);
+	WAIT_UNTIL(active_view(&h) == a);
+
+	/* 4. A popup (target=_blank, window.open): a related child,
+	 *    activated. */
+	g_ptr_array_unref(before);
+	before = snapshot_views(&h);
+	g_assert_nonnull(gsurf_view_emit_create_view(a, link));
+	popup = new_view_since(&h, before);
+	g_assert_nonnull(popup);
+	g_assert_true(gsurf_view_get_opener(popup) == a);
+	g_assert_true(gsurf_view_get_related(popup));
+	g_assert_true(active_view(&h) == popup);
+	gsurf_window_remove_view(h.window, popup);
+	WAIT_UNTIL(active_view(&h) == a);
+
+	/* 5. The modal F hints: a child of the hinted page. */
+	gsurf_view_load_uri(a, links);
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(a));
+	g_ptr_array_unref(before);
+	before = snapshot_views(&h);
+	g_assert_true(gsurf_module_manager_dispatch_action(h.mgr, a,
+		GSURF_ACTION_FOLLOW_HINTS_NEW_VIEW));
+	g_assert_true(gsurf_module_manager_dispatch_key_event(h.mgr, a, GDK_KEY_a, 0, 0,
+		GSURF_MODE_NORMAL));
+	hinted = new_view_since(&h, before);
+	g_assert_nonnull(hinted);
+	g_assert_true(gsurf_view_get_opener(hinted) == a);
+	gsurf_window_remove_view(h.window, hinted);
+	WAIT_UNTIL(active_view(&h) == a);
+
+	/* 6. A background child replaced in another container (the
+	 *    containers module's reassignment) stays a background child in
+	 *    its place, even after its opener closed. */
+	opener_id = gsurf_view_get_id(a);
+	kept = background_tab(&h, bg, "kept");
+	fresh = gsurf_window_replace_view(h.window, bg, GSURF_CONTAINER_TEMPORARY, link);
+	g_assert_nonnull(fresh);
+	g_assert_true(gsurf_view_get_opener(fresh) == a);
+	g_assert_true(active_view(&h) == a);
+	g_assert_false(gsurf_window_get_view_visible(h.window, fresh));
+	g_assert_true(gsurf_view_lookup(gsurf_view_get_id(kept)) == kept);
+	ASSERT_SIDEBAR(&h, "[0:links*] links@1 linked@2 kept@3");
+	gsurf_window_remove_view(h.window, a);
+	g_assert_null(gsurf_view_get_opener(fresh));
+	g_assert_cmpuint(gsurf_view_get_opener_id(fresh), ==, opener_id);
+	{
+		GsurfView *again = gsurf_window_replace_view(h.window, fresh, NULL, NULL);
+
+		g_assert_nonnull(again);
+		g_assert_cmpuint(gsurf_view_get_opener_id(again), ==, opener_id);
+	}
+	check_invariants(&h);
+	h_free(&h);
+}
+
+/* Feature: the vim mode indicator in the status line (and the chromebar),
+ * driven end to end by the modal module's keys. */
+static void
+test_mode_indicator(void)
+{
+	static const gchar *const modules[] = { "modal", "chromebar", NULL };
+	H h;
+	GtkWidget *bar_mode;
+	g_autofree gchar *links = g_strdup_printf("http://127.0.0.1:%u/links", port);
+
+	if (!gsurf_webkit_test_init() ||
+	    !h_init(&h, "    mode_insert_color: \"#ff0000\"\n",
+			"  modal:\n    enabled: true\n  chromebar:\n    enabled: true\n", modules))
+		return;
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	g_assert_nonnull(h.w->status_mode);
+	bar_mode = find_named(h.toplevel, "gsurf-chromebar-mode");
+	g_assert_nonnull(bar_mode);
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_true(gtk_widget_get_visible(h.w->status_mode));
+	{
+		g_autofree gchar *css = gtk_css_provider_to_string(h.w->css);
+		g_autofree gchar *red = NULL;
+		GdkRGBA rgba;
+
+		g_assert_true(gdk_rgba_parse(&rgba, "#ff0000"));
+		red = gdk_rgba_to_string(&rgba);
+		g_assert_nonnull(strstr(css, "wmux-mode-insert"));
+		g_assert_nonnull(strstr(css, red));
+	}
+
+	/* 1. i: INSERT, in both indicators; Escape: NORMAL. */
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(h.first));
+	g_assert_true(press(&h, GDK_KEY_i, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- INSERT --");
+	g_assert_true(has_class(h.w->status_mode, "wmux-mode-insert"));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- INSERT --");
+	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- NORMAL --");
+
+	/* 2. Hints: FOLLOW while they are up. */
+	gsurf_view_load_uri(h.first, links);
+	gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(h.first));
+	g_assert_true(gsurf_module_manager_dispatch_action(h.mgr, h.first,
+		GSURF_ACTION_FOLLOW_HINTS));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- FOLLOW --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- FOLLOW --");
+	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	h_free(&h);
+
+	/* 3. mode_hide_normal hides it in NORMAL; mode_indicator: false
+	 *    leaves it out. */
+	if (!h_init(&h, "    mode_hide_normal: true\n", NULL, NULL))
+		return;
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	g_assert_false(gtk_widget_get_visible(h.w->status_mode));
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_INSERT);
+	g_assert_true(gtk_widget_get_visible(h.w->status_mode));
+	gsurf_module_manager_set_mode(h.mgr, GSURF_MODE_NORMAL);
+	h_free(&h);
+	if (!h_init(&h, "    mode_indicator: false\n", NULL, NULL))
+		return;
+	g_assert_null(h.w->status_mode);
+	g_assert_null(find_named(h.toplevel, "gsurf-wmux-status-mode"));
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1878,6 +2696,10 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/wmux/webkit/lifetime", test_lifetime);
 	g_test_add_func("/gsurf/wmux/webkit/session-round-trip", test_session_round_trip);
 	g_test_add_func("/gsurf/wmux/webkit/stress", test_stress);
+	g_test_add_func("/gsurf/wmux/webkit/drag-into-pane", test_drag_into_pane);
+	g_test_add_func("/gsurf/wmux/webkit/grouped-tree", test_grouped_tree);
+	g_test_add_func("/gsurf/wmux/webkit/opened-children", test_opened_children);
+	g_test_add_func("/gsurf/wmux/webkit/mode-indicator", test_mode_indicator);
 
 	ret = g_test_run();
 	g_clear_object(&server);

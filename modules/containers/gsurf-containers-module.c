@@ -747,7 +747,6 @@ on_reopen_idle(gpointer data)
 	PendingReopen *pending = data;
 	g_autoptr(GsurfView) view = g_weak_ref_get(&pending->view);
 	GsurfWindow *window;
-	GsurfView *opener;
 	gint index;
 
 	if (view == NULL)
@@ -758,13 +757,22 @@ on_reopen_idle(gpointer data)
 		return G_SOURCE_REMOVE;
 	index = gsurf_window_get_view_index(window, view);
 
-	/* A replaced tab hands its place and its opener to the new one; a
-	 * tab that stays becomes the new one's opener, just right of it. */
+	/* A replaced tab hands everything to the new one
+	 * (gsurf_window_replace_view()): its place in the window and in the
+	 * tab tree, its opener (even one that already closed), a layout's
+	 * pane, and whether it was the active tab, so a link opened in a
+	 * background tab stays a background child tab. A tab that stays
+	 * becomes the new one's opener, just right of it. */
 	if (pending->close_old) {
-		opener = gsurf_view_get_opener(view);
-		open_view(pending->self, window, (guint)index, opener, pending->container,
+		GsurfView *fresh = gsurf_window_replace_view(window, view, pending->container,
 			pending->uri);
-		gsurf_window_remove_view(window, view);
+
+		if (fresh != NULL) {
+			/* Explicit placement: exempt from host reassignment until
+			 * its first load commits, like every view we open. */
+			view_state(fresh)->exempt = TRUE;
+			track_view(pending->self, fresh);
+		}
 	} else {
 		open_view(pending->self, window, (guint)index + 1, view, pending->container,
 			pending->uri);

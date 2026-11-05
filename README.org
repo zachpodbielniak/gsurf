@@ -41,13 +41,13 @@ Working today:
 - Module system: =GsurfModule= base, =GsurfModuleManager= (GModule loading,
   interface auto-detection, priority hook dispatch), 8 hook interfaces.
 - *33 modules* covering the common surf patches + an MCP server — search engines,
-  history, homepage, vim modal navigation, tabs (strip + tree sidebar with a per-tab context menu), an address bar, adblock,
+  history, homepage, vim modal navigation, tabs (strip + Sidebery-style tree sidebar: links opened from a tab nest under it, drag and drop to re-parent, a per-tab context menu, grouped by wmux window with wmux on), an address bar, adblock,
   LibreWolf-style privacy hardening, cookie policy, toggles, find, downloads, userscripts,
   site styles, per-URI params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,
   playexternal, dark mode (per-site, Dark Reader), status bar, inspector, geolocation/notification
   policy, proxy switching, containers, session, spacesearch, form autofill, =wmux= (tmux in the
   browser: split a window into panes with =C-b %= / =C-b "=, move with =C-h/j/k/l=, several
-  layouts per window with a status line, layouts saved with the session; off by default),
+  layouts per window with a status line, layouts saved with the session, tabs dragged from the sidebar into panes; off by default),
   and =mcp= (=MCP=1=).
   See [[file:docs/modules.org][docs/modules.org]].
 - Embedded default config + =--generate-yaml-config= / =--generate-c-config= /

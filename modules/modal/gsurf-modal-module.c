@@ -60,13 +60,17 @@ scroll(GsurfView *view, const gchar *js)
 }
 
 /* Change mode and publish INSERT passthrough so the host suppresses
- * bare-key dispatch to every module (not just this one) while typing. */
+ * bare-key dispatch to every module (not just this one) while typing,
+ * and the mode itself (gsurf_module_manager_set_mode()). */
 static void
 set_mode(GsurfModalModule *self, GsurfModePolicy mode)
 {
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+
 	self->mode = mode;
-	gsurf_module_manager_set_input_passthrough(
-		gsurf_module_manager_get_default(), mode == GSURF_MODE_INSERT);
+	gsurf_module_manager_set_input_passthrough(mgr, mode == GSURF_MODE_INSERT);
+	/* Publish it for mode indicators (chromebar, the wmux status line). */
+	gsurf_module_manager_set_mode(mgr, mode);
 }
 
 /* Leave INSERT (or FOLLOW) for NORMAL from a key or action: also leave
@@ -501,6 +505,14 @@ gsurf_modal_activate(GsurfModule *module)
 	return TRUE;
 }
 
+/* Disabled: no module owns the modes any more, so the published mode
+ * goes back to NORMAL (and passthrough off). */
+static void
+gsurf_modal_deactivate(GsurfModule *module)
+{
+	set_mode(GSURF_MODAL_MODULE(module), GSURF_MODE_NORMAL);
+}
+
 static void
 dup_member(gchar **dst, YamlMapping *m, const gchar *key)
 {
@@ -614,6 +626,7 @@ gsurf_modal_module_class_init(GsurfModalModuleClass *klass)
 
 	object_class->finalize = gsurf_modal_module_finalize;
 	module_class->activate = gsurf_modal_activate;
+	module_class->deactivate = gsurf_modal_deactivate;
 	module_class->get_name = gsurf_modal_get_name;
 	module_class->get_description = gsurf_modal_get_description;
 	module_class->configure = gsurf_modal_configure;

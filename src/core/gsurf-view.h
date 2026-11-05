@@ -575,6 +575,32 @@ void gsurf_view_emit_favicon_changed(GsurfView *self);
  * Returns: (transfer none) (nullable): the host-owned popup view, or %NULL to block
  */
 GsurfView *gsurf_view_emit_create_view(GsurfView *self, const gchar *uri);
+
+/**
+ * gsurf_view_request_new_view:
+ * @self: a #GsurfView
+ * @uri: the address to open
+ * @background: keep @self active (%TRUE) or activate the new view
+ *
+ * Asks the host to open @uri in a new tab whose opener is @self (emits
+ * #GsurfView::new-view-requested). Kiosk mode refuses.
+ *
+ * Returns: %TRUE when the host opened it
+ *
+ * Since: 0.4.2
+ */
+gboolean   gsurf_view_request_new_view(GsurfView *self, const gchar *uri, gboolean background);
+
+/**
+ * gsurf_view_has_new_view_handler:
+ * @self: a #GsurfView
+ *
+ * Returns: whether a host handles #GsurfView::new-view-requested for
+ *   @self (the context menu offers "Open Link in New Tab" only then)
+ *
+ * Since: 0.4.2
+ */
+gboolean   gsurf_view_has_new_view_handler(GsurfView *self);
 void gsurf_view_emit_web_process_terminated(GsurfView *self);
 
 G_END_DECLS

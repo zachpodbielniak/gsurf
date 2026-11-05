@@ -116,7 +116,7 @@ When the window makes a tab active (the sidebar, =gt=, =Ctrl+Tab=, a new tab, a 
 
 ** The status line
 
-The status line sits under the panes (=status_position: top= puts it above): =[gsurf]=, one entry per tmux window (=0:GitHub*=, =1:docs-=, =2:mail=), and the active pane's number and the pane count on the right (=2/3=, plus =Z= while zoomed). =*= marks the current window and =-= the last one. A window is named after the page title of its active pane (cut to =window_name_max= characters) until it is renamed (=C-b ,=, =rename-window=, =new-window -n=); renaming it to nothing goes back to automatic naming. Clicking an entry selects that window.
+The status line sits under the panes (=status_position: top= puts it above): =[gsurf]=, one entry per tmux window (=0:GitHub*=, =1:docs-=, =2:mail=), and the active pane's number and the pane count on the right (=2/3=, plus =Z= while zoomed), preceded by the vim mode the =modal= module publishes (=-- NORMAL --=, =-- INSERT --=, =-- FOLLOW --=; =mode_indicator=, =mode_hide_normal= and the =mode_*_color= keys below; see "Mode indicator" in =keybindings.org=). =*= marks the current window and =-= the last one. A window is named after the page title of its active pane (cut to =window_name_max= characters) until it is renamed (=C-b ,=, =rename-window=, =new-window -n=); renaming it to nothing goes back to automatic naming. Clicking an entry selects that window.
 
 The status line also hosts the prompts: =C-b := (any command), =C-b ,= (rename, starting with the current name), and the =y=/=n= question of =confirm-before= (=C-b x=, =C-b &=). Enter runs, Escape cancels; for a question =y= runs and =n=, Escape or Enter cancel. A command that does not parse, or a refused split, shows its error there for a moment (it is also logged).
 
@@ -133,6 +133,17 @@ wmux runs before every other key handler (priority -10, before =modal= and =find
 ** Borders
 
 Every pane frame has the CSS class =wmux-pane=, the active one also =wmux-pane-active=, and a pane whose tab is in a container =wmux-ctr-<container id>=. An inactive pane has a =border_width= border in its container's colour (or =border_color= in the default container, or always with =container_colors: false=) at =inactive_opacity=. The active pane has an =active_border_width= border, in its container's colour mixed toward white by =active_brighten= at full opacity (=active_border_color= in the default container). The stylesheet follows the container registry: a container colour that changes, appears or goes away restyles the panes at once.
+
+** Dragging tabs into panes
+
+With the =tabs= module's sidebar, a tab row can be dragged onto a pane (=mouse: true=, the default). While the drag runs, every pane on screen shows a drop target over its page, and the zone under the pointer is highlighted where the tab would go, in the dragged tab's container colour (=box.wmux-drop-zone=, =active_border_color= for the default container):
+
+| Drop on the pane's  | The tab is shown                         | What the pane showed |
+|----------------------+------------------------------------------+----------------------|
+| centre               | in that pane, which becomes active       | becomes a background tab; if the dragged tab was in another pane (of any window), the two *swap* (tmux =swap-pane=), so nothing leaves the screen |
+| outer 25% of an edge | in a new pane split off on that side (=split_ratio=, the highlight shows its share) | stays; if the dragged tab was in another pane, that pane closes first (tmux =join-pane=; its window closes when it was its only pane) |
+
+Dropping a pane's own tab on its centre selects the pane; on an edge it does nothing. A split that would make a pane smaller than =min_pane_pct= is refused with the usual message. The same operation is available to any chrome through the core seam =gsurf_window_layout_show_view_at(layout, window, view, target, zone)=; =wmux= implements it with these rules.
 
 ** Views off screen
 
@@ -769,7 +780,7 @@ Everything lives under =modules.wmux= and is optional. =configure()= starts from
 | =on_pane_kill=        | =close_tab= | =close_tab=, =keep_tab= | What kill-pane and kill-window do with the tabs of the panes. |
 | =on_tab_close=        | =close_pane= | =close_pane=, =keep_pane= | What happens to a pane whose tab closes. |
 | =confirm_kill=        | =true=      | boolean         | =confirm-before= asks before =kill-pane= and =kill-window=; =false= runs them directly. |
-| =mouse=               | =true=      | boolean         | Drag the gaps between panes to resize (clicking a pane always focuses it). |
+| =mouse=               | =true=      | boolean         | Drag the gaps between panes to resize, and drop tabs dragged from the =tabs= sidebar onto panes (clicking a pane always focuses it). |
 | =remember_layout=     | =true=      | boolean         | Let the session module save the tmux windows and layouts. |
 | =min_pane_pct=        | =10=        | 0-50 %          | The smallest pane a split, resize or drag may leave, in percent of the window. |
 | =gap=                 | =2=         | 0-64 px         | Space between panes (where drags start). |
@@ -786,6 +797,11 @@ Everything lives under =modules.wmux= and is optional. =configure()= starts from
 | =status_fg=           | ="#cdd6f4"= | CSS colour      | Status line and chooser text. |
 | =status_current_fg=   | ="#89b4fa"= | CSS colour      | The current window's entry. |
 | =window_name_max=     | =20=        | 1-200           | Characters of a window name in the status line. |
+| =mode_indicator=      | =true=      | boolean         | Show the vim mode (=-- INSERT --=) in the status line, left of the pane counter. |
+| =mode_hide_normal=    | =false=     | boolean         | Hide the mode indicator in NORMAL mode. |
+| =mode_normal_color=   | =#89b4fa=   | CSS colour      | Mode indicator colour in NORMAL. |
+| =mode_insert_color=   | =#a6e3a1=   | CSS colour      | Mode indicator colour in INSERT. |
+| =mode_follow_color=   | =#f9e2af=   | CSS colour      | Mode indicator colour in FOLLOW (link hints). |
 
 Booleans accept =true=/=false=, =yes=/=no= and =on=/=off=. Colours are anything GTK parses (=#rgb=, =#rrggbb=, =rgb()=, =rgba()=, names) and are stored normalized. The data/default-config.yaml block lists every key with its default.
 
@@ -945,6 +961,33 @@ modules:
     active_brighten: 0.5
 #+end_src
 
+** Drag a tab into a pane
+
+Show the sidebar (=Ctrl+Shift+.=), press a tab row and drag it over the panes: the highlight shows where it goes. Drop it in the middle of a pane to show it there (the tab that was there goes to the background, or swaps places with it when the dragged tab was on screen), or near an edge to split that pane and show it on that side.
+
+#+begin_src yaml
+modules:
+  wmux:
+    enabled: true
+    mouse: true              # border drags and tab drops (the default)
+  tabs:
+    enabled: true
+    sidebar: true            # start with the sidebar shown
+#+end_src
+
+** The sidebar grouped by window
+
+With both modules on, the sidebar lists each wmux window as a heading (=0:name*=, click to switch to it) with the tabs its panes show and their background children; other background tabs go under a last heading. Rename the heading with the usual =C-b ,=. To keep the plain opener tree instead, or to rename the background group:
+
+#+begin_src yaml
+modules:
+  wmux:
+    enabled: true
+  tabs:
+    wmux_groups: true        # false: the opener tree, as without wmux
+    background_label: "Off screen"
+#+end_src
+
 ** No mouse, a prefix that gives up
 
 For people who hit the prefix by accident: after 1.5 s it lapses.
@@ -961,7 +1004,7 @@ modules:
 
 ** tabs
 
-The strip and the sidebar list every tab, shown in a pane or not. Tabs shown in a pane other than the active one carry =gsurf-tab-row-visible= (sidebar) / =gsurf-tab-visible= (strip), coloured by the tabs module's =visible_color=. The tab context menu has *Open in Split Right* and *Open in Split Below* while a layout is installed: they dispatch =pane-split-right= / =pane-split-down= for that tab. wmux handles both: a tab on screen has its pane split with a new tab; a tab off screen (a background tab, or shown in another tmux window) is shown in a new pane split off the active one (it leaves its old pane). The two actions are also core actions (=keybinds:= can bind them; they have no default key). Selecting a tab in the sidebar or the strip follows the rules of "Selecting a tab" above.
+The strip and the sidebar list every tab, shown in a pane or not. The sidebar is grouped by wmux window (=tabs.org=, "Grouped by wmux window"): wmux lists its windows through =gsurf_window_layout_list_groups()= (index, the status line's name, current, the tabs its panes show in pane order), selects one through =gsurf_window_layout_select_group()=, and emits =GsurfWindow::layout-groups-changed= whenever that list changes. Sidebar rows can be dragged onto panes (see "Dragging tabs into panes"). Tabs shown in a pane other than the active one carry =gsurf-tab-row-visible= (sidebar) / =gsurf-tab-visible= (strip), coloured by the tabs module's =visible_color=. The tab context menu has *Open in Split Right* and *Open in Split Below* while a layout is installed: they dispatch =pane-split-right= / =pane-split-down= for that tab. wmux handles both: a tab on screen has its pane split with a new tab; a tab off screen (a background tab, or shown in another tmux window) is shown in a new pane split off the active one (it leaves its old pane). The two actions are also core actions (=keybinds:= can bind them; they have no default key). Selecting a tab in the sidebar or the strip follows the rules of "Selecting a tab" above.
 
 ** containers
 
@@ -991,7 +1034,7 @@ windows:
 
 ** chromebar
 
-The address bar shows and edits the active pane's address; Enter loads into the active pane. With the default root table =C-l= moves to the right pane instead of focusing the address bar.
+The address bar shows and edits the active pane's address; Enter loads into the active pane. With the default root table =C-l= moves to the right pane instead of focusing the address bar. Both show the vim mode (=-- INSERT --=): the chromebar left of the address, wmux in the status line.
 
 ** Kiosk mode and libregnum
 
@@ -1049,7 +1092,7 @@ The model is tested headless, as part of =make test=, by compiling its sources s
 
 | Test                         | Covers |
 |------------------------------+--------|
-| =tests/test-wmux-layout.c=   | every layout operation and its refusals; neighbor overlap and most-recently-used tie-breaks; presets for 1 to 6 panes; exact geometry with and without gaps at awkward sizes; border hit-testing and dragging; layout and state strings: round trips, every malformed form with its position; a 5000-operation randomized run checking every invariant (weights sum, no single-child or same-direction splits, unique never-reused ids, payloads, exact tiling) after each operation; fuzzing both parsers with random, truncated and mutated input |
+| =tests/test-wmux-layout.c=   | every layout operation and its refusals; neighbor overlap and most-recently-used tie-breaks; presets for 1 to 6 panes; exact geometry with and without gaps at awkward sizes; border hit-testing and dragging; drop zones (centre, the four 25% edge bands, corners, clamping, degenerate sizes); layout and state strings: round trips, every malformed form with its position; a 5000-operation randomized run checking every invariant (weights sum, no single-child or same-direction splits, unique never-reused ids, payloads, exact tiling) after each operation; fuzzing both parsers with random, truncated and mutated input |
 | =tests/test-wmux-command.c=  | the tokenizer, every command and flag, aliases, the canonical printer and round trips, every error with its code and position (also inside nested commands), the nesting limit, fuzzing with random, truncated and mutated lines |
 | =tests/test-wmux-keys.c=     | tmux and gsurf notation, every named key, key events (shifted printables, Shift on named keys, bare modifiers, Super), the GDK modifier conversion, every error, fuzzing |
 | =tests/test-wmux-bindings.c= | the default tables against this document's mapping tables, key events reaching their default commands, set/unbind/repeatable, merging overrides, validation errors, the parsed-command cache, a randomized run against the table invariants |
@@ -1061,7 +1104,7 @@ The module is tested with the real =wmux.so=:
 | Test                         | Covers |
 |------------------------------+--------|
 | =tests/test-wmux.c=          | headless (=make test=): every default (from the module's struct and its keybind help, e.g. =C-b %= -> =split-window -h=), every key with a valid value and with invalid ones (each warns once and keeps its default), unknown keys, binding overrides (rebind, add, unbind with =""= and =null=, bad keys and commands warned and skipped with the default kept), a new prefix moving =send-prefix=, extra repeatable keys, a second =configure()= going back to the defaults, activation without a window, refusal in kiosk mode and on a window that cannot host a layout (logged once), the module finalized with its manager |
-| =tests/test-wmux-webkit.c=   | real windows and WebKit views on both toolkits (=make test-gui=), keys sent through the backend's key handling and a copy of the gsurf binary's typing guard: splits and their rectangles, the Ctrl variants duplicating page and container, =C-h/j/k/l= and the arrows (repeatable) with the active tab following, focus following a click, the prefix then =%= while typing in a page field (the key grab), a pending prefix dropped (with the key grab) by a click, an active-view change and the window losing focus, the status line text, zoom, =display-panes= and a digit, swap, rotate, presets, resize keys and a mouse drag on a gap, kill with =y= / =n= and the last-pane rule, refused splits, tmux windows (=c n p l 0-9=, rename through the prompt, =:= commands and errors, kill-window, break-pane, clicking a status entry), the chooser, the open prompt (chromebar) loading into the active pane, borders (classes, container colours from the stylesheet and as drawn, wider active border, live colour changes) with the containers module, the tabs sidebar (a click shows a background tab in the active pane, focuses a pane) and its Open in Split menu, the =pane-split-*= actions, reopen in a container keeping the pane, =serialize= / =restore= on the layout (round trip, refusals), deactivate restoring the view stack with every view alive and every widget freed, reactivation and reconfiguration, the window finalized first, a session save and restore through =session.yaml= with the real session and tabs modules, and a 200-step randomized run (splits, kills, swaps, zooms, window switches, tab selections and closes; seed 4242, =GSURF_WMUX_SEED= replays another) checking after every step that every tab is in exactly one pane or a background tab, that the grid's children match the panes, and that the active tab is the active pane's |
+| =tests/test-wmux-webkit.c=   | real windows and WebKit views on both toolkits (=make test-gui=), keys sent through the backend's key handling and a copy of the gsurf binary's typing guard: splits and their rectangles, the Ctrl variants duplicating page and container, =C-h/j/k/l= and the arrows (repeatable) with the active tab following, focus following a click, the prefix then =%= while typing in a page field (the key grab), a pending prefix dropped (with the key grab) by a click, an active-view change and the window losing focus, the status line text, zoom, =display-panes= and a digit, swap, rotate, presets, resize keys and a mouse drag on a gap, kill with =y= / =n= and the last-pane rule, refused splits, tmux windows (=c n p l 0-9=, rename through the prompt, =:= commands and errors, kill-window, break-pane, clicking a status entry), the chooser, the open prompt (chromebar) loading into the active pane, borders (classes, container colours from the stylesheet and as drawn, wider active border, live colour changes) with the containers module, the tabs sidebar (a click shows a background tab in the active pane, focuses a pane) and its Open in Split menu, the =pane-split-*= actions, reopen in a container keeping the pane, =serialize= / =restore= on the layout (round trip, refusals), deactivate restoring the view stack with every view alive and every widget freed, reactivation and reconfiguration, the window finalized first, a session save and restore through =session.yaml= with the real session and tabs modules, and a 200-step randomized run (splits, kills, swaps, zooms, window switches, tab selections and closes; seed 4242, =GSURF_WMUX_SEED= replays another) checking after every step that every tab is in exactly one pane or a background tab, that the grid's children match the panes, and that the active tab is the active pane's; tabs dragged from the sidebar onto panes through the rows' drag source and the panes' drop target handlers (drop targets only over panes on screen and only during a drag, centre / swap / edge splits / join, a pane's own tab, the container-coloured highlight, refusal of a target off screen); the sidebar grouped by window (split, background children, new window, rename, a heading click, collapse, kill, wmux off and =wmux_groups: false=); every way of opening a tab from a tab (context menu "Open Link in New Tab" and its absence without a host handler, a foreground link tab, a popup, the =modal= =F= hints, a background child replaced in another container keeping its place and its opener id); the mode indicator in the status line and the chromebar driven by the =modal= keys (=i=, Escape, hints), its colours and =mode_hide_normal= / =mode_indicator: false= |
 | =tests/test-wmux-docs.c=     | headless: every =yaml= block of this document and the =wmux:= block of =data/default-config.yaml= configures the real module without a warning, and every example in the "Command reference" parses as a binding of the real module |
 
 The GUI test runs under =make test-gui= on GTK3 and GTK4; any GLib warning or critical fails it.

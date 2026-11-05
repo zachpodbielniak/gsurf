@@ -2281,3 +2281,40 @@ gsurf_wmux_state_parse(const gchar *text, gint *error_pos, GError **error)
 	state->last = last_at != NULL ? (gint)last : -1;
 	return g_steal_pointer(&state);
 }
+
+/* ------------------------------------------------------------------ */
+/* Drops                                                               */
+/* ------------------------------------------------------------------ */
+
+GsurfWmuxDrop
+gsurf_wmux_drop_zone(gint width, gint height, gint x, gint y, guint edge_pct)
+{
+	gdouble fx;
+	gdouble fy;
+	gdouble dist[4];
+	gdouble band;
+	guint best = 0;
+	guint i;
+
+	if (width <= 0 || height <= 0)
+		return GSURF_WMUX_DROP_CENTER;
+
+	/* 1. How far into the pane the point is from each edge, as a
+	 *    fraction of the pane's extent across that edge. */
+	fx = CLAMP((gdouble)x / (gdouble)width, 0.0, 1.0);
+	fy = CLAMP((gdouble)y / (gdouble)height, 0.0, 1.0);
+	dist[0] = fx;          /* left */
+	dist[1] = 1.0 - fx;    /* right */
+	dist[2] = fy;          /* top */
+	dist[3] = 1.0 - fy;    /* bottom */
+
+	/* 2. The nearest edge wins when the point is inside its band. */
+	for (i = 1; i < 4; i++) {
+		if (dist[i] < dist[best])
+			best = i;
+	}
+	band = (gdouble)MIN(edge_pct, 50u) / 100.0;
+	if (dist[best] >= band)
+		return GSURF_WMUX_DROP_CENTER;
+	return (GsurfWmuxDrop)(GSURF_WMUX_DROP_LEFT + best);
+}

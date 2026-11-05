@@ -127,6 +127,7 @@ test_actions(void)
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_PASTE_URL));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_HOME));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_OPEN_NEW_VIEW));
+	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_TAB_NEW));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_CONTAINER_NEW_TEMP));
 	g_assert_false(gsurf_kiosk_allows_action(GSURF_ACTION_CONTAINER_REOPEN_NEXT));

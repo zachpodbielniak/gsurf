@@ -15,6 +15,9 @@
  *             content:<root|null>
  *   layout    attach detach add:<v> lremove:<v> activate:<v>
  *   signals   visible  (GsurfWindow::visible-views-changed)
+ *
+ * The optional extras of 0.4.2 (groups, drops, view drags) and the view's
+ * opener-id / new-view-requested are checked here too, without the log.
  */
 
 #include <gsurf.h>
@@ -173,6 +176,12 @@ typedef struct {
 	GObject    *root;     /* stands in for the native root widget */
 	GHashTable *visible;  /* GsurfView* set, borrowed */
 	gchar      *name;
+	/* The 0.4.2 extras: what was asked last. */
+	gint        selected;     /* select_group index, -1 */
+	GsurfView  *drop_view;    /* show_view_at, borrowed */
+	GsurfView  *drop_target;
+	gint        drop_zone;
+	gint        drags;        /* begin_view_drag - end_view_drag */
 } TestLayout;
 typedef struct { GObjectClass parent; } TestLayoutClass;
 
@@ -267,6 +276,60 @@ l_restore(GsurfWindowLayout *self, GsurfWindow *window, const gchar *state,
 	return TRUE;
 }
 
+/* Two groups: 0 "web" (current) showing every view, 1 "" empty. */
+static GPtrArray *
+l_list_groups(GsurfWindowLayout *self, GsurfWindow *window)
+{
+	GPtrArray *groups = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_layout_group_unref);
+	GsurfLayoutGroup *web = gsurf_layout_group_new(0, "web", TRUE);
+	guint i;
+
+	(void)self;
+	for (i = 0; i < gsurf_window_get_n_views(window); i++)
+		gsurf_layout_group_add_view_id(web, gsurf_view_get_id(gsurf_window_get_nth_view(window, i)));
+	g_ptr_array_add(groups, web);
+	g_ptr_array_add(groups, gsurf_layout_group_new(1, NULL, FALSE));
+	return groups;
+}
+
+static gboolean
+l_select_group(GsurfWindowLayout *self, GsurfWindow *window, guint index)
+{
+	(void)window;
+	if (index > 1)
+		return FALSE;
+	((TestLayout *)self)->selected = (gint)index;
+	return TRUE;
+}
+
+static gboolean
+l_show_view_at(GsurfWindowLayout *self, GsurfWindow *window, GsurfView *view,
+               GsurfView *target, GsurfLayoutDropZone zone)
+{
+	TestLayout *layout = (TestLayout *)self;
+
+	(void)window;
+	layout->drop_view = view;
+	layout->drop_target = target;
+	layout->drop_zone = (gint)zone;
+	return view != target;
+}
+
+static void
+l_begin_drag(GsurfWindowLayout *self, GsurfWindow *window, GsurfView *view)
+{
+	(void)window;
+	(void)view;
+	((TestLayout *)self)->drags++;
+}
+
+static void
+l_end_drag(GsurfWindowLayout *self, GsurfWindow *window)
+{
+	(void)window;
+	((TestLayout *)self)->drags--;
+}
+
 static void
 test_layout_iface_init(GsurfWindowLayoutInterface *iface)
 {
@@ -279,6 +342,11 @@ test_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->is_view_visible = l_visible;
 	iface->serialize = l_serialize;
 	iface->restore = l_restore;
+	iface->list_groups = l_list_groups;
+	iface->select_group = l_select_group;
+	iface->show_view_at = l_show_view_at;
+	iface->begin_view_drag = l_begin_drag;
+	iface->end_view_drag = l_end_drag;
 }
 
 static void
@@ -302,6 +370,8 @@ static void
 test_layout_init(TestLayout *self)
 {
 	self->visible = g_hash_table_new(g_direct_hash, g_direct_equal);
+	self->selected = -1;
+	self->drop_zone = -1;
 }
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(TestLayout, g_object_unref)
@@ -770,6 +840,178 @@ test_bad_arguments(void)
 	g_test_assert_expected_messages();
 }
 
+/* --- 0.4.2: groups, drops, drags --- */
+
+static void
+count_signal(GsurfWindow *window, gpointer user_data)
+{
+	(void)window;
+	(*(guint *)user_data)++;
+}
+
+/* The boxed group: values, ids (no zero, no duplicates), references. */
+static void
+test_group_boxed(void)
+{
+	g_autoptr(GsurfLayoutGroup) group = gsurf_layout_group_new(3, "mail", TRUE);
+	g_autoptr(GsurfLayoutGroup) unnamed = gsurf_layout_group_new(0, NULL, FALSE);
+	GsurfLayoutGroup *copy;
+	const guint64 *ids;
+	guint n = 42;
+
+	g_assert_true(G_TYPE_IS_BOXED(GSURF_TYPE_LAYOUT_GROUP));
+	g_assert_cmpuint(gsurf_layout_group_get_index(group), ==, 3);
+	g_assert_cmpstr(gsurf_layout_group_get_name(group), ==, "mail");
+	g_assert_true(gsurf_layout_group_get_current(group));
+	g_assert_cmpstr(gsurf_layout_group_get_name(unnamed), ==, "");
+	g_assert_false(gsurf_layout_group_get_current(unnamed));
+	ids = gsurf_layout_group_get_view_ids(group, &n);
+	g_assert_cmpuint(n, ==, 0);
+
+	gsurf_layout_group_add_view_id(group, 7);
+	gsurf_layout_group_add_view_id(group, 0);
+	gsurf_layout_group_add_view_id(group, 5);
+	gsurf_layout_group_add_view_id(group, 7);
+	ids = gsurf_layout_group_get_view_ids(group, &n);
+	g_assert_cmpuint(n, ==, 2);
+	g_assert_cmpuint(ids[0], ==, 7);
+	g_assert_cmpuint(ids[1], ==, 5);
+
+	/* g_boxed_copy() is a reference. */
+	copy = g_boxed_copy(GSURF_TYPE_LAYOUT_GROUP, group);
+	g_assert_true(copy == group);
+	g_boxed_free(GSURF_TYPE_LAYOUT_GROUP, copy);
+	g_assert_cmpstr(gsurf_layout_group_get_name(group), ==, "mail");
+}
+
+/* The wrappers reach the vfuncs; a layout without them answers "none";
+ * installing or removing a layout, and notify_groups(), emit
+ * layout-groups-changed. */
+static void
+test_groups_and_drops(void)
+{
+	static const gchar *const names[] = { "a", "b", NULL };
+	g_autoptr(GsurfWindow) window = new_window(names);
+	g_autoptr(TestLayout) layout = new_layout("L");
+	g_autoptr(TestMinLayout) min = g_object_new(test_min_layout_get_type(), NULL);
+	g_autoptr(GPtrArray) groups = NULL;
+	GsurfWindowLayout *l = GSURF_WINDOW_LAYOUT(layout);
+	GsurfWindowLayout *m = GSURF_WINDOW_LAYOUT(min);
+	GsurfView *a = view_named(window, "a");
+	GsurfView *b = view_named(window, "b");
+	const guint64 *ids;
+	guint changed = 0;
+	guint n;
+
+	setup();
+	g_signal_connect(window, "layout-groups-changed", G_CALLBACK(count_signal), &changed);
+
+	/* 1. Installing and removing a layout announce the groups. */
+	g_assert_true(gsurf_window_set_layout(window, l));
+	g_assert_cmpuint(changed, ==, 1);
+	gsurf_window_layout_notify_groups(window);
+	g_assert_cmpuint(changed, ==, 2);
+
+	/* 2. Groups, in order, with the views their panes show. */
+	groups = gsurf_window_layout_list_groups(l, window);
+	g_assert_nonnull(groups);
+	g_assert_cmpuint(groups->len, ==, 2);
+	g_assert_cmpstr(gsurf_layout_group_get_name(g_ptr_array_index(groups, 0)), ==, "web");
+	ids = gsurf_layout_group_get_view_ids(g_ptr_array_index(groups, 0), &n);
+	g_assert_cmpuint(n, ==, 2);
+	g_assert_cmpuint(ids[0], ==, gsurf_view_get_id(a));
+	g_assert_cmpuint(ids[1], ==, gsurf_view_get_id(b));
+	g_assert_true(gsurf_window_layout_select_group(l, window, 1));
+	g_assert_cmpint(layout->selected, ==, 1);
+	g_assert_false(gsurf_window_layout_select_group(l, window, 9));
+
+	/* 3. Drops and drags. */
+	g_assert_true(gsurf_window_layout_show_view_at(l, window, b, a, GSURF_LAYOUT_DROP_LEFT));
+	g_assert_true(layout->drop_view == b && layout->drop_target == a);
+	g_assert_cmpint(layout->drop_zone, ==, GSURF_LAYOUT_DROP_LEFT);
+	g_assert_false(gsurf_window_layout_show_view_at(l, window, a, a, GSURF_LAYOUT_DROP_CENTER));
+	gsurf_window_layout_begin_view_drag(l, window, a);
+	g_assert_cmpint(layout->drags, ==, 1);
+	gsurf_window_layout_end_view_drag(l, window);
+	g_assert_cmpint(layout->drags, ==, 0);
+
+	g_assert_true(gsurf_window_set_layout(window, NULL));
+	g_assert_cmpuint(changed, ==, 3);
+
+	/* 4. A layout without the extras: no groups, no drops; the drag
+	 *    calls are harmless. */
+	g_assert_null(gsurf_window_layout_list_groups(m, window));
+	g_assert_false(gsurf_window_layout_select_group(m, window, 0));
+	g_assert_false(gsurf_window_layout_show_view_at(m, window, a, b, GSURF_LAYOUT_DROP_CENTER));
+	gsurf_window_layout_begin_view_drag(m, window, a);
+	gsurf_window_layout_end_view_drag(m, window);
+
+	/* 5. Guards. */
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*GSURF_IS_VIEW*");
+	g_assert_false(gsurf_window_layout_show_view_at(l, window, a, NULL, GSURF_LAYOUT_DROP_TOP));
+	g_test_assert_expected_messages();
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_CRITICAL, "*GSURF_IS_WINDOW*");
+	gsurf_window_layout_notify_groups(NULL);
+	g_test_assert_expected_messages();
+}
+
+/* --- views: opener id, new-view requests --- */
+
+static gboolean
+on_new_view_requested(GsurfView *view, const gchar *uri, gboolean background, gpointer data)
+{
+	GString *log = data;
+
+	(void)view;
+	g_string_append_printf(log, "%s:%s,", uri, background ? "bg" : "fg");
+	return TRUE;
+}
+
+/* GsurfView:opener-id is a construct fallback: kept when no opener
+ * object is given, overridden by a live opener; readable. */
+static void
+test_view_opener_id(void)
+{
+	g_autoptr(GsurfView) opener = new_view("o");
+	g_autoptr(GsurfView) orphan = g_object_new(test_view_get_type(), "opener-id",
+		G_GUINT64_CONSTANT(4242), NULL);
+	g_autoptr(GsurfView) child = g_object_new(test_view_get_type(), "opener", opener,
+		"opener-id", G_GUINT64_CONSTANT(4242), NULL);
+	g_autoptr(GsurfView) plain = new_view("p");
+	guint64 read = 0;
+
+	g_assert_cmpuint(gsurf_view_get_opener_id(orphan), ==, 4242);
+	g_assert_null(gsurf_view_get_opener(orphan));
+	g_assert_cmpuint(gsurf_view_get_opener_id(child), ==, gsurf_view_get_id(opener));
+	g_assert_true(gsurf_view_get_opener(child) == opener);
+	g_assert_cmpuint(gsurf_view_get_opener_id(plain), ==, 0);
+	g_object_get(orphan, "opener-id", &read, NULL);
+	g_assert_cmpuint(read, ==, 4242);
+}
+
+/* gsurf_view_request_new_view(): the host's handler opens it; without a
+ * handler (or an empty address) nothing happens. */
+static void
+test_view_new_view_requested(void)
+{
+	g_autoptr(GsurfView) view = new_view("v");
+	g_autoptr(GString) log = g_string_new(NULL);
+	gulong id;
+
+	g_assert_false(gsurf_view_has_new_view_handler(view));
+	g_assert_false(gsurf_view_request_new_view(view, "https://example.org/", TRUE));
+
+	id = g_signal_connect(view, "new-view-requested", G_CALLBACK(on_new_view_requested), log);
+	g_assert_true(gsurf_view_has_new_view_handler(view));
+	g_assert_true(gsurf_view_request_new_view(view, "https://example.org/", TRUE));
+	g_assert_true(gsurf_view_request_new_view(view, "https://example.net/", FALSE));
+	g_assert_false(gsurf_view_request_new_view(view, "", TRUE));
+	g_assert_false(gsurf_view_request_new_view(view, NULL, TRUE));
+	g_assert_cmpstr(log->str, ==, "https://example.org/:bg,https://example.net/:fg,");
+	g_signal_handler_disconnect(view, id);
+	g_assert_false(gsurf_view_has_new_view_handler(view));
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -789,6 +1031,10 @@ main(int argc, char *argv[])
 	g_test_add_func("/window-layout/dispose-with-layout", test_dispose_with_layout);
 	g_test_add_func("/window-layout/layout-lifetime", test_layout_lifetime);
 	g_test_add_func("/window-layout/bad-arguments", test_bad_arguments);
+	g_test_add_func("/window-layout/group-boxed", test_group_boxed);
+	g_test_add_func("/window-layout/groups-and-drops", test_groups_and_drops);
+	g_test_add_func("/view/opener-id", test_view_opener_id);
+	g_test_add_func("/view/new-view-requested", test_view_new_view_requested);
 
 	return g_test_run();
 }

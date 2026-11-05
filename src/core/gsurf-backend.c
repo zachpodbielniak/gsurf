@@ -180,7 +180,7 @@ view_type_for_backend(GsurfBackendType type)
  * base constructed() resolves the container before the backend builds
  * its native web view. */
 static GsurfView *
-view_new_for_backend_full(GsurfBackendType type, GsurfView *opener,
+view_new_for_backend_full(GsurfBackendType type, GsurfView *opener, guint64 opener_id,
                           const gchar *container_id, const gchar *initial_uri,
                           gboolean related)
 {
@@ -193,6 +193,7 @@ view_new_for_backend_full(GsurfBackendType type, GsurfView *opener,
 	}
 	return g_object_new(gtype,
 		"opener", opener,
+		"opener-id", opener_id,
 		"container-id", container_id,
 		"initial-uri", initial_uri,
 		"related", related && opener != NULL,
@@ -202,7 +203,7 @@ view_new_for_backend_full(GsurfBackendType type, GsurfView *opener,
 GsurfView *
 gsurf_view_new_for_backend(GsurfBackendType type)
 {
-	return view_new_for_backend_full(type, NULL, NULL, NULL, FALSE);
+	return view_new_for_backend_full(type, NULL, 0, NULL, NULL, FALSE);
 }
 
 GsurfWindow *
@@ -261,7 +262,7 @@ gsurf_view_new_full(GsurfView *opener, const gchar *container_id,
 {
 	g_return_val_if_fail(opener == NULL || GSURF_IS_VIEW(opener), NULL);
 
-	return view_new_for_backend_full(gsurf_backend_get_default_type(), opener,
+	return view_new_for_backend_full(gsurf_backend_get_default_type(), opener, 0,
 		container_id, initial_uri, related);
 }
 
@@ -271,25 +272,35 @@ gsurf_window_new(void)
 	return gsurf_window_new_for_backend(gsurf_backend_get_default_type());
 }
 
-GsurfView *
-gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *container_id)
+/*
+ * reopen_view:
+ * @uri: (nullable): what to load; %NULL picks @view's address
+ * @activate: always activate the new view (reopen), or only when @view
+ *   was active (replace)
+ *
+ * The shared body of gsurf_window_reopen_view() and
+ * gsurf_window_replace_view().
+ */
+static GsurfView *
+reopen_view(GsurfWindow *window, GsurfView *view, const gchar *container_id,
+            const gchar *uri, gboolean activate)
 {
 	GsurfConfig *config = gsurf_config_get_default();
 	g_autoptr(GsurfView) old = NULL;
 	g_autoptr(GsurfView) fresh = NULL;
-	const gchar *uri;
+	gboolean was_active;
 	gint index;
-
-	g_return_val_if_fail(GSURF_IS_WINDOW(window), NULL);
-	g_return_val_if_fail(GSURF_IS_VIEW(view), NULL);
 
 	index = gsurf_window_get_view_index(window, view);
 	if (index < 0)
 		return NULL;
+	was_active = (gsurf_window_get_active_view(window) == view);
 
-	/* 1. What to load: the current URI, else the first URI the view was
-	 *    created for (a tab still loading it), else a new-tab page. */
-	uri = gsurf_view_get_uri(view);
+	/* 1. What to load: the given address, else the current URI, else
+	 *    the first URI the view was created for (a tab still loading
+	 *    it), else a new-tab page. */
+	if (uri == NULL || *uri == '\0')
+		uri = gsurf_view_get_uri(view);
 	if (uri == NULL || *uri == '\0')
 		uri = gsurf_view_get_initial_uri(view);
 	if (uri == NULL || *uri == '\0')
@@ -297,9 +308,11 @@ gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *cont
 			? config->new_view_uri : "about:blank";
 
 	/* 2. Hold the old view: its opener and URI must outlive the new
-	 *    view's construction, and removal drops the window's reference. */
+	 *    view's construction, and removal drops the window's reference.
+	 *    The opener id survives an opener that already closed. */
 	old = g_object_ref(view);
-	fresh = gsurf_view_new_full(gsurf_view_get_opener(old),
+	fresh = view_new_for_backend_full(gsurf_backend_get_default_type(),
+		gsurf_view_get_opener(old), gsurf_view_get_opener_id(old),
 		(container_id != NULL && *container_id != '\0') ? container_id
 		                                                : GSURF_CONTAINER_DEFAULT,
 		uri, FALSE);
@@ -311,11 +324,31 @@ gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *cont
 	/* 3. Same place; chrome hands over the old view's place (its tab
 	 *    tree node, a layout its pane) before activation, so activating
 	 *    the new view finds it where the old one was instead of moving
-	 *    it; then active, loading, and the old view goes. */
+	 *    it; then active (when asked), loading, and the old view goes. */
 	gsurf_window_insert_view(window, fresh, (guint)index);
 	g_signal_emit_by_name(window, "view-replaced", old, fresh);
-	gsurf_window_set_active_view(window, fresh);
+	if (activate || was_active)
+		gsurf_window_set_active_view(window, fresh);
 	gsurf_view_load_uri(fresh, uri);
 	gsurf_window_remove_view(window, old);
 	return fresh;
+}
+
+GsurfView *
+gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view, const gchar *container_id)
+{
+	g_return_val_if_fail(GSURF_IS_WINDOW(window), NULL);
+	g_return_val_if_fail(GSURF_IS_VIEW(view), NULL);
+
+	return reopen_view(window, view, container_id, NULL, TRUE);
+}
+
+GsurfView *
+gsurf_window_replace_view(GsurfWindow *window, GsurfView *view, const gchar *container_id,
+                          const gchar *uri)
+{
+	g_return_val_if_fail(GSURF_IS_WINDOW(window), NULL);
+	g_return_val_if_fail(GSURF_IS_VIEW(view), NULL);
+
+	return reopen_view(window, view, container_id, uri, FALSE);
 }

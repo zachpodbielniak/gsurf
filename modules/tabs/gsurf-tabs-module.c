@@ -17,7 +17,14 @@
  *   - view-moved by anyone else: the tree re-syncs from the window order;
  *   - active-view-changed: collapsed ancestors of the new tab expand;
  *   - visible-views-changed (a window layout such as wmux): tabs shown
- *     in another pane get the "visible" style.
+ *     in another pane get the "visible" style;
+ *   - layout-groups-changed (a layout with groups, such as wmux's
+ *     windows): the sidebar regroups (wmux_groups).
+ *
+ * Sidebar drags: a tab row dragged onto another row re-parents the tab
+ * (gsurf_tab_tree_move_to()); while a drag runs the window layout is
+ * told (gsurf_window_layout_begin_view_drag()) so it can take the drop
+ * itself (wmux: show the tab in a pane, or split one).
  *
  * The strip and sidebar widgets live in gsurf-tabs-ui.c. Implements
  * #GsurfInputHandler, #GsurfKeybindProvider and #GsurfActionHandler.
@@ -349,6 +356,110 @@ gsurf_tabs_split_tab(GsurfTabsModule *self, guint64 id, GsurfAction action)
 	gsurf_module_manager_dispatch_action(gsurf_module_manager_get_default(), view, action);
 }
 
+/* ------------------------------------------------------------------ */
+/* Layout groups                                                       */
+/* ------------------------------------------------------------------ */
+
+GPtrArray *
+gsurf_tabs_list_groups(GsurfTabsModule *self)
+{
+	GsurfWindowLayout *layout;
+
+	if (!self->wmux_groups || self->window == NULL)
+		return NULL;
+	layout = gsurf_window_get_layout(self->window);
+	if (layout == NULL)
+		return NULL;
+	return gsurf_window_layout_list_groups(layout, self->window);
+}
+
+void
+gsurf_tabs_select_group(GsurfTabsModule *self, guint index)
+{
+	GsurfWindowLayout *layout;
+
+	if (self->window == NULL || index == GSURF_TAB_GROUP_BACKGROUND)
+		return;
+	layout = gsurf_window_get_layout(self->window);
+	if (layout != NULL)
+		gsurf_window_layout_select_group(layout, self->window, index);
+}
+
+gboolean
+gsurf_tabs_group_collapsed(GsurfTabsModule *self, guint index)
+{
+	if (index == GSURF_TAB_GROUP_BACKGROUND)
+		return self->background_collapsed;
+	return self->collapsed_groups != NULL &&
+	       g_hash_table_contains(self->collapsed_groups, GUINT_TO_POINTER(index + 1));
+}
+
+void
+gsurf_tabs_toggle_group(GsurfTabsModule *self, guint index)
+{
+	if (index == GSURF_TAB_GROUP_BACKGROUND) {
+		self->background_collapsed = !self->background_collapsed;
+	} else if (self->collapsed_groups != NULL) {
+		gpointer key = GUINT_TO_POINTER(index + 1);
+
+		if (!g_hash_table_remove(self->collapsed_groups, key))
+			g_hash_table_add(self->collapsed_groups, key);
+	}
+	gsurf_tabs_ui_sync(self);
+}
+
+/* ------------------------------------------------------------------ */
+/* Sidebar drag and drop                                               */
+/* ------------------------------------------------------------------ */
+
+void
+gsurf_tabs_drag_begin(GsurfTabsModule *self, guint64 id)
+{
+	GsurfView *view = window_view(self, id);
+	GsurfWindowLayout *layout;
+
+	if (view == NULL)
+		return;
+	self->drag_id = id;
+	layout = gsurf_window_get_layout(self->window);
+	if (layout != NULL)
+		gsurf_window_layout_begin_view_drag(layout, self->window, view);
+}
+
+void
+gsurf_tabs_drag_end(GsurfTabsModule *self)
+{
+	GsurfWindowLayout *layout;
+
+	self->drag_id = 0;
+	if (self->window == NULL)
+		return;
+	layout = gsurf_window_get_layout(self->window);
+	if (layout != NULL)
+		gsurf_window_layout_end_view_drag(layout, self->window);
+}
+
+/* A tab row accepts the dragged tab unless it is that tab or lies in its
+ * subtree. */
+gboolean
+gsurf_tabs_can_drop(GsurfTabsModule *self, guint64 target)
+{
+	return self->tree != NULL && self->drag_id != 0 && target != 0 &&
+	       window_view(self, self->drag_id) != NULL && window_view(self, target) != NULL &&
+	       !gsurf_tab_tree_is_in_subtree(self->tree, target, self->drag_id);
+}
+
+gboolean
+gsurf_tabs_drop(GsurfTabsModule *self, guint64 target, GsurfTabTreeDrop where)
+{
+	if (!gsurf_tabs_can_drop(self, target) ||
+	    !gsurf_tab_tree_move_to(self->tree, self->drag_id, target, where))
+		return FALSE;
+	apply_tree_order(self);
+	gsurf_tabs_ui_sync(self);
+	return TRUE;
+}
+
 gboolean
 gsurf_tabs_view_in_other_pane(GsurfTabsModule *self, GsurfView *view)
 {
@@ -538,6 +649,15 @@ on_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
  * when their state did. */
 static void
 on_visible_views_changed(GsurfWindow *window, gpointer user_data)
+{
+	(void)window;
+	gsurf_tabs_ui_sync(GSURF_TABS_MODULE(user_data));
+}
+
+/* The layout's groups changed (a wmux window created, killed, renamed or
+ * selected, a pane showing another tab): regroup the sidebar. */
+static void
+on_layout_groups_changed(GsurfWindow *window, gpointer user_data)
 {
 	(void)window;
 	gsurf_tabs_ui_sync(GSURF_TABS_MODULE(user_data));
@@ -786,6 +906,10 @@ release_activation(GsurfTabsModule *self)
 		}
 	}
 	g_clear_pointer(&self->tree, gsurf_tab_tree_free);
+	if (self->collapsed_groups != NULL)
+		g_hash_table_remove_all(self->collapsed_groups);
+	self->background_collapsed = FALSE;
+	self->drag_id = 0;
 	self->syncing = FALSE;
 }
 
@@ -831,6 +955,7 @@ gsurf_tabs_activate(GsurfModule *module)
 	g_signal_connect(window, "view-replaced", G_CALLBACK(on_view_replaced), self);
 	g_signal_connect(window, "active-view-changed", G_CALLBACK(on_active_view_changed), self);
 	g_signal_connect(window, "visible-views-changed", G_CALLBACK(on_visible_views_changed), self);
+	g_signal_connect(window, "layout-groups-changed", G_CALLBACK(on_layout_groups_changed), self);
 
 	/* 3. Kiosk shows no strip and no sidebar; the keys still work. */
 	if (gsurf_kiosk_is_enabled())
@@ -968,6 +1093,8 @@ reset_config(GsurfTabsModule *self)
 	self->indent = GSURF_TABS_DEFAULT_INDENT;
 	self->max_depth = GSURF_TABS_DEFAULT_MAX_DEPTH;
 	self->on_close_parent = GSURF_TAB_TREE_CLOSE_PROMOTE;
+	self->wmux_groups = TRUE;
+	set_string(&self->background_label, GSURF_TABS_DEFAULT_BACKGROUND_LABEL);
 }
 
 /* Each configure() starts from the defaults, so a second call replaces
@@ -1020,6 +1147,17 @@ gsurf_tabs_configure(GsurfModule *module, gpointer config_ptr)
 	read_choice(m, "on_close_parent", "promote", "close_children", &close_children);
 	self->on_close_parent = close_children ? GSURF_TAB_TREE_CLOSE_CHILDREN
 		: GSURF_TAB_TREE_CLOSE_PROMOTE;
+
+	read_bool(m, "wmux_groups", &self->wmux_groups);
+	if (yaml_mapping_has_member(m, "background_label")) {
+		const gchar *label = yaml_mapping_get_string_member(m, "background_label");
+
+		if (label == NULL || *label == '\0' || !g_utf8_validate(label, -1, NULL))
+			g_warning("tabs.background_label must be a non-empty string; keeping '%s'",
+			          self->background_label);
+		else
+			set_string(&self->background_label, label);
+	}
 }
 
 static void
@@ -1047,6 +1185,8 @@ gsurf_tabs_module_finalize(GObject *object)
 	g_clear_pointer(&self->active_color, g_free);
 	g_clear_pointer(&self->fg_color, g_free);
 	g_clear_pointer(&self->visible_color, g_free);
+	g_clear_pointer(&self->background_label, g_free);
+	g_clear_pointer(&self->collapsed_groups, g_hash_table_unref);
 	if (self->closed_uris != NULL) {
 		g_queue_free_full(self->closed_uris, g_free);
 		self->closed_uris = NULL;
@@ -1075,6 +1215,7 @@ gsurf_tabs_module_init(GsurfTabsModule *self)
 {
 	reset_config(self);
 	self->closed_uris = g_queue_new();
+	self->collapsed_groups = g_hash_table_new(g_direct_hash, g_direct_equal);
 }
 
 G_MODULE_EXPORT GType

@@ -128,12 +128,85 @@ hit_test_from_webkit(WebKitHitTestResult *r)
 	return ht;
 }
 
+/* "Open Link in New Tab": ask the host for a background child tab of
+ * the view the menu was opened in (held weakly: the tab may close while
+ * the menu is up). */
+static void
+on_open_link_new_tab(GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+	GWeakRef *ref = g_object_get_data(G_OBJECT(action), "gsurf-view");
+	const gchar *uri = g_object_get_data(G_OBJECT(action), "gsurf-uri");
+	g_autoptr(GsurfView) view = ref != NULL ? g_weak_ref_get(ref) : NULL;
+
+	(void)param;
+	(void)user_data;
+	if (view != NULL && uri != NULL)
+		gsurf_view_request_new_view(view, uri, TRUE);
+}
+
+static void
+weak_ref_free(gpointer data)
+{
+	g_weak_ref_clear(data);
+	g_free(data);
+}
+
+/* On a link, replace WebKit's "Open Link in New Window" with our "Open
+ * Link in New Tab" at the same position. gsurf shows every view of a
+ * process in one window, so WebKit's item would only open a related
+ * foreground tab (a popup sharing the page's session); without a host
+ * handler (an embedder that never connected new-view-requested) the
+ * stock item stays. */
+static void
+replace_new_window_item(GsurfView *view, WebKitContextMenu *menu, WebKitHitTestResult *hit)
+{
+	g_autoptr(GSimpleAction) action = NULL;
+	GWeakRef *ref;
+	GList *items;
+	GList *l;
+	guint position = 0;
+
+	if (view == NULL || !webkit_hit_test_result_context_is_link(hit) ||
+	    webkit_hit_test_result_get_link_uri(hit) == NULL ||
+	    !gsurf_view_has_new_view_handler(view))
+		return;
+
+	/* 1. Find (and drop) the stock item. */
+	items = webkit_context_menu_get_items(menu);
+	for (l = items; l != NULL; l = l->next, position++) {
+		WebKitContextMenuItem *item = l->data;
+
+		if (webkit_context_menu_item_get_stock_action(item) ==
+		    WEBKIT_CONTEXT_MENU_ACTION_OPEN_LINK_IN_NEW_WINDOW) {
+			webkit_context_menu_remove(menu, item);
+			break;
+		}
+	}
+
+	/* 2. Our item in its place (first, when WebKit offered none). */
+	if (l == NULL)
+		position = 0;
+	action = g_simple_action_new(GSURF_WEBKIT_MENU_NEW_TAB_ACTION, NULL);
+	ref = g_new0(GWeakRef, 1);
+	g_weak_ref_init(ref, view);
+	g_object_set_data_full(G_OBJECT(action), "gsurf-view", ref, weak_ref_free);
+	g_object_set_data_full(G_OBJECT(action), "gsurf-uri",
+		g_strdup(webkit_hit_test_result_get_link_uri(hit)), g_free);
+	g_signal_connect(action, "activate", G_CALLBACK(on_open_link_new_tab), NULL);
+	webkit_context_menu_insert(menu,
+		webkit_context_menu_item_new_from_gaction(G_ACTION(action),
+			"Open Link in New Tab", NULL), (gint)position);
+}
+
 void
-gsurf_webkit_common_populate_menu(WebKitContextMenu *menu, WebKitHitTestResult *hit_result)
+gsurf_webkit_common_populate_menu(GsurfView *view, WebKitContextMenu *menu,
+                                  WebKitHitTestResult *hit_result)
 {
 	GsurfHitTest *hit = hit_test_from_webkit(hit_result);
 	GPtrArray *items = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_menu_item_free);
 	guint i;
+
+	replace_new_window_item(view, menu, hit_result);
 
 	gsurf_module_manager_dispatch_populate_menu(gsurf_module_manager_get_default(),
 		hit, items);

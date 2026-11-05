@@ -15,6 +15,9 @@
  *   |   |       +-- GtkOverlay
  *   |   |           +-- the view's web view
  *   |   |           +-- the display-panes number label
+ *   |   |           +-- the drop target ("gsurf-wmux-drop"), shown only
+ *   |   |               while a tab is dragged from the sidebar, holding
+ *   |   |               the zone highlight ("gsurf-wmux-drop-zone")
  *   |   +-- chooser ("gsurf-wmux-chooser"), shown by choose-tree
  *   +-- [status line, when status_position is bottom]
  *
@@ -35,6 +38,13 @@
  * changes) gives each frame its border: the container's colour (or
  * border_color) at inactive_opacity, and for the active pane the
  * brightened colour (or active_border_color), wider.
+ *
+ * Drops: while chrome drags a tab (gsurf_window_layout_begin_view_drag()),
+ * every pane on screen shows a drop target above its page (the page would
+ * swallow the drag otherwise). Over it, the zone under the pointer
+ * (gsurf_wmux_drop_zone(): the outer 25% of each side, else the centre)
+ * is highlighted where the tab would go, in the dragged tab's container
+ * colour; a drop runs gsurf_wmux_show_view_at().
  */
 
 #include "modules/include/gsurf-chrome-compat.h"
@@ -42,6 +52,7 @@
 #include "gsurf-wmux-private.h"
 
 #define CTR_CLASS_DATA     "gsurf-wmux-ctr-class"
+#define FRAME_OWNER_DATA   "gsurf-wmux-frame-owner"
 #define CHOOSER_CTR_PREFIX "wmux-chooser-ctr-"
 
 /* ------------------------------------------------------------------ */
@@ -107,6 +118,16 @@ build_css(GsurfWmuxModule *self)
 		self->border_width, inactive, self->active_border_width, self->active_border_color,
 		self->active_border_color);
 
+	/* 1b. The drop zone highlight (a dragged tab in the default
+	 *     container; container colours below override it). */
+	{
+		g_autofree gchar *fill = gsurf_wmux_with_alpha(self->active_border_color, 0.3);
+
+		g_string_append_printf(css,
+			"box.wmux-drop-zone { background-color: %s; border: 3px solid %s; }\n",
+			fill, self->active_border_color);
+	}
+
 	/* 2. The status line and the chooser. */
 	g_string_append_printf(css,
 		".wmux-status { background-color: %s; color: %s; padding: 0px 4px; }\n"
@@ -123,6 +144,14 @@ build_css(GsurfWmuxModule *self)
 		self->status_bg, self->status_fg, self->status_fg, self->status_current_fg,
 		self->status_bg, self->status_fg, self->active_border_color, self->status_fg,
 		self->active_border_color, self->status_bg);
+
+	/* 2b. The mode indicator. */
+	g_string_append_printf(css,
+		".wmux-status label.wmux-status-mode { font-weight: bold; }\n"
+		".wmux-status label.wmux-mode-normal { color: %s; }\n"
+		".wmux-status label.wmux-mode-insert { color: %s; }\n"
+		".wmux-status label.wmux-mode-follow { color: %s; }\n",
+		self->mode_normal_color, self->mode_insert_color, self->mode_follow_color);
 
 	/* 3. Container colours: the frame border (dim, or brightened and full
 	 *    for the active pane) and the chooser stripe. */
@@ -144,8 +173,10 @@ build_css(GsurfWmuxModule *self)
 				"box.wmux-pane." GSURF_WMUX_CTR_CLASS_PREFIX "%s { border-color: %s; }\n"
 				"box.wmux-pane." GSURF_WMUX_CTR_CLASS_PREFIX "%s.wmux-pane-active"
 				" { border-color: %s; }\n"
-				"." CHOOSER_CTR_PREFIX "%s { background-color: %s; }\n",
-				id, dim, id, bright, id, color);
+				"." CHOOSER_CTR_PREFIX "%s { background-color: %s; }\n"
+				"box.wmux-drop-zone." GSURF_WMUX_CTR_CLASS_PREFIX "%s"
+				" { background-color: %s; border-color: %s; }\n",
+				id, dim, id, bright, id, color, id, dim, color);
 		}
 	}
 	return g_string_free(css, FALSE);
@@ -284,10 +315,138 @@ static const GsurfWmuxGridFuncs grid_funcs = {
 /* Frames                                                              */
 /* ------------------------------------------------------------------ */
 
-/* The frame around @view: a bordered box holding an overlay with the web
- * view and the (hidden) pane number. */
+/* --- Drop targets over the panes --- */
+
+/* The frame a drop target belongs to. */
 static GsurfWmuxFrame *
-frame_new(GsurfView *view)
+frame_of_drop(GsurfWmuxModule *self, GtkWidget *drop)
+{
+	guint64 *id = g_object_get_data(G_OBJECT(drop), GSURF_WMUX_VIEW_ID_DATA);
+
+	return id != NULL ? gsurf_wmux_ui_frame(self, *id) : NULL;
+}
+
+/* Highlight where a drop in @zone would put the tab (-1 hides it): the
+ * whole pane for the centre, else the share a new pane would get
+ * (split_ratio) on that side. */
+static void
+frame_show_zone(GsurfWmuxModule *self, GsurfWmuxFrame *f, gint zone)
+{
+	gint width;
+	gint height;
+
+	if (f->zone == NULL || f->zone_shown == zone)
+		return;
+	f->zone_shown = zone;
+	if (zone < 0) {
+		gtk_widget_set_visible(f->zone, FALSE);
+		return;
+	}
+	width = gsurf_chrome_widget_get_width(f->drop) * self->split_ratio / 100;
+	height = gsurf_chrome_widget_get_height(f->drop) * self->split_ratio / 100;
+	gtk_widget_set_halign(f->zone, zone == GSURF_WMUX_DROP_LEFT ? GTK_ALIGN_START
+		: zone == GSURF_WMUX_DROP_RIGHT ? GTK_ALIGN_END : GTK_ALIGN_FILL);
+	gtk_widget_set_valign(f->zone, zone == GSURF_WMUX_DROP_TOP ? GTK_ALIGN_START
+		: zone == GSURF_WMUX_DROP_BOTTOM ? GTK_ALIGN_END : GTK_ALIGN_FILL);
+	gtk_widget_set_size_request(f->zone,
+		(zone == GSURF_WMUX_DROP_LEFT || zone == GSURF_WMUX_DROP_RIGHT) ? MAX(width, 1) : -1,
+		(zone == GSURF_WMUX_DROP_TOP || zone == GSURF_WMUX_DROP_BOTTOM) ? MAX(height, 1) : -1);
+	gtk_widget_set_visible(f->zone, TRUE);
+}
+
+static gboolean
+on_drop_motion(GtkWidget *widget, gint x, gint y, gpointer user_data)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(user_data);
+	GsurfWmuxFrame *f = frame_of_drop(self, widget);
+	GsurfView *target = f != NULL ? gsurf_view_lookup(f->id) : NULL;
+
+	if (f == NULL || self->drag_view == 0 || target == NULL ||
+	    !gsurf_wmux_view_visible(self, target)) {
+		if (f != NULL)
+			frame_show_zone(self, f, -1);
+		return FALSE;
+	}
+	frame_show_zone(self, f, (gint)gsurf_wmux_drop_zone(gsurf_chrome_widget_get_width(widget),
+		gsurf_chrome_widget_get_height(widget), x, y, GSURF_WMUX_DROP_EDGE_PCT));
+	return TRUE;
+}
+
+static void
+on_drop_leave(GtkWidget *widget, gpointer user_data)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(user_data);
+	GsurfWmuxFrame *f = frame_of_drop(self, widget);
+
+	if (f != NULL)
+		frame_show_zone(self, f, -1);
+}
+
+/* The dragged tab dropped on a pane: put it there, then take the drop
+ * targets down (the drag's end would too). */
+static gboolean
+on_drop(GtkWidget *widget, gint x, gint y, gpointer user_data)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(user_data);
+	GsurfWmuxFrame *f = frame_of_drop(self, widget);
+	g_autoptr(GsurfView) view = NULL;
+	g_autoptr(GsurfView) target = NULL;
+	GsurfWmuxDrop zone;
+	gboolean done;
+
+	if (f == NULL || self->drag_view == 0 || gsurf_view_lookup(self->drag_view) == NULL ||
+	    gsurf_view_lookup(f->id) == NULL)
+		return FALSE;
+	/* Hold both: the drop may close a pane or replace a frame. */
+	view = g_object_ref(gsurf_view_lookup(self->drag_view));
+	target = g_object_ref(gsurf_view_lookup(f->id));
+	zone = gsurf_wmux_drop_zone(gsurf_chrome_widget_get_width(widget),
+		gsurf_chrome_widget_get_height(widget), x, y, GSURF_WMUX_DROP_EDGE_PCT);
+	done = gsurf_wmux_show_view_at(self, view, target, zone);
+	gsurf_wmux_ui_set_drag(self, NULL);
+	return done;
+}
+
+static const GsurfChromeDropFuncs drop_funcs = {
+	on_drop_motion,
+	on_drop_leave,
+	on_drop
+};
+
+void
+gsurf_wmux_ui_set_drag(GsurfWmuxModule *self, GsurfView *view)
+{
+	g_autofree gchar *want = NULL;
+	GHashTableIter iter;
+	gpointer value;
+
+	self->drag_view = view != NULL ? gsurf_view_get_id(view) : 0;
+	if (self->frames == NULL)
+		return;
+	/* The highlight wears the dragged tab's container colour. */
+	want = container_class(self, view);
+	g_hash_table_iter_init(&iter, self->frames);
+	while (g_hash_table_iter_next(&iter, NULL, &value)) {
+		GsurfWmuxFrame *f = value;
+		const gchar *have = g_object_get_data(G_OBJECT(f->zone), CTR_CLASS_DATA);
+
+		if (g_strcmp0(want, have) != 0) {
+			if (have != NULL)
+				gsurf_chrome_widget_remove_class(f->zone, have);
+			if (want != NULL)
+				gsurf_chrome_widget_add_class(f->zone, want);
+			g_object_set_data_full(G_OBJECT(f->zone), CTR_CLASS_DATA, g_strdup(want), g_free);
+		}
+		frame_show_zone(self, f, -1);
+		gtk_widget_set_visible(f->drop, self->drag_view != 0 &&
+			gsurf_wmux_grid_get_pane(f->frame) != GSURF_WMUX_GRID_PARKED);
+	}
+}
+
+/* The frame around @view: a bordered box holding an overlay with the web
+ * view, the (hidden) pane number and the (hidden) drop target. */
+static GsurfWmuxFrame *
+frame_new(GsurfWmuxModule *self, GsurfView *view)
 {
 	GsurfWmuxFrame *f = g_new0(GsurfWmuxFrame, 1);
 	GtkWidget *webview = gsurf_view_get_native_widget(view);
@@ -295,6 +454,8 @@ frame_new(GsurfView *view)
 
 	f->id = id;
 	f->frame = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+	/* frame_free() (a hash table destroy function) finds the module here. */
+	g_object_set_data(G_OBJECT(f->frame), FRAME_OWNER_DATA, self);
 	gsurf_chrome_widget_add_class(f->frame, GSURF_WMUX_PANE_CLASS);
 	g_object_set_data_full(G_OBJECT(f->frame), GSURF_WMUX_VIEW_ID_DATA,
 		g_memdup2(&id, sizeof(id)), g_free);
@@ -317,6 +478,31 @@ frame_new(GsurfView *view)
 	gtk_overlay_set_overlay_pass_through(GTK_OVERLAY(f->overlay), f->number, TRUE);
 #endif
 
+	/* The drop target: hidden (and, on GTK3, kept out of an ancestor's
+	 * show_all) until a sidebar drag; GTK3 needs a widget with its own
+	 * window to be a drag destination, so an event box. */
+	f->zone_shown = -1;
+	f->zone = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_widget_set_name(f->zone, GSURF_WMUX_DROP_ZONE_NAME);
+	gsurf_chrome_widget_add_class(f->zone, GSURF_WMUX_DROP_ZONE_CLASS);
+	gtk_widget_set_hexpand(f->zone, TRUE);
+	gtk_widget_set_vexpand(f->zone, TRUE);
+#ifdef GSURF_BACKEND_GTK4
+	f->drop = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+	gtk_box_append(GTK_BOX(f->drop), f->zone);
+#else
+	f->drop = gtk_event_box_new();
+	gtk_container_add(GTK_CONTAINER(f->drop), f->zone);
+#endif
+	gtk_widget_set_name(f->drop, GSURF_WMUX_DROP_NAME);
+	gsurf_chrome_widget_add_class(f->drop, GSURF_WMUX_DROP_CLASS);
+	gtk_widget_set_halign(f->drop, GTK_ALIGN_FILL);
+	gtk_widget_set_valign(f->drop, GTK_ALIGN_FILL);
+	g_object_set_data_full(G_OBJECT(f->drop), GSURF_WMUX_VIEW_ID_DATA,
+		g_memdup2(&id, sizeof(id)), g_free);
+	gtk_overlay_add_overlay(GTK_OVERLAY(f->overlay), f->drop);
+	gsurf_chrome_drop_target_add(f->drop, GSURF_LAYOUT_VIEW_MIME_TYPE, &drop_funcs, self);
+
 	if (webview != NULL && gtk_widget_get_parent(webview) == NULL) {
 		f->webview = g_object_ref(webview);
 		gtk_widget_set_hexpand(webview, TRUE);
@@ -334,8 +520,13 @@ frame_new(GsurfView *view)
 	if (f->webview != NULL)
 		gtk_widget_show(f->webview);
 	gtk_widget_set_no_show_all(f->number, TRUE);
+	gtk_widget_show(f->drop);
+	gtk_widget_set_no_show_all(f->drop, TRUE);
+	gtk_widget_set_no_show_all(f->zone, TRUE);
 #endif
 	gtk_widget_set_visible(f->number, FALSE);
+	gtk_widget_set_visible(f->zone, FALSE);
+	gtk_widget_set_visible(f->drop, self->drag_view != 0);
 	return f;
 }
 
@@ -346,6 +537,7 @@ frame_free(gpointer data)
 	GsurfWmuxFrame *f = data;
 	GtkWidget *parent;
 
+	gsurf_chrome_disconnect_dnd(f->drop, g_object_get_data(G_OBJECT(f->frame), FRAME_OWNER_DATA));
 	overlay_unset_main(f->overlay, f->webview);
 	parent = gtk_widget_get_parent(f->frame);
 	if (parent != NULL)
@@ -499,13 +691,14 @@ gsurf_wmux_ui_sync(GsurfWmuxModule *self)
 		if (id == self->removing)
 			continue;
 		if (f == NULL) {
-			f = frame_new(view);
+			f = frame_new(self, view);
 			g_hash_table_insert(self->frames, g_memdup2(&id, sizeof(id)), f);
 		}
 		if (tag == NULL) {
 			gsurf_wmux_grid_put(self->grid, f->frame, GSURF_WMUX_GRID_PARKED);
 			frame_style(self, f, view, FALSE);
 			gtk_widget_set_visible(f->number, FALSE);
+			gtk_widget_set_visible(f->drop, FALSE);
 			continue;
 		}
 		pane = GPOINTER_TO_UINT(tag) - 1;
@@ -518,6 +711,8 @@ gsurf_wmux_ui_sync(GsurfWmuxModule *self)
 			gtk_label_set_text(GTK_LABEL(f->number), number);
 		}
 		gtk_widget_set_visible(f->number, self->displaying);
+		/* A pane that appears mid-drag (a drop split one) gets a target. */
+		gtk_widget_set_visible(f->drop, self->drag_view != 0);
 	}
 	gsurf_wmux_grid_relayout(self->grid);
 
@@ -530,6 +725,10 @@ gsurf_wmux_ui_sync(GsurfWmuxModule *self)
 		if (self->window != NULL && self->installed)
 			gsurf_window_layout_notify_visible(self->window);
 	}
+
+	/* 4b. Tell the window (the tab sidebar) when the groups changed: the
+	 *     windows, their names, the current one, what their panes show. */
+	gsurf_wmux_notify_groups(self);
 
 	/* 5. The status line (window names, pane counter) and the chooser. */
 	gsurf_wmux_ui_update_status(self);
@@ -577,6 +776,35 @@ right_text(GsurfWmuxModule *self)
 	index = gsurf_wmux_layout_get_pane_index(win->layout, gsurf_wmux_layout_get_active(win->layout));
 	return g_strdup_printf("%d/%u%s", index + 1, gsurf_wmux_layout_get_n_panes(win->layout),
 		gsurf_wmux_layout_get_zoomed(win->layout) != GSURF_WMUX_PANE_NONE ? " Z" : "");
+}
+
+/* The status line's mode indicator follows the published input mode. */
+void
+gsurf_wmux_ui_update_mode(GsurfWmuxModule *self, GsurfModePolicy mode)
+{
+	static const gchar *const classes[] = {
+		"wmux-mode-normal", "wmux-mode-insert", "wmux-mode-follow",
+		"wmux-mode-find", "wmux-mode-passthrough", NULL
+	};
+	const gchar *label = gsurf_mode_policy_get_label(mode);
+	g_autofree gchar *text = NULL;
+	guint i;
+
+	if (self->status_mode == NULL)
+		return;
+	text = g_strdup_printf("-- %s --", label != NULL ? label : "?");
+	gtk_label_set_text(GTK_LABEL(self->status_mode), text);
+	for (i = 0; classes[i] != NULL; i++)
+		gsurf_chrome_widget_set_class(self->status_mode, classes[i], (guint)mode == i);
+	gtk_widget_set_visible(self->status_mode,
+		!(self->mode_hide_normal && mode == GSURF_MODE_NORMAL));
+}
+
+static void
+on_mode_changed(GsurfModuleManager *manager, GsurfModePolicy mode, gpointer user_data)
+{
+	(void)manager;
+	gsurf_wmux_ui_update_mode(GSURF_WMUX_MODULE(user_data), mode);
 }
 
 void
@@ -1076,6 +1304,12 @@ gsurf_wmux_ui_build(GsurfWmuxModule *self)
 	spacer = gtk_label_new("");
 	gtk_widget_set_hexpand(spacer, TRUE);
 	box_append(self->status_box, spacer, TRUE);
+	if (self->mode_indicator) {
+		self->status_mode = gtk_label_new("");
+		gtk_widget_set_name(self->status_mode, GSURF_WMUX_STATUS_MODE_NAME);
+		gsurf_chrome_widget_add_class(self->status_mode, "wmux-status-mode");
+		box_append(self->status_box, self->status_mode, FALSE);
+	}
 	self->status_right = gtk_label_new("");
 	gtk_widget_set_name(self->status_right, GSURF_WMUX_STATUS_RIGHT_NAME);
 	box_append(self->status_box, self->status_right, FALSE);
@@ -1095,6 +1329,14 @@ gsurf_wmux_ui_build(GsurfWmuxModule *self)
 	gsurf_chrome_widget_start_hidden(self->prompt_box);
 	gsurf_chrome_widget_manage_visibility(self->status_box);
 	gtk_widget_set_visible(self->status_box, self->status);
+
+	/* 6. The mode indicator follows the published input mode. */
+	if (self->status_mode != NULL) {
+		gsurf_chrome_widget_manage_visibility(self->status_mode);
+		self->mode_source = g_object_ref(gsurf_module_manager_get_default());
+		g_signal_connect(self->mode_source, "mode-changed", G_CALLBACK(on_mode_changed), self);
+		gsurf_wmux_ui_update_mode(self, gsurf_module_manager_get_mode(self->mode_source));
+	}
 }
 
 void
@@ -1114,6 +1356,10 @@ gsurf_wmux_ui_free(GsurfWmuxModule *self)
 	g_clear_pointer(&self->prompt_template, g_free);
 	g_clear_pointer(&self->prompt_command, g_free);
 	g_clear_pointer(&self->chooser_items, g_array_unref);
+	if (self->mode_source != NULL) {
+		g_signal_handlers_disconnect_by_data(self->mode_source, self);
+		g_clear_object(&self->mode_source);
+	}
 
 	/* Frames first: their web views must never die with the root. */
 	g_clear_pointer(&self->frames, g_hash_table_unref);
@@ -1135,6 +1381,7 @@ gsurf_wmux_ui_free(GsurfWmuxModule *self)
 	self->status_box = NULL;
 	self->status_windows = NULL;
 	self->status_right = NULL;
+	self->status_mode = NULL;
 	self->message = NULL;
 	self->prompt_box = NULL;
 	self->prompt_label = NULL;

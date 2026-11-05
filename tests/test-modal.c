@@ -215,11 +215,17 @@ key(GsurfModule *module, GsurfView *view, guint keyval)
 		keyval, 0, 0, GSURF_MODE_NORMAL);
 }
 
-/* INSERT publishes passthrough to the manager (the host drops bare keys). */
+/* INSERT publishes passthrough to the manager (the host drops bare keys),
+ * and the mode itself for mode indicators: the two always agree. */
 static gboolean
 inserting(void)
 {
-	return gsurf_module_manager_get_input_passthrough(gsurf_module_manager_get_default());
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	gboolean passthrough = gsurf_module_manager_get_input_passthrough(mgr);
+
+	g_assert_cmpint(passthrough, ==,
+		gsurf_module_manager_get_mode(mgr) == GSURF_MODE_INSERT);
+	return passthrough;
 }
 
 static void
@@ -271,6 +277,30 @@ test_insert_keys_default(void)
 		GSURF_ACTION_ENTER_NORMAL_MODE));
 	g_assert_false(inserting());
 	g_assert_nonnull(strstr(hv->script, ".blur()"));
+}
+
+/* The published mode follows every switch (FOLLOW included would need
+ * a page; INSERT and NORMAL here), and a deactivated modal module leaves
+ * NORMAL behind, passthrough off. */
+static void
+test_mode_published(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_assert_true(gsurf_module_activate(module));
+	g_assert_true(key(module, view, 'i'));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_INSERT);
+	gsurf_module_deactivate(module);
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_assert_false(inserting());
+	/* start_mode: insert publishes INSERT at configuration. */
+	configure_yaml(module, "modules:\n  modal:\n    start_mode: insert\n");
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_INSERT);
+	g_assert_true(key(module, view, KEY_ESCAPE));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
 }
 
 /* With a page field focused (NORMAL), bare keys are typing, never
@@ -411,6 +441,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/modal/normal-with-field", test_normal_with_field);
 	g_test_add_func("/gsurf/modal/insert-keys-config", test_insert_keys_config);
 	g_test_add_func("/gsurf/modal/gi", test_gi);
+	g_test_add_func("/gsurf/modal/mode-published", test_mode_published);
 	g_test_add_func("/gsurf/modal/keybind-list", test_keybind_list);
 	result = g_test_run();
 	/* The C config compiler may leave more than gsurf/cconfig behind (a

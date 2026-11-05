@@ -107,8 +107,9 @@ keybinds:
 mousebinds:
   "Button8": back                  # back thumb button
   "Button9": forward               # forward thumb button
-  "Ctrl+Button1": open-new-view
-  "Button2": open-new-view         # middle-click link -> new tab
+  "Ctrl+Button1": open-new-view-background  # Ctrl-click link -> background child tab
+  "Button2": open-new-view-background       # middle-click link -> background child tab
+  # open-new-view opens the link in a foreground tab instead
 
 # ===== Search engines (search-engines module) =====
 search_engines:
@@ -149,6 +150,11 @@ modules:
   chromebar:
     enabled: true
     key_focus: "Ctrl+l"
+    mode_indicator: true           # vim mode ("-- INSERT --") left of the bar
+    mode_hide_normal: false        # hide it in NORMAL mode
+    mode_normal_color: "#89b4fa"
+    mode_insert_color: "#a6e3a1"
+    mode_follow_color: "#f9e2af"
     position: top                  # top or bottom
     bg_color: "#1e1e2e"
     fg_color: "#cdd6f4"
@@ -239,6 +245,8 @@ modules:
     indent: 14                     # px per tree level (0-64)
     max_depth: 8                   # deepest drawn indentation (0-64)
     on_close_parent: promote       # promote | close_children
+    wmux_groups: true              # sidebar grouped by wmux window (with wmux)
+    background_label: "Background" # heading of tabs in no pane (grouped sidebar)
     key_sidebar: "Ctrl+Shift+greater"     # == Ctrl+Shift+period (Ctrl+Shift+.)
     key_collapse: "Ctrl+Shift+bracketleft"
     key_move_up: "Ctrl+Shift+Page_Up"
@@ -521,5 +529,10 @@ modules:
     status_fg: "#cdd6f4"
     status_current_fg: "#89b4fa"   # the current window's entry
     window_name_max: 20            # characters of a window name (1-200)
+    mode_indicator: true           # "-- INSERT --" in the status line
+    mode_hide_normal: false        # hide the indicator in NORMAL mode
+    mode_normal_color: "#89b4fa"
+    mode_insert_color: "#a6e3a1"
+    mode_follow_color: "#f9e2af"
 
   # --- AI modules (require the AI=1 build flag; deferred / not yet built) ---

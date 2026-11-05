@@ -21,9 +21,17 @@
 
 G_BEGIN_DECLS
 
-/* Append context-menu entries contributed by context-menu-provider
- * modules for @hit to @menu. */
-void gsurf_webkit_common_populate_menu(WebKitContextMenu *menu, WebKitHitTestResult *hit);
+/* GSURF_WEBKIT_MENU_NEW_TAB_ACTION: the name of the GAction behind the
+ * "Open Link in New Tab" item (tests find the item by it). */
+#define GSURF_WEBKIT_MENU_NEW_TAB_ACTION "gsurf-open-link-new-tab"
+
+/* Rework @menu for @view: on a link, when the host handles
+ * #GsurfView::new-view-requested, WebKit's "Open Link in New Window"
+ * (a popup, in gsurf a related tab) becomes "Open Link in New Tab" (a
+ * background tab, @view's child); then the entries contributed by
+ * context-menu-provider modules for @hit are appended. */
+void gsurf_webkit_common_populate_menu(GsurfView *view, WebKitContextMenu *menu,
+                                       WebKitHitTestResult *hit);
 
 /* Let download-handler modules choose the destination of @download. */
 void gsurf_webkit_common_track_download(WebKitDownload *download);

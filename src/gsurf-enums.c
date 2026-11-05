@@ -55,6 +55,15 @@ GSURF_DEFINE_ENUM_TYPE(GsurfChromeEdge, gsurf_chrome_edge, {
 	END_EV
 })
 
+GSURF_DEFINE_ENUM_TYPE(GsurfLayoutDropZone, gsurf_layout_drop_zone, {
+	EV(GSURF_LAYOUT_DROP_CENTER, "center"),
+	EV(GSURF_LAYOUT_DROP_LEFT, "left"),
+	EV(GSURF_LAYOUT_DROP_RIGHT, "right"),
+	EV(GSURF_LAYOUT_DROP_TOP, "top"),
+	EV(GSURF_LAYOUT_DROP_BOTTOM, "bottom"),
+	END_EV
+})
+
 GSURF_DEFINE_ENUM_TYPE(GsurfLrgRenderMode, gsurf_lrg_render_mode, {
 	EV(GSURF_LRG_RENDER_MODE_2D, "2d"),
 	EV(GSURF_LRG_RENDER_MODE_3D, "3d"),
@@ -214,6 +223,7 @@ GSURF_DEFINE_ENUM_TYPE(GsurfAction, gsurf_action, {
 	EV(GSURF_ACTION_FORM_AUTOFILL, "form-autofill"),
 	EV(GSURF_ACTION_PANE_SPLIT_RIGHT, "pane-split-right"),
 	EV(GSURF_ACTION_PANE_SPLIT_DOWN, "pane-split-down"),
+	EV(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND, "open-new-view-background"),
 	END_EV
 })
 
@@ -255,6 +265,19 @@ gsurf_action_to_string(GsurfAction action)
 	g_type_class_unref(klass);
 
 	return nick;
+}
+
+const gchar *
+gsurf_mode_policy_get_label(GsurfModePolicy mode)
+{
+	switch (mode) {
+	case GSURF_MODE_NORMAL:      return "NORMAL";
+	case GSURF_MODE_INSERT:      return "INSERT";
+	case GSURF_MODE_FOLLOW:      return "FOLLOW";
+	case GSURF_MODE_FIND:        return "FIND";
+	case GSURF_MODE_PASSTHROUGH: return "PASSTHROUGH";
+	default:                     return NULL;
+	}
 }
 
 const gchar *
@@ -313,6 +336,8 @@ gsurf_action_get_description(GsurfAction action)
 	case GSURF_ACTION_FORM_AUTOFILL: return "Fill the focused form from an autofill profile";
 	case GSURF_ACTION_PANE_SPLIT_RIGHT: return "Split the pane, the new pane on the right";
 	case GSURF_ACTION_PANE_SPLIT_DOWN: return "Split the pane, the new pane below";
+	case GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND:
+		return "Open in a new background tab";
 	case GSURF_ACTION_LAST:
 	default:                                return NULL;
 	}

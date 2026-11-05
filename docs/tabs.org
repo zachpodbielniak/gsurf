@@ -6,7 +6,7 @@
 The =tabs= module gives a window two views of its tabs, on GTK3 and GTK4 alike:
 
 - the *strip*: a row of flat tab buttons above (or below) the page, in window order;
-- the *tree sidebar*: a Sidebery-style vertical list beside the page, where each tab sits under the tab it was opened from.
+- the *tree sidebar*: a Sidebery-style vertical list beside the page, where each tab sits under the tab it was opened from. With the =wmux= module the sidebar is grouped by wmux window (see "Grouped by wmux window"), and tabs can be dragged from it into panes.
 
 It also owns the keyboard tab commands (new, close, next, previous, reopen) and the tree commands (toggle the sidebar, collapse a subtree, move a subtree up or down). The sidebar starts hidden; =Ctrl+Shift+.= shows it.
 
@@ -22,7 +22,7 @@ The module is three parts built into one =tabs.so=:
 
 ** Where the tree comes from
 
-The window's view order is the source of truth; the tree is derived from it. Every view records its opener at construction (=gsurf_view_new_full()=, used by =main.c= for links opened in a new view and popups, and by =modal= for =F= link hints). =gsurf_view_get_opener_id()= keeps that id after the opener closes. A view opened by the user (=tab-new=, startup, the MCP =open= tool) has no opener.
+The window's view order is the source of truth; the tree is derived from it. Every view records its opener at construction (=gsurf_view_new_full()=; see "Opened from a tab" for every path that sets one). =gsurf_view_get_opener_id()= keeps that id after the opener closes. A view opened by the user (=tab-new=, startup, the MCP =open= tool) has no opener.
 
 Each tab has a /logical parent/, initially its opener. The tree is built by walking the window order with a stack holding the path from a root to the previous tab:
 
@@ -64,6 +64,21 @@ A tab with children shows a twisty (=▾= expanded, =▸= collapsed). Collapsing
 - Collapsing a subtree that holds the active tab makes the collapsed tab active, so the active tab is always visible.
 - Activating a hidden tab by any means (=tab-next=, the strip, the host) expands all its collapsed ancestors.
 
+** Opened from a tab
+
+Every way of opening a page from a tab makes the new tab that tab's child, placed as its last child (Sidebery style):
+
+| How                                         | New tab is                    | Notes |
+|---------------------------------------------+-------------------------------+-------|
+| Middle click or =Ctrl+click= on a link      | a background child (default)  | The default mousebinds map =Button2= and =Ctrl+Button1= to =open-new-view-background=; bind them to =open-new-view= for a foreground child. Off a link the click is the engine's (paste, autoscroll). |
+| Page context menu: "Open Link in New Tab"   | a background child            | Replaces WebKit's "Open Link in New Window": gsurf runs one window per process, so that item only opened a popup tab sharing the page's session. The host opens the tab through =GsurfView::new-view-requested= (=gsurf_view_request_new_view()=); a host that does not connect it (an embedder) keeps WebKit's item. |
+| =target=_blank=, =window.open()=            | a foreground child, related   | A popup (=GsurfView::create-view=): it shares the page's web process and session so =window.opener= works, and it stays in the page's container. |
+| =modal= =F= link hints                      | a foreground child            | |
+| =Duplicate Tab= (context menu)              | a foreground child            | Same container. |
+| A tab moved to its host rule's container    | the same place                | The =containers= module replaces a tab whose first load lands on another container's host (=gsurf_window_replace_view()=): the new tab keeps the old one's place, parent (even one already closed: =GsurfView:opener-id=), children, collapse state, pane, and whether it was the active tab, so a background child stays a background child. |
+
+With a window layout (=wmux=), a background child is a background tab: it does not take a pane, and the grouped sidebar shows it under its parent's pane tab. A foreground child is shown in the active pane, like any activated tab.
+
 ** Moving subtrees
 
 =tab-move-up= and =tab-move-down= move the active tab together with its whole subtree past the previous or next *sibling* (and that sibling's subtree). A tab never changes parent this way; at its first or last sibling the command does nothing. The window's view order is updated to match.
@@ -86,9 +101,31 @@ Each row shows, left to right:
 - the title (or the URI, or "New Tab"), ellipsized, updated on =title-changed=;
 - a close button.
 
-The row is indented by =indent= pixels per level and the active tab is highlighted with =active_color=; a tab on screen in another pane gets =visible_color= (see "Tabs in panes"). Clicking a row activates its tab; a middle click closes it; a right click opens its context menu (see "Context menu" below). Clicks on the twisty and close buttons stay with those buttons.
+The row is indented by =indent= pixels per level and the active tab is highlighted with =active_color=; a tab on screen in another pane gets =visible_color= (see "Tabs in panes"). A primary click (pressed and released without dragging) activates its tab; a middle click closes it; a right click opens its context menu (see "Context menu" below). Clicks on the twisty and close buttons stay with those buttons. Pressing and dragging a row starts a drag (see "Drag and drop").
 
 Rows are kept and updated in place: adding, closing or moving a tab creates, removes or reorders one row, and each row only re-applies the properties (indentation, twisty, visibility, highlight, the in-pane style) that changed. The strip is simply rebuilt.
+
+** Drag and drop
+
+Each tab row is a drag source for a private, same-application target (=application/x-gsurf-view-id=, =GSURF_LAYOUT_VIEW_MIME_TYPE=, the view id as text) and a drop target for it:
+
+- *Onto another row*: the upper quarter of the row puts the dragged tab (with its subtree) right *before* that tab, as its sibling; the lower quarter puts it *after* that tab's whole subtree, as its sibling; the middle makes it that tab's *last child*. The row under the pointer shows where with a line above or below it, or a frame around it (CSS classes =gsurf-tab-drop-before=, =-after=, =-child=, in =fg_color=). A tab cannot be dropped on itself or into its own subtree (the drop is refused while hovering). The window's view order follows (=gsurf_tab_tree_move_to()=, then the order is applied with =gsurf_window_move_view()=). Group headings (see below) are no drop targets.
+- *Onto a pane* of a window layout: while a drag runs, the module tells the layout (=gsurf_window_layout_begin_view_drag()= / =_end_view_drag()=), and the layout takes drops on its own widgets; =wmux= shows the tab in a pane or splits one (=wmux.org=, "Dragging tabs into panes").
+
+Because a press may start a drag, the primary click acts on release; a drag never activates the tab. Both toolkits share the code through the compat header's DnD helpers (see "GTK3 and GTK4").
+
+** Grouped by wmux window
+
+When the window's layout has groups (=gsurf_window_layout_list_groups()=; =wmux='s windows) and =wmux_groups= is on (the default), the sidebar is grouped by them instead of being one opener tree:
+
+1. One *heading* per wmux window, in window order, labelled like wmux's status line: =<index>:<name>=, with =*= after the current window (=0:github*=), which also gets the =gsurf-tab-group-current= class (=visible_color=). Clicking a heading selects that window (=gsurf_window_layout_select_group()=).
+2. Under it, the tabs its panes show, in pane order (left to right, top to bottom), each with its container stripe and the usual active / in-pane styles.
+3. Under each pane tab, its descendants in the opener tree that no pane shows (background tabs), nested as in the tree. A descendant that is shown in a pane is listed under its own pane instead, with its subtree.
+4. A final heading, =background_label= (default =Background=), for the background tabs that descend from no pane tab, nested as in the tree. It is left out when there are none; clicking it collapses or expands it.
+
+Headings have a twisty: collapsing one hides its group (the collapse state is per window index and lasts until the module is reactivated). A tab row's twisty collapses its nested rows as in the plain tree. The headings follow =GsurfWindow::layout-groups-changed=, which wmux emits when a window is created, killed, renamed or selected, when a pane shows another tab, and when an automatically named window's active page changes title.
+
+Without a layout, with a layout that has no groups, or with =wmux_groups: false=, the sidebar is the plain opener tree exactly as described above; it switches back the moment wmux is deactivated (the window emits =layout-groups-changed= when a layout is removed). The strip stays flat in every case. The underlying tree (order, parents, collapse state) does not change when the sidebar regroups, so sessions save and restore it as before.
 
 ** Tabs in panes
 
@@ -144,6 +181,8 @@ Under =modules.tabs= (all optional; =data/default-config.yaml= spells out the de
 | =indent=              | =14=                     | Pixels per tree level, 0 to 64. |
 | =max_depth=           | =8=                      | Deepest indentation drawn, 0 to 64. |
 | =on_close_parent=     | =promote=                | =promote= or =close_children=. |
+| =wmux_groups=         | =true=                   | Group the sidebar by the window layout's groups (wmux windows); =false= keeps the opener tree. See "Grouped by wmux window". |
+| =background_label=    | =Background=             | Heading of the background-tabs group in the grouped sidebar; a non-empty string. |
 | =key_new=             | =Ctrl+t=                 | =tab-new= |
 | =key_close=           | =Ctrl+w=                 | =tab-close= |
 | =key_next=            | =Ctrl+Tab=               | =tab-next= |
@@ -205,6 +244,9 @@ The UI is a single source file built against either toolkit through =modules/inc
 | =gsurf_chrome_image_set_native()= | =cairo_surface_t=, scaled into a 16x16 surface | =GdkPaintable= with a pixel size |
 | =gsurf_chrome_css_provider_new()= / =_reload()= / =_remove()= | provider on the default screen | provider on the default display |
 | =gsurf_chrome_clickable_new()= / =gsurf_chrome_connect_click()= / =_disconnect_click()= | a =GtkEventBox= and =button-press-event= | the widget itself and one =GtkGestureClick= per button, named =gsurf-chrome-click-<n>= |
+| =gsurf_chrome_connect_release()= | =button-release-event= (a drag grabs the pointer, so no release follows one) | a =GtkGestureClick= named =gsurf-chrome-release-<n>=, ="released"= (a drag source claims the sequence, cancelling it) |
+| =gsurf_chrome_drag_source_add()= / =_drop_target_add()= / =_disconnect_dnd()= | =gtk_drag_source_set()= / =gtk_drag_dest_set()= with a same-app target; =drag-begin=, =drag-end=, =drag-data-get=, =drag-motion=, =drag-leave=, =drag-drop= | a =GtkDragSource= (=gsurf-chrome-drag-source=) and a =GtkDropTargetAsync= (=gsurf-chrome-drop-target=) for the mime type |
+| =gsurf_chrome_widget_get_width()= / =_get_height()= | allocated size | =gtk_widget_get_width()= / =_get_height()= |
 
 Click helpers ignore presses on a =GtkButton= nested in the clickable widget (GTK3: the window under the press belongs to a button; GTK4: =gtk_widget_pick()= finds one), so the twisty and close buttons never also activate the row.
 
@@ -219,5 +261,7 @@ The module follows the chrome module rules (=docs/modules.org=, "Chrome module l
 
 - =tests/test-tab-tree.c= (headless, part of =make test=): the model compiled in directly (placement after the last descendant, nesting, promote and close_children, collapse and expansion, moving subtrees, =max_depth=, orphaned openers, rebuilding from the window order, handing a tab's place to its replacement (=gsurf_tab_tree_replace()=: position, parent, children, collapse state, refusals), a randomized 4000-step stress run checking the block invariants, a 2000-tab sync), and the real =tabs.so= configuration (defaults, custom and empty keys, a second =configure()= back to defaults, the shipped default config parsing without warnings, and every bad value warning).
 - =tests/test-chrome-lifecycle.c= (=make test-gui=, both backends): strip and sidebar lifetime (deactivate twice, reactivate, repeated disposal, the window dying first), toggling by =Ctrl+Shift+.= and by action, rows and indentation following the tree, =max_depth=, collapse by action, key and twisty, expansion on activation, move up/down by action and key, external reorders, row clicks and middle clicks, the close button, promote and close_children (including the last-view rule), title and favicon updates, container stripes following the registry (colour, name, added, removed, a malformed colour), strip hiding, sidebar position and width, kiosk, and the context menu without containers (entries per tab, collapse/expand, Close and Close Children acting on the right-clicked tab, the strip opening the same menu, no menu widget off screen, actions dropped on deactivation). With a fake =GsurfWindowLayout= installed on the stand-in window: the in-pane classes following =visible-views-changed= (the active tab keeps only the active style, the marks follow pane changes and activation, nothing is marked without a layout, =visible_color= reaches the stylesheet, a bad one warns, a second =configure()= restores the default, deactivation disconnects the signal), and the Open in Split entries (absent without a layout, dispatching =pane-split-right= / =pane-split-down= with the right-clicked tab's view to a stand-in pane module, also from the strip, no-ops once the layout is gone or the tab closed).
-- =tests/test-tabs-webkit.c= (=make test-gui=, both backends): the sidebar keeps exactly =sidebar_width= in a real window with a long tab title.
+- =tests/test-tab-tree.c= also covers =gsurf_tab_tree_move_to()= (before, after, under; refusals; a descendant moved out of and back into its ancestor) and the display rows: the plain tree with collapse, and the grouped rows (pane order, background descendants nested under their pane tab, a descendant in a pane listed under its own pane, collapsed headings, empty groups, a tab listed by two groups, no groups, an empty tree).
+- =tests/test-tabs-webkit.c= (=make test-gui=, both backends): the sidebar keeps exactly =sidebar_width= in a real window with a long tab title; rows re-parent by drag and drop through their real drag source and drop target handlers (before, after, under, a refused drop into the own subtree, the content provider carrying the private mime type on GTK4, no indicator left behind, the active tab unchanged); "Open Link in New Tab" from a page's context menu opens a background child placed as the page's last child.
+- =tests/test-wmux-webkit.c= (=make test-gui=, both backends) covers the wmux side: drag into panes, the grouped sidebar (split, background children, a new window, rename, a heading click, collapse, kill, wmux off and =wmux_groups: false= back to the plain tree) and every way of opening a tab from a tab with wmux on.
 - =tests/test-containers-module-webkit.c= (=make test-gui=, both backends), case =tabs-context-menu=: with the =containers= module enabled, in a real window, a right click on a row opens a real menu listing the containers with the current one checked; Reopen in Container moves the tab to Media in place with its child kept under it; =container-reopen-next= keeps the child too; Duplicate opens a child copy in the same container; Close Children closes the subtree; Close is disabled on the last tab.

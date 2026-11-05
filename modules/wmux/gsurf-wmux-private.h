@@ -60,6 +60,9 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_DEFAULT_STATUS_FG           "#cdd6f4"
 #define GSURF_WMUX_DEFAULT_STATUS_CURRENT_FG   "#89b4fa"
 #define GSURF_WMUX_DEFAULT_WINDOW_NAME_MAX     (20)
+#define GSURF_WMUX_DEFAULT_MODE_NORMAL_COLOR   "#89b4fa"
+#define GSURF_WMUX_DEFAULT_MODE_INSERT_COLOR   "#a6e3a1"
+#define GSURF_WMUX_DEFAULT_MODE_FOLLOW_COLOR   "#f9e2af"
 
 /* The session name the status line shows ("[gsurf]"). */
 #define GSURF_WMUX_SESSION_NAME "gsurf"
@@ -73,12 +76,15 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_STATUS_NAME         "gsurf-wmux-status"
 #define GSURF_WMUX_STATUS_WINDOWS_NAME "gsurf-wmux-status-windows"
 #define GSURF_WMUX_STATUS_RIGHT_NAME   "gsurf-wmux-status-right"
+#define GSURF_WMUX_STATUS_MODE_NAME    "gsurf-wmux-status-mode"
 #define GSURF_WMUX_MESSAGE_NAME        "gsurf-wmux-message"
 #define GSURF_WMUX_PROMPT_NAME         "gsurf-wmux-prompt"
 #define GSURF_WMUX_PROMPT_LABEL_NAME   "gsurf-wmux-prompt-label"
 #define GSURF_WMUX_PROMPT_ENTRY_NAME   "gsurf-wmux-prompt-entry"
 #define GSURF_WMUX_CHOOSER_NAME        "gsurf-wmux-chooser"
 #define GSURF_WMUX_PANE_NUMBER_NAME    "gsurf-wmux-pane-number"
+#define GSURF_WMUX_DROP_NAME           "gsurf-wmux-drop"
+#define GSURF_WMUX_DROP_ZONE_NAME      "gsurf-wmux-drop-zone"
 
 /* CSS classes. */
 #define GSURF_WMUX_PANE_CLASS           "wmux-pane"
@@ -89,6 +95,8 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_STATUS_CURRENT_CLASS "wmux-status-current"
 #define GSURF_WMUX_CHOOSER_ROW_CLASS    "wmux-chooser-row"
 #define GSURF_WMUX_CHOOSER_SEL_CLASS    "wmux-chooser-selected"
+#define GSURF_WMUX_DROP_CLASS           "wmux-drop"
+#define GSURF_WMUX_DROP_ZONE_CLASS      "wmux-drop-zone"
 
 /* Object data: on the module, its GtkCssProvider (borrowed) while the UI
  * exists; on a pane frame, the id of the view it shows (a guint64*); on a
@@ -120,6 +128,10 @@ typedef struct {
  * @overlay: the GtkOverlay holding the web view and @number
  * @number: the display-panes number label
  * @webview: the view's widget while it is parented here (a reference)
+ * @drop: the drop target over the web view, shown only while a tab is
+ *   dragged (so the page keeps every other pointer event)
+ * @zone: the highlight inside @drop: where a drop would put the tab
+ * @zone_shown: the zone highlighted (a #GsurfWmuxDrop), or -1
  *
  * The widgets around one visible view.
  */
@@ -129,6 +141,9 @@ typedef struct {
 	GtkWidget *overlay;
 	GtkWidget *number;
 	GtkWidget *webview;
+	GtkWidget *drop;
+	GtkWidget *zone;
+	gint       zone_shown;
 } GsurfWmuxFrame;
 
 /* What the status-line entry is asking for. */
@@ -176,6 +191,11 @@ struct _GsurfWmuxModule
 	gchar             *status_fg;
 	gchar             *status_current_fg;
 	gint               window_name_max;
+	gboolean           mode_indicator;    /* "-- INSERT --" in the status line */
+	gboolean           mode_hide_normal;
+	gchar             *mode_normal_color;
+	gchar             *mode_insert_color;
+	gchar             *mode_follow_color;
 
 	/* --- Runtime (activate() .. deactivate()) --- */
 	GsurfWindow       *window;            /* weak: cleanup when it finalizes */
@@ -189,6 +209,8 @@ struct _GsurfWmuxModule
 	gint               in_activate;       /* activate_view nesting depth */
 	guint64            removing;          /* the view remove_view handles */
 	gchar             *visible_sig;       /* the visible views at the last sync */
+	gchar             *groups_sig;        /* the groups at the last notification */
+	guint64            drag_view;         /* the tab being dragged in, or 0 */
 
 	/* Keys. */
 	gboolean           prefix_active;     /* the next key is a prefix command */
@@ -207,6 +229,8 @@ struct _GsurfWmuxModule
 	GtkWidget         *status_box;
 	GtkWidget         *status_windows;    /* box of window buttons */
 	GtkWidget         *status_right;      /* "2/3 Z" */
+	GtkWidget         *status_mode;       /* "-- INSERT --", or NULL */
+	GsurfModuleManager *mode_source;      /* whose mode we show (ref) */
 	GtkWidget         *message;           /* a command error */
 	GtkWidget         *prompt_box;
 	GtkWidget         *prompt_label;
@@ -269,6 +293,13 @@ G_GNUC_INTERNAL void     gsurf_wmux_new_window(GsurfWmuxModule *self, const gcha
                                                const gchar *uri);
 G_GNUC_INTERNAL void     gsurf_wmux_break_pane(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void     gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name);
+/* Show @view (a view of the window) in place of (CENTER) or beside @target
+ * (a view on screen): see wmux_show_view_at() in gsurf-wmux-session.c. */
+G_GNUC_INTERNAL gboolean gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view,
+                                                 GsurfView *target, GsurfWmuxDrop zone);
+/* Tell the window when the groups (the tmux windows: names, current,
+ * the views their panes show) changed since the last call. */
+G_GNUC_INTERNAL void     gsurf_wmux_notify_groups(GsurfWmuxModule *self);
 /* After a model change in the current window: make the active pane's view
  * the window's active view and focus it, and bring the widgets in line. */
 G_GNUC_INTERNAL void     gsurf_wmux_show_active(GsurfWmuxModule *self);
@@ -288,6 +319,8 @@ G_GNUC_INTERNAL void      gsurf_wmux_ui_drop_frame(GsurfWmuxModule *self, guint6
 G_GNUC_INTERNAL void      gsurf_wmux_ui_clear_frames(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_update_status(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_update_css(GsurfWmuxModule *self);
+/* Show @mode ("-- INSERT --") in the status line's mode indicator. */
+G_GNUC_INTERNAL void      gsurf_wmux_ui_update_mode(GsurfWmuxModule *self, GsurfModePolicy mode);
 /* The status line as plain text: "[gsurf] 0:a* 1:b-" + "  " + "2/3 Z". */
 G_GNUC_INTERNAL gchar    *gsurf_wmux_ui_status_text(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_message(GsurfWmuxModule *self, const gchar *text);
@@ -295,6 +328,9 @@ G_GNUC_INTERNAL void      gsurf_wmux_ui_prompt(GsurfWmuxModule *self, GsurfWmuxP
                                                const gchar *prompt, const gchar *initial);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_prompt_close(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_display_panes(GsurfWmuxModule *self, gboolean show);
+/* A tab drag from chrome began (@view) or ended (NULL): show or hide the
+ * drop targets over the panes. */
+G_GNUC_INTERNAL void      gsurf_wmux_ui_set_drag(GsurfWmuxModule *self, GsurfView *view);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_open(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_close(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_refresh(GsurfWmuxModule *self);

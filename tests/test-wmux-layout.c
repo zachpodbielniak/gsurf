@@ -1581,6 +1581,40 @@ test_fuzz(void)
 	}
 }
 
+/* ------------------------------------------------------------------ */
+/* Drop zones                                                          */
+/* ------------------------------------------------------------------ */
+
+/* The outer 25% of each side is that edge, the rest the centre; where
+ * two bands meet the one the point is deeper into wins. */
+static void
+test_drop_zone(void)
+{
+	/* 1. Centre, and the four edge bands of a 400x200 pane. */
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 200, 100, 25), ==, GSURF_WMUX_DROP_CENTER);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 100, 100, 25), ==, GSURF_WMUX_DROP_CENTER);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 99, 100, 25), ==, GSURF_WMUX_DROP_LEFT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 0, 100, 25), ==, GSURF_WMUX_DROP_LEFT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 301, 100, 25), ==, GSURF_WMUX_DROP_RIGHT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 400, 100, 25), ==, GSURF_WMUX_DROP_RIGHT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 200, 49, 25), ==, GSURF_WMUX_DROP_TOP);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 200, 151, 25), ==, GSURF_WMUX_DROP_BOTTOM);
+
+	/* 2. Corners: the relatively nearer edge. */
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 10, 40, 25), ==, GSURF_WMUX_DROP_LEFT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 80, 5, 25), ==, GSURF_WMUX_DROP_TOP);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 395, 195, 25), ==, GSURF_WMUX_DROP_RIGHT);
+
+	/* 3. Out of range points clamp; a band of 0 is all centre; bands
+	 *    over 50% are 50%; a pane without size is all centre. */
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, -50, 100, 25), ==, GSURF_WMUX_DROP_LEFT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 999, 100, 25), ==, GSURF_WMUX_DROP_RIGHT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 0, 0, 0), ==, GSURF_WMUX_DROP_CENTER);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, 200, 190, 100, 90), ==, GSURF_WMUX_DROP_LEFT);
+	g_assert_cmpint(gsurf_wmux_drop_zone(0, 200, 0, 0, 25), ==, GSURF_WMUX_DROP_CENTER);
+	g_assert_cmpint(gsurf_wmux_drop_zone(400, -1, 0, 0, 25), ==, GSURF_WMUX_DROP_CENTER);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -1600,6 +1634,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/wmux-layout/parse-errors", test_parse_errors);
 	g_test_add_func("/gsurf/wmux-layout/state", test_state);
 	g_test_add_func("/gsurf/wmux-layout/state-errors", test_state_errors);
+	g_test_add_func("/gsurf/wmux-layout/drop-zone", test_drop_zone);
 	g_test_add_func("/gsurf/wmux-layout/stress", test_stress);
 	g_test_add_func("/gsurf/wmux-layout/fuzz", test_fuzz);
 	return g_test_run();

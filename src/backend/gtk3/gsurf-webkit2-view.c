@@ -66,7 +66,7 @@ on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu, GdkEvent *event,
 {
 	if (gsurf_kiosk_is_enabled())
 		return TRUE;
-	gsurf_webkit_common_populate_menu(menu, hit_result);
+	gsurf_webkit_common_populate_menu(GSURF_VIEW(user_data), menu, hit_result);
 	return FALSE;   /* keep the (augmented) menu */
 }
 

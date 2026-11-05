@@ -88,6 +88,35 @@ void               gsurf_module_manager_set_input_passthrough(GsurfModuleManager
  */
 gboolean           gsurf_module_manager_get_input_passthrough(GsurfModuleManager *self);
 
+/**
+ * gsurf_module_manager_set_mode:
+ * @self: a #GsurfModuleManager
+ * @mode: the input mode now in effect
+ *
+ * Publishes the input mode of the module that owns the keyboard modes
+ * (the modal module: NORMAL, INSERT, FOLLOW while hints are up), so chrome
+ * can show it (the chromebar's and wmux's "-- INSERT --" indicators).
+ * Emits #GsurfModuleManager::mode-changed and notifies
+ * #GsurfModuleManager:mode when the mode changes; setting the current
+ * mode again does nothing. It does not change the input passthrough
+ * (gsurf_module_manager_set_input_passthrough()), which stays the
+ * modal module's separate decision.
+ *
+ * Since: 0.4.2
+ */
+void               gsurf_module_manager_set_mode(GsurfModuleManager *self, GsurfModePolicy mode);
+
+/**
+ * gsurf_module_manager_get_mode:
+ * @self: a #GsurfModuleManager
+ *
+ * Returns: the input mode last published with
+ *   gsurf_module_manager_set_mode(); %GSURF_MODE_NORMAL until then
+ *
+ * Since: 0.4.2
+ */
+GsurfModePolicy    gsurf_module_manager_get_mode(GsurfModuleManager *self);
+
 /* --- Module search paths (for embedders / non-CLI hosts) ---
  *
  * The library never loads modules on its own: a host configures one or more

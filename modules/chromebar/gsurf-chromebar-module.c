@@ -10,6 +10,12 @@
  * configured key (Ctrl+l); Escape restores the URI and returns focus to
  * the page, as does loading a URI with Enter. Builds against GTK3 and
  * GTK4 through the module-private modules/include/gsurf-chrome-compat.h.
+ *
+ * Left of the entry, a vim-style mode indicator ("-- INSERT --") follows
+ * the input mode the modal module publishes on the module manager
+ * (GsurfModuleManager::mode-changed); mode_indicator: false leaves it
+ * out, mode_hide_normal: true hides it in NORMAL mode, and each mode has
+ * its own colour.
  */
 
 #include <gsurf/gsurf.h>
@@ -22,9 +28,29 @@
 G_DECLARE_FINAL_TYPE(GsurfChromebarModule, gsurf_chromebar_module,
                      GSURF, CHROMEBAR_MODULE, GsurfModule)
 
+/* Defaults of the mode indicator (Catppuccin Mocha: blue, green, yellow,
+ * and peach for find / passthrough). */
+#define DEFAULT_MODE_NORMAL_COLOR "#89b4fa"
+#define DEFAULT_MODE_INSERT_COLOR "#a6e3a1"
+#define DEFAULT_MODE_FOLLOW_COLOR "#f9e2af"
+#define DEFAULT_MODE_OTHER_COLOR  "#fab387"
+
+/* Widget names the tests (and user CSS) can rely on. */
+#define CHROMEBAR_NAME      "gsurf-chromebar"
+#define CHROMEBAR_MODE_NAME "gsurf-chromebar-mode"
+
 struct _GsurfChromebarModule
 {
 	GsurfModule parent_instance;
+	GtkWidget *bar;         /* [mode][entry], the chrome widget (retained) */
+	GtkWidget *mode;        /* the mode label, or NULL without an indicator */
+	GtkCssProvider *css;    /* the indicator's colours */
+	GsurfModuleManager *manager; /* whose mode we follow (ref) */
+	gboolean   mode_indicator;
+	gboolean   mode_hide_normal;
+	gchar     *mode_normal_color;
+	gchar     *mode_insert_color;
+	gchar     *mode_follow_color;
 	GtkWidget *entry;
 	GsurfWindow *window; /* weak; the host may destroy it before the module */
 	gchar     *key_focus;
@@ -137,6 +163,52 @@ on_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
 	track_view(GSURF_CHROMEBAR_MODULE(user_data), view);
 }
 
+/* --- Mode indicator --- */
+
+/* "-- INSERT --" with the mode's class (gsurf-mode-insert, ...), hidden
+ * in NORMAL with mode_hide_normal. */
+static void
+update_mode(GsurfChromebarModule *self, GsurfModePolicy mode)
+{
+	static const gchar *const classes[] = {
+		"gsurf-mode-normal", "gsurf-mode-insert", "gsurf-mode-follow",
+		"gsurf-mode-find", "gsurf-mode-passthrough", NULL
+	};
+	const gchar *label = gsurf_mode_policy_get_label(mode);
+	g_autofree gchar *text = NULL;
+	guint i;
+
+	if (self->mode == NULL)
+		return;
+	text = g_strdup_printf("-- %s --", label != NULL ? label : "?");
+	gtk_label_set_text(GTK_LABEL(self->mode), text);
+	for (i = 0; classes[i] != NULL; i++)
+		gsurf_chrome_widget_set_class(self->mode, classes[i], (guint)mode == i);
+	gtk_widget_set_visible(self->mode,
+		!(self->mode_hide_normal && mode == GSURF_MODE_NORMAL));
+}
+
+static void
+on_mode_changed(GsurfModuleManager *manager, GsurfModePolicy mode, gpointer user_data)
+{
+	(void)manager;
+	update_mode(GSURF_CHROMEBAR_MODULE(user_data), mode);
+}
+
+static gchar *
+build_css(GsurfChromebarModule *self)
+{
+	return g_strdup_printf(
+		"label.gsurf-chromebar-mode { font-weight: bold; font-family: monospace;"
+		" padding: 0px 6px; }\n"
+		"label.gsurf-mode-normal { color: %s; }\n"
+		"label.gsurf-mode-insert { color: %s; }\n"
+		"label.gsurf-mode-follow { color: %s; }\n"
+		"label.gsurf-mode-find, label.gsurf-mode-passthrough { color: "
+		DEFAULT_MODE_OTHER_COLOR "; }\n",
+		self->mode_normal_color, self->mode_insert_color, self->mode_follow_color);
+}
+
 static gboolean
 gsurf_chromebar_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
                                  guint keyval, guint keycode, guint state, GsurfModePolicy mode)
@@ -213,13 +285,35 @@ gsurf_chromebar_activate(GsurfModule *module)
 	if (gsurf_kiosk_is_enabled())
 		return TRUE;
 
+	/* 1. The bar: [mode indicator][entry]. Retain the widgets even if
+	 *    the host destroys its container first. */
+	self->bar = g_object_ref_sink(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0));
+	gtk_widget_set_name(self->bar, CHROMEBAR_NAME);
 	self->entry = gtk_entry_new();
-	/* Retain the widget even if the host destroys its container first. */
 	g_object_ref_sink(self->entry);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(self->entry), "Enter URL or search...");
 	g_signal_connect(self->entry, "activate", G_CALLBACK(on_entry_activate), self);
 	gsurf_chrome_connect_key_press(self->entry, on_entry_key_press, self);
-	gsurf_window_add_top_widget(window, self->entry);
+	if (self->mode_indicator) {
+		g_autofree gchar *css = build_css(self);
+
+		self->css = gsurf_chrome_css_provider_new(css);
+		self->mode = g_object_ref_sink(gtk_label_new(""));
+		gtk_widget_set_name(self->mode, CHROMEBAR_MODE_NAME);
+		gsurf_chrome_widget_add_class(self->mode, "gsurf-chromebar-mode");
+		gsurf_chrome_box_pack(self->bar, self->mode, FALSE, 0);
+	}
+	gsurf_chrome_box_pack(self->bar, self->entry, TRUE, 0);
+	gsurf_window_add_top_widget(window, self->bar);
+	if (self->mode != NULL)
+		gsurf_chrome_widget_manage_visibility(self->mode);
+
+	/* 2. Follow the published input mode. */
+	self->manager = g_object_ref(gsurf_module_manager_get_default());
+	if (self->mode != NULL) {
+		g_signal_connect(self->manager, "mode-changed", G_CALLBACK(on_mode_changed), self);
+		update_mode(self, gsurf_module_manager_get_mode(self->manager));
+	}
 
 	self->window = window;
 	g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&self->window);
@@ -229,6 +323,42 @@ gsurf_chromebar_activate(GsurfModule *module)
 	return TRUE;
 }
 
+/* A CSS colour, validated with GdkRGBA and stored normalized; an
+ * invalid one warns and keeps the current value. */
+static void
+read_color(YamlMapping *m, const gchar *member, gchar **field)
+{
+	const gchar *text;
+	GdkRGBA rgba;
+
+	if (!yaml_mapping_has_member(m, member))
+		return;
+	text = yaml_mapping_get_string_member(m, member);
+	if (text == NULL || !gdk_rgba_parse(&rgba, text)) {
+		g_warning("chromebar.%s: '%s' is not a CSS colour; keeping %s",
+		          member, text != NULL ? text : "", *field);
+		return;
+	}
+	g_free(*field);
+	*field = gdk_rgba_to_string(&rgba);
+}
+
+/* The indicator's options back to their defaults. */
+static void
+reset_mode_config(GsurfChromebarModule *self)
+{
+	self->mode_indicator = TRUE;
+	self->mode_hide_normal = FALSE;
+	g_free(self->mode_normal_color);
+	g_free(self->mode_insert_color);
+	g_free(self->mode_follow_color);
+	self->mode_normal_color = g_strdup(DEFAULT_MODE_NORMAL_COLOR);
+	self->mode_insert_color = g_strdup(DEFAULT_MODE_INSERT_COLOR);
+	self->mode_follow_color = g_strdup(DEFAULT_MODE_FOLLOW_COLOR);
+}
+
+/* The indicator options start from their defaults on every call; they
+ * take effect at the next activation. */
 static void
 gsurf_chromebar_configure(GsurfModule *module, gpointer config_ptr)
 {
@@ -237,6 +367,7 @@ gsurf_chromebar_configure(GsurfModule *module, gpointer config_ptr)
 	YamlNode *node;
 	YamlMapping *m;
 
+	reset_mode_config(self);
 	node = gsurf_config_get_module_node(config, "chromebar");
 	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
 		return;
@@ -245,6 +376,13 @@ gsurf_chromebar_configure(GsurfModule *module, gpointer config_ptr)
 		g_free(self->key_focus);
 		self->key_focus = g_strdup(yaml_mapping_get_string_member(m, "key_focus"));
 	}
+	if (yaml_mapping_has_member(m, "mode_indicator"))
+		self->mode_indicator = yaml_mapping_get_boolean_member(m, "mode_indicator");
+	if (yaml_mapping_has_member(m, "mode_hide_normal"))
+		self->mode_hide_normal = yaml_mapping_get_boolean_member(m, "mode_hide_normal");
+	read_color(m, "mode_normal_color", &self->mode_normal_color);
+	read_color(m, "mode_insert_color", &self->mode_insert_color);
+	read_color(m, "mode_follow_color", &self->mode_follow_color);
 }
 
 /* Tear down callbacks and chrome before releasing the module's storage. */
@@ -259,11 +397,23 @@ gsurf_chromebar_deactivate(GsurfModule *module)
 		self->window = NULL;
 	}
 	track_view(self, NULL);
+	if (self->manager != NULL) {
+		g_signal_handlers_disconnect_by_data(self->manager, self);
+		g_clear_object(&self->manager);
+	}
 	if (self->entry != NULL) {
 		gsurf_chrome_disconnect_key_press(self->entry, self);
 		g_signal_handlers_disconnect_by_data(self->entry, self);
-		gsurf_chrome_widget_detach(self->entry);
-		g_clear_object(&self->entry);
+	}
+	if (self->bar != NULL) {
+		gsurf_chrome_widget_detach(self->bar);
+		g_clear_object(&self->bar);
+	}
+	g_clear_object(&self->entry);
+	g_clear_object(&self->mode);
+	if (self->css != NULL) {
+		gsurf_chrome_css_provider_remove(self->css);
+		g_clear_object(&self->css);
 	}
 }
 
@@ -280,6 +430,9 @@ gsurf_chromebar_module_finalize(GObject *object)
 {
 	GsurfChromebarModule *self = GSURF_CHROMEBAR_MODULE(object);
 	g_clear_pointer(&self->key_focus, g_free);
+	g_clear_pointer(&self->mode_normal_color, g_free);
+	g_clear_pointer(&self->mode_insert_color, g_free);
+	g_clear_pointer(&self->mode_follow_color, g_free);
 	G_OBJECT_CLASS(gsurf_chromebar_module_parent_class)->finalize(object);
 }
 
@@ -302,6 +455,7 @@ static void
 gsurf_chromebar_module_init(GsurfChromebarModule *self)
 {
 	self->key_focus = g_strdup("Ctrl+l");
+	reset_mode_config(self);
 }
 
 G_MODULE_EXPORT GType

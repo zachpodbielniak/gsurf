@@ -53,7 +53,8 @@ static const gchar *const known_keys[] = {
 	"border_width", "active_border_width", "border_color", "active_border_color",
 	"container_colors", "inactive_opacity", "active_brighten", "status",
 	"status_position", "status_bg", "status_fg", "status_current_fg",
-	"window_name_max", NULL
+	"window_name_max", "mode_indicator", "mode_hide_normal", "mode_normal_color",
+	"mode_insert_color", "mode_follow_color", NULL
 };
 
 /* ------------------------------------------------------------------ */
@@ -1044,6 +1045,11 @@ reset_config(GsurfWmuxModule *self)
 	set_string(&self->status_fg, GSURF_WMUX_DEFAULT_STATUS_FG);
 	set_string(&self->status_current_fg, GSURF_WMUX_DEFAULT_STATUS_CURRENT_FG);
 	self->window_name_max = GSURF_WMUX_DEFAULT_WINDOW_NAME_MAX;
+	self->mode_indicator = TRUE;
+	self->mode_hide_normal = FALSE;
+	set_string(&self->mode_normal_color, GSURF_WMUX_DEFAULT_MODE_NORMAL_COLOR);
+	set_string(&self->mode_insert_color, GSURF_WMUX_DEFAULT_MODE_INSERT_COLOR);
+	set_string(&self->mode_follow_color, GSURF_WMUX_DEFAULT_MODE_FOLLOW_COLOR);
 }
 
 /* The default table binds C-b to send-prefix; with another prefix that
@@ -1122,6 +1128,11 @@ gsurf_wmux_configure(GsurfModule *module, gpointer config_ptr)
 	read_color(m, "status_fg", &self->status_fg);
 	read_color(m, "status_current_fg", &self->status_current_fg);
 	read_int(m, "window_name_max", 1, 200, &self->window_name_max);
+	read_bool(m, "mode_indicator", &self->mode_indicator);
+	read_bool(m, "mode_hide_normal", &self->mode_hide_normal);
+	read_color(m, "mode_normal_color", &self->mode_normal_color);
+	read_color(m, "mode_insert_color", &self->mode_insert_color);
+	read_color(m, "mode_follow_color", &self->mode_follow_color);
 }
 
 static void
@@ -1144,6 +1155,9 @@ gsurf_wmux_module_finalize(GObject *object)
 	g_clear_pointer(&self->status_bg, g_free);
 	g_clear_pointer(&self->status_fg, g_free);
 	g_clear_pointer(&self->status_current_fg, g_free);
+	g_clear_pointer(&self->mode_normal_color, g_free);
+	g_clear_pointer(&self->mode_insert_color, g_free);
+	g_clear_pointer(&self->mode_follow_color, g_free);
 	G_OBJECT_CLASS(gsurf_wmux_module_parent_class)->finalize(object);
 }
 
