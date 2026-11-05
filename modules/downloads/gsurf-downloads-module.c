@@ -47,9 +47,13 @@ gsurf_downloads_decide_destination(GsurfDownloadHandler *handler,
 		g_free(name);
 		name = g_strdup("download");
 	}
-	/* WebKit's destination conversion requires an absolute filename, even
-	 * when the configured download directory is relative to the process. */
-	directory = g_canonicalize_filename(self->dir, NULL);
+	/* WebKit's destination conversion requires an absolute, canonical
+	 * filename; a relative directory is relative to the launch dir. */
+	{
+		g_autofree gchar *launch = gsurf_get_launch_dir();
+
+		directory = g_canonicalize_filename(self->dir, launch);
+	}
 	if (g_mkdir_with_parents(directory, 0755) != 0) {
 		g_warning("gsurf downloads: cannot create '%s': %s",
 			directory, g_strerror(errno));
@@ -87,9 +91,8 @@ gsurf_downloads_configure(GsurfModule *module, gpointer config_ptr)
 	if (dir == NULL)
 		dir = "~/Downloads";
 	g_free(self->dir);
-	self->dir = (dir[0] == '~' && dir[1] == '/')
-		? g_build_filename(g_get_home_dir(), dir + 2, NULL)
-		: g_strdup(dir);
+	/* "~/" and relative directories (against the launch directory). */
+	self->dir = gsurf_resolve_path(dir);
 }
 
 static gboolean gsurf_downloads_activate(GsurfModule *m) { return TRUE; }

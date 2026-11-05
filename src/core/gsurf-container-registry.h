@@ -7,8 +7,10 @@
  * A container is a separate browsing identity: its own cookies, storage
  * and cache, like Firefox's contextual identities. Persistent containers
  * keep their data on disk under $XDG_DATA_HOME/gsurf/containers/<id>;
- * temporary containers are ephemeral and are destroyed shortly after
- * their last view closes.
+ * temporary containers keep theirs in this process's runtime directory
+ * (`$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/temp/<id>`, see
+ * gsurf-runtime-dir.h) and are destroyed, data and all, shortly after
+ * their last view closes or when the process exits.
  *
  * The registry is backend-agnostic. It decides which container a new
  * view belongs to (gsurf_container_registry_resolve()) and owns one
@@ -117,12 +119,27 @@ gboolean gsurf_container_get_temporary(GsurfContainer *self);
  */
 guint gsurf_container_get_n_views(GsurfContainer *self);
 
+/**
+ * gsurf_container_get_data_dir:
+ * @self: a #GsurfContainer
+ *
+ * The data directory the container's session stores its profile in:
+ * $XDG_DATA_HOME/gsurf/containers/<id> for a persistent container, a
+ * private directory under the runtime directory for a temporary one.
+ *
+ * Returns: (transfer none) (type filename) (nullable): the directory, or
+ *   %NULL while the container has no session (or an ephemeral fallback)
+ */
+const gchar *gsurf_container_get_data_dir(GsurfContainer *self);
+
 /* --- backend vtable --- */
 
 /**
  * GsurfSessionBackend:
- * @create: create the native session for a container. @data_dir and
- *   @cache_dir are %NULL for a temporary (ephemeral) container. Returns a
+ * @create: create the native session for a container in @data_dir and
+ *   @cache_dir (a temporary container's are removed with it). Both are
+ *   %NULL only when a temporary container could not get private
+ *   directories; the backend then makes an ephemeral session. Returns a
  *   new reference to the native object.
  * @destroy: release a native session returned by @create
  * @apply_policy: apply the registry's privacy policy to a native session;

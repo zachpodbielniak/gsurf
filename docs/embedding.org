@@ -224,6 +224,12 @@ Rules worth knowing:
 - Call =gsurf_window_layout_notify_visible()= whenever the views on screen change, so chrome can follow (=visible-views-changed=).
 - =gsurf_window_set_key_grab()= lets a host or module see the next key even while the user types in a page field or the address bar, e.g. after a prefix key.
 
+* Runtime directory and working directory
+
+libgsurf keeps per-process scratch data in =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX= (see =gsurf-runtime-dir.h=): temporary containers store their profiles in =temp/<id>= below it, removed with the container, and the whole directory is removed by an =atexit()= handler (or =gsurf_runtime_dir_cleanup()=). Directories of dead processes are swept when a process creates its own; liveness is an =flock()= on the directory's =lock= file, so it works across PID namespaces.
+
+The =gsurf= binary also calls =gsurf_runtime_dir_enter()=, which records the launch directory and =chdir()=s into the runtime directory, so a relative write by WebKit cannot reach the user's directory. *The library never changes an embedder's working directory*: a host such as cmacs keeps its own, and =gsurf_get_launch_dir()= then simply returns the current directory. A host that wants the same protection calls =gsurf_runtime_dir_enter()= itself before creating its first view. Relative paths from users or config files resolve with =gsurf_resolve_path()= (also used by =gsurf_expand_home()= and =gsurf_view_normalize_uri()=), which works either way.
+
 * GObject Introspection
 
 =make BUILD_GIR=1= produces =Gsurf-0.2.gir= / =Gsurf-0.2.typelib=, so gsurf can be

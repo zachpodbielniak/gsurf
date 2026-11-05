@@ -7,7 +7,7 @@
 
 #include "gsurf-keybind-help.h"
 
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
 #include <string.h>
 
 G_DEFINE_BOXED_TYPE(GsurfKeybindHelp, gsurf_keybind_help,

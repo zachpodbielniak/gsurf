@@ -63,8 +63,11 @@ gboolean gsurf_private_file_is_private(const gchar *path, GError **error);
  * gsurf_expand_home:
  * @path: (type filename) (nullable): a path, possibly starting with "~/"
  *
- * Returns: (transfer full) (type filename) (nullable): @path with a
- *   leading "~" or "~/" replaced by the home directory
+ * Same as gsurf_resolve_path(): a leading "~" or "~/" becomes the home
+ * directory and a relative path is made absolute against the launch
+ * directory (gsurf_get_launch_dir()).
+ *
+ * Returns: (transfer full) (type filename) (nullable): the resolved path
  */
 gchar *gsurf_expand_home(const gchar *path);
 

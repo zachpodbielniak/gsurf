@@ -6,6 +6,7 @@
  */
 
 #include "util/gsurf-kiosk.h"
+#include "util/gsurf-runtime-dir.h"
 #include "core/gsurf-view.h"
 #include "core/gsurf-container-registry.h"
 
@@ -504,14 +505,16 @@ gsurf_uri_expand_tilde(const gchar *path)
 	return full;
 }
 
-/* Turn an absolute or relative filesystem location into a file URI. The
- * path is resolved against the process working directory. */
+/* Turn an absolute or relative filesystem location into a file URI. A
+ * relative path is resolved against the launch directory (the gsurf
+ * binary itself works in its runtime directory). */
 static gchar *
 gsurf_uri_from_local_path(const gchar *path)
 {
 	g_autoptr(GFile) file = NULL;
+	g_autofree gchar *launch = gsurf_get_launch_dir();
 
-	file = g_file_new_for_commandline_arg(path);
+	file = g_file_new_for_commandline_arg_and_cwd(path, launch);
 	return g_file_get_uri(file);
 }
 
@@ -529,8 +532,12 @@ gsurf_uri_is_filesystem_path(const gchar *s)
 		return TRUE;
 	if (g_str_has_prefix(s, "./") || g_str_has_prefix(s, "../"))
 		return TRUE;
-	if (g_file_test(s, G_FILE_TEST_EXISTS))
-		return TRUE;
+	{
+		g_autofree gchar *resolved = gsurf_resolve_path(s);
+
+		if (g_file_test(resolved, G_FILE_TEST_EXISTS))
+			return TRUE;
+	}
 	if (strchr(s, '/') != NULL && strchr(s, ' ') == NULL && strchr(s, '\t') == NULL
 	    && !gsurf_uri_authority_is_host(s))
 		return TRUE;
@@ -855,10 +862,13 @@ gsurf_view_blur_editable(GsurfView *self)
 {
 	g_return_if_fail(GSURF_IS_VIEW(self));
 
-	/* Blurring an <iframe> element in the top document also drops focus
-	 * out of the frame, so the top-level activeElement is enough. */
+	/* Blur the deepest active element of the top document: through open
+	 * shadow roots (document.activeElement is only the shadow host), and
+	 * an <iframe> element, whose blur also drops focus out of the frame. */
 	gsurf_view_run_javascript_async(self,
-		"document.activeElement&&document.activeElement.blur&&document.activeElement.blur()",
+		"(function(){var a=document.activeElement;"
+		"while(a&&a.shadowRoot&&a.shadowRoot.activeElement)a=a.shadowRoot.activeElement;"
+		"if(a&&a.blur)a.blur();})()",
 		NULL, NULL, NULL);
 	gsurf_view_set_editing(self, FALSE);
 }

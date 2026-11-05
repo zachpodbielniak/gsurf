@@ -258,8 +258,7 @@ modules:
   modal:
     enabled: true                  # vim-style navigation by default
     start_mode: normal             # normal or insert
-    key_insert: "i"
-    key_normal: "Escape"
+    insert_keys: [i, a]            # bare keys that enter INSERT ([] = none)
     scroll_step: 40
     hint_key: "f"
     hint_key_newview: "F"

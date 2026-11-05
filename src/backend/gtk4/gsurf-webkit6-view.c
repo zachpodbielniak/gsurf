@@ -565,23 +565,14 @@ create_native_view(GsurfWebkit6View *self)
 /* --- lifecycle --- */
 
 /* See the GTK3 backend: reports DOM edit-focus to gsurf_view_set_editing. */
-static const gchar *FOCUS_TRACKER_JS =
-	"(function(){if(window.__gsurfFT)return;window.__gsurfFT=1;"
-	"function ed(e){if(!e)return false;if(e.isContentEditable)return true;"
-	"var t=e.tagName;if(t==='TEXTAREA'||t==='SELECT')return true;"
-	"if(t==='INPUT'){var ty=(e.getAttribute('type')||'text').toLowerCase();"
-	"return !/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/.test(ty);}return false;}"
-	"function snd(){try{window.webkit.messageHandlers.gsurfFocus.postMessage(ed(document.activeElement));}catch(x){}}"
-	"document.addEventListener('focusin',snd,true);"
-	"document.addEventListener('focusout',function(){setTimeout(snd,0);},true);snd();})()";
-
 /* WebKitGTK 6.0 hands script-message handlers the JSCValue directly
  * (4.1 wrapped it in a WebKitJavascriptResult). */
 static void
 on_focus_message(WebKitUserContentManager *ucm, JSCValue *value, gpointer user_data)
 {
 	GsurfWebkit6View *self = user_data;
-	gsurf_view_set_editing(GSURF_VIEW(self), jsc_value_to_boolean(value));
+	/* Per-frame reports, folded into one editing state. */
+	gsurf_webkit_common_focus_message(GSURF_VIEW(self), value);
 }
 
 static void
@@ -619,7 +610,7 @@ gsurf_webkit6_view_constructed(GObject *object)
 	webkit_user_content_manager_register_script_message_handler(ucm, "gsurfFocus", NULL);
 	g_signal_connect(ucm, "script-message-received::gsurfFocus",
 		G_CALLBACK(on_focus_message), self);
-	tracker = webkit_user_script_new(FOCUS_TRACKER_JS,
+	tracker = webkit_user_script_new(gsurf_webkit_focus_tracker_js,
 		WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
 		WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, NULL, NULL);
 	webkit_user_content_manager_add_script(ucm, tracker);
