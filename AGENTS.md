@@ -13,6 +13,10 @@ a thin `main.c`. surf "patches" are implemented as runtime-loaded `.so` **module
 
 - Behaviour changes come with tests and the matching `docs/*.org` update in the **same
   commit**. A change without both is not done and must not be merged.
+- The `/gsurf` agent skill (`skills/gsurf/`, see `docs/skill.org`) is documentation too: a
+  change to behaviour, config keys, modules, `gsurfctl` commands, build flags or packages
+  updates the matching `skills/gsurf/references/*.md` (or `SKILL.md`, a template) in the
+  **same commit**. `make test` checks its structure, its installer and its examples.
 - Zero warnings on every target (`make clean all`, `make test`, `make test-gui`,
   `make BUILD_GIR=1 gir`) and on **both** `GTK_BACKEND=gtk3` and `GTK_BACKEND=gtk4`.
   Fix the code, never the flags.

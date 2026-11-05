@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# gsurfctl-session.sh - open a set of pages in a running gsurf, in panes
+# when wmux is enabled, and save each page's text for reading later.
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+set -o errexit -o nounset -o pipefail
+
+usage () {
+	cat <<'EOF'
+Usage: gsurfctl-session.sh [-i INSTANCE] [-o DIR] URL [URL...]
+
+Opens the first URL in a new tab and the others in panes beside it (or in
+background tabs without wmux), waits for the loads, then writes each page's
+text to DIR/<view id>.txt (default: ./gsurf-session).
+
+Options:
+  -i INSTANCE   gsurf instance (pid or control.name); default $GSURF_INSTANCE
+  -o DIR        where to write the page text
+  -h, --help    this help
+  --license     print the license notice
+
+Examples:
+  gsurfctl-session.sh https://docs.gtk.org/glib/ https://docs.gtk.org/gtk4/
+  gsurfctl-session.sh -i work -o /tmp/research https://example.org
+EOF
+}
+
+die () {
+	printf 'gsurfctl-session: %s\n' "$*" >&2
+	exit 1
+}
+
+# wait_loaded <view id>: poll until the view's page has a title (max 15 s).
+wait_loaded () {
+	if [[ $# -ne 1 ]]
+	then
+		die 'wait_loaded() requires 1 positional argument: <view id>'
+	fi
+	local view="${1}"
+	local tries=0
+	until [[ -n "$(gsurfctl -j tabs | yq -p json ".[] | select(.id == ${view}) | .title // \"\"")" ]]
+	do
+		tries=$((tries + 1))
+		[[ ${tries} -lt 30 ]] || { printf 'view %s did not load\n' "${view}" >&2; return 1; }
+		sleep 0.5
+	done
+}
+
+main () {
+	local out="./gsurf-session"
+	local wmux_on=""
+	local first=""
+	local view=""
+	local -a views=()
+
+	while [[ $# -gt 0 ]]
+	do
+		case "${1}" in
+			-h|--help) usage; exit 0 ;;
+			--license) printf 'AGPL-3.0-or-later: https://www.gnu.org/licenses/agpl-3.0.html\n'; exit 0 ;;
+			-i) [[ $# -ge 2 ]] || die '-i needs a value'; export GSURF_INSTANCE="${2}"; shift 2 ;;
+			-o) [[ $# -ge 2 ]] || die '-o needs a value'; out="${2}"; shift 2 ;;
+			-*) usage >&2; exit 2 ;;
+			*) break ;;
+		esac
+	done
+	[[ $# -ge 1 ]] || { usage >&2; exit 2; }
+	command -v gsurfctl > /dev/null || die 'gsurfctl is not on PATH'
+	gsurfctl -q list || die 'no running gsurf (exit 3); start gsurf first'
+	mkdir -p -- "${out}"
+
+	# The first page gets its own active tab; the rest go into panes.
+	first="$(gsurfctl -j open "${1}" | yq -p json '.id')"
+	views+=("${first}")
+	shift
+	wmux_on="$(gsurfctl config modules.wmux.enabled 2> /dev/null || printf 'false')"
+	for url in "$@"
+	do
+		if [[ "${wmux_on}" == true ]]
+		then
+			gsurfctl -q wmux "split-window -h ${url}"
+			view="$(gsurfctl -j tabs | yq -p json '.[] | select(.active) | .id')"
+		else
+			view="$(gsurfctl -j open --bg --child-of "${first}" "${url}" | yq -p json '.id')"
+		fi
+		views+=("${view}")
+	done
+
+	# Save each page's text once it has loaded.
+	for view in "${views[@]}"
+	do
+		wait_loaded "${view}" || continue
+		gsurfctl tab "${view}"
+		gsurfctl text > "${out}/${view}.txt"
+		printf '%s\t%s\n' "${view}" "$(gsurfctl uri)"
+	done
+	gsurfctl tab "${first}"
+}
+
+main "$@"

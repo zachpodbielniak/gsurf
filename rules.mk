@@ -283,6 +283,89 @@ uninstall:
 	rm -f $(DESTDIR)$(ICONDIR)/256x256/apps/gsurf.png
 	rm -f $(DESTDIR)$(MANDIR)/man1/gsurf.1
 
+# ---------------------------------------------------------------------------
+# Agent skill (/gsurf)
+#
+# skills/gsurf/ is copied (or, with SKILLS_LINK=1, symlinked from this tree)
+# into $(AGENTS_HOME)/skills/gsurf and then symlinked from the Claude and
+# Grok skills directories. A destination that exists but is not this skill
+# (its SKILL.md has no `name: gsurf' line) is left alone and the install
+# fails. Nothing is built, and `make install' does not install the skill.
+# tests/test-install-skill.sh exercises all of this in a temporary HOME.
+# ---------------------------------------------------------------------------
+
+SKILL_NAME  := gsurf
+SKILL_SRC   := $(CURDIR)/skills/$(SKILL_NAME)
+SKILL_DST   := $(AGENTS_HOME)/skills/$(SKILL_NAME)
+# Quoted one by one in the recipes, so the paths may contain spaces.
+SKILL_LINKS := "$(CLAUDE_DIR)/skills/$(SKILL_NAME)" "$(GROK_DIR)/skills/$(SKILL_NAME)"
+
+.PHONY: install-skill install-skills uninstall-skill uninstall-skills
+install-skill:
+	@test -f "$(SKILL_SRC)/SKILL.md" || { echo "missing $(SKILL_SRC)/SKILL.md"; exit 1; }
+	@$(MKDIR_P) "$(AGENTS_HOME)/skills"
+	@parent="$$(cd "$(AGENTS_HOME)/skills" && pwd -P)"; \
+	src="$$(cd "$(SKILL_SRC)" && pwd -P)"; \
+	if [ "$$parent/$(SKILL_NAME)" = "$$src" ]; then \
+		echo "refusing: $(SKILL_DST) is this tree's skills/$(SKILL_NAME)"; exit 1; fi
+	@dst="$(SKILL_DST)"; \
+	if [ -L "$$dst" ]; then \
+		if [ -e "$$dst" ] && ! grep -qx "name: $(SKILL_NAME)" "$$dst/SKILL.md" 2>/dev/null; then \
+			echo "$$dst links to $$(readlink "$$dst"), not the $(SKILL_NAME) skill; leaving it"; exit 1; \
+		fi; \
+		rm -f "$$dst" || exit 1; \
+	elif [ -e "$$dst" ]; then \
+		grep -qx "name: $(SKILL_NAME)" "$$dst/SKILL.md" 2>/dev/null || \
+			{ echo "$$dst exists and is not the $(SKILL_NAME) skill; leaving it"; exit 1; }; \
+		rm -rf "$$dst" || exit 1; \
+	fi; \
+	if [ "$(SKILLS_LINK)" = "1" ]; then ln -s "$(SKILL_SRC)" "$$dst" || exit 1; \
+	else cp -R "$(SKILL_SRC)" "$$dst" && chmod -R u+rwX,go+rX "$$dst" || exit 1; fi; \
+	echo "  INSTALL $$dst"
+	@parent="$$(cd "$(AGENTS_HOME)/skills" && pwd -P)"; \
+	for link in $(SKILL_LINKS); do \
+		$(MKDIR_P) "$$(dirname "$$link")"; \
+		if [ "$$(cd "$$(dirname "$$link")" && pwd -P)" = "$$parent" ]; then \
+			echo "  SKIP    $$link (the same directory as $(SKILL_DST))"; continue; \
+		fi; \
+		if [ -L "$$link" ]; then \
+			t="$$(readlink "$$link")"; \
+			if [ -e "$$link" ] && [ "$$t" != "$(SKILL_DST)" ] && [ "$$t" != "$(SKILL_SRC)" ] && \
+			   ! grep -qx "name: $(SKILL_NAME)" "$$link/SKILL.md" 2>/dev/null; then \
+				echo "$$link links to $$t, not the $(SKILL_NAME) skill; leaving it"; exit 1; \
+			fi; \
+			rm -f "$$link" || exit 1; \
+		elif [ -e "$$link" ]; then \
+			grep -qx "name: $(SKILL_NAME)" "$$link/SKILL.md" 2>/dev/null || \
+				{ echo "$$link exists and is not the $(SKILL_NAME) skill; leaving it"; exit 1; }; \
+			rm -rf "$$link" || exit 1; \
+		fi; \
+		ln -s "$(SKILL_DST)" "$$link" && echo "  LINK    $$link -> $(SKILL_DST)" || exit 1; \
+	done
+
+# Removes only this skill: links to the installed copy or to this tree (or
+# to anything whose SKILL.md says `name: gsurf'), and copies whose SKILL.md
+# says so. A foreign directory or link of the same name is left alone.
+uninstall-skill:
+	@parent="$$(cd "$(AGENTS_HOME)/skills" 2>/dev/null && pwd -P)"; \
+	src="$$(cd "$(SKILL_SRC)" && pwd -P)"; \
+	if [ -n "$$parent" ] && [ "$$parent/$(SKILL_NAME)" = "$$src" ]; then \
+		echo "refusing: $(SKILL_DST) is this tree's skills/$(SKILL_NAME)"; exit 1; fi
+	@for p in $(SKILL_LINKS) "$(SKILL_DST)"; do \
+		if [ -L "$$p" ]; then \
+			t="$$(readlink "$$p")"; \
+			if [ "$$t" = "$(SKILL_DST)" ] || [ "$$t" = "$(SKILL_SRC)" ] || \
+			   grep -qx "name: $(SKILL_NAME)" "$$p/SKILL.md" 2>/dev/null; then \
+				rm -f "$$p" && echo "  REMOVE  $$p"; \
+			else echo "  KEEP    $$p (not the $(SKILL_NAME) skill)"; fi; \
+		elif [ -e "$$p" ] && grep -qx "name: $(SKILL_NAME)" "$$p/SKILL.md" 2>/dev/null; then \
+			rm -rf "$$p" && echo "  REMOVE  $$p"; \
+		elif [ -e "$$p" ]; then echo "  KEEP    $$p (not the $(SKILL_NAME) skill)"; fi; \
+	done
+
+install-skills: install-skill
+uninstall-skills: uninstall-skill
+
 # Always out of date, so the stamp above is re-evaluated every run.
 .PHONY: FORCE
 FORCE:

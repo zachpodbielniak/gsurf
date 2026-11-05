@@ -86,6 +86,15 @@ MKDIR_P := mkdir -p
 APPIMAGETOOL ?= appimagetool-x86_64.AppImage
 APPDIR := $(BUILDDIR)/AppDir
 
+# Agent skill install locations (make install-skill; mirrors
+# agent-skills/scripts/install.sh). The skill is copied (or, with
+# SKILLS_LINK=1, symlinked from this tree) into $(AGENTS_HOME)/skills and
+# linked from each agent's skills directory.
+AGENTS_HOME ?= $(HOME)/.agents
+CLAUDE_DIR  ?= $(HOME)/.claude
+GROK_DIR    ?= $(HOME)/.grok
+SKILLS_LINK ?= 0
+
 # C standard and dialect
 CSTD := -std=gnu11
 
