@@ -32,5 +32,8 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
 - [[file:embedding.org][Embedding]] — using libgsurf in another application.
 
+** Agents
+- [[file:skill.org][The /gsurf agent skill]] — the agent skill in =skills/gsurf/=, =make install-skill= and its tests.
+
 ** Maintenance
 - [[file:audit-2026-09.org][September 2026 correctness audit]] — confirmed defects, regression coverage and boundaries.

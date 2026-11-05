@@ -10,6 +10,7 @@
 #   make modules          - Build all modules
 #   make test             - Run the test suite
 #   make install          - Install to PREFIX
+#   make install-skill    - Install the /gsurf agent skill (~/.agents, ~/.claude, ~/.grok)
 #   make clean            - Clean build artifacts
 #   make DEBUG=1          - Build with debug symbols
 #   make MCP=1            - Build with the MCP server module
@@ -37,7 +38,8 @@ else
 include config.mk
 
 # Check dependencies before anything else (skip for targets that don't need them)
-SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all adblock-lists
+SKIP_DEP_CHECK_TARGETS := install-deps help check-deps show-config clean clean-all adblock-lists \
+	install-skill install-skills uninstall-skill uninstall-skills test-skill test-install-skill
 ifeq ($(filter $(SKIP_DEP_CHECK_TARGETS),$(MAKECMDGOALS)),)
 $(foreach dep,$(DEPS_REQUIRED),$(call check_dep,$(dep)))
 endif
@@ -253,6 +255,15 @@ test: gsurf gsurfctl modules $(TEST_BINS)
 		echo "    FAIL"; \
 		failed=$$((failed + 1)); \
 	fi; \
+	for script in tests/test-skill.sh tests/test-install-skill.sh; do \
+		echo "  Running $$(basename $$script)..."; \
+		if $$script; then \
+			echo "    PASS"; \
+		else \
+			echo "    FAIL"; \
+			failed=$$((failed + 1)); \
+		fi \
+	done; \
 	for test in $(TEST_BINS); do \
 		echo "  Running $$(basename $$test)..."; \
 		if LD_LIBRARY_PATH=$(OUTDIR):$(CURDIR)/deps/mcp-glib/build $$test; then \
@@ -272,6 +283,23 @@ test: gsurf gsurfctl modules $(TEST_BINS)
 # Build-system regression tests only (no compile; see the script's header).
 test-build:
 	tests/test-build-config.sh "$(MAKE)" "$(BUILDDIR)"
+
+# The /gsurf agent skill: its structure (tests/test-skill.sh, the checks of
+# agent-skills' validate-skills.sh) and its installer in a temporary HOME
+# (tests/test-install-skill.sh). Neither needs a build and `make test' runs
+# both; test-skill-examples checks the skill's examples against the built
+# library, modules and gsurfctl.
+.PHONY: test-skill test-install-skill
+test-skill:
+	tests/test-skill.sh
+test-install-skill:
+	tests/test-install-skill.sh
+
+# test-skill-examples builds the skill's module template the way the
+# `modules' target builds a module, so it needs the module flags.
+$(OUTDIR)/test-skill-examples: $(OUTDIR)/module-cflags.txt
+$(OUTDIR)/module-cflags.txt: $(GSURF_FLAGS_STAMP) | $(OUTDIR)
+	$(file >$@,$(MODULE_CFLAGS))
 
 # test-tab-tree compiles the tabs module's tree model in directly.
 $(OBJDIR)/tests/test-tab-tree.o: modules/tabs/gsurf-tab-tree.c modules/tabs/gsurf-tab-tree.h
@@ -456,6 +484,11 @@ help:
 	@echo "  check-deps       - Check for required dependencies"
 	@echo "  show-config      - Show current build configuration"
 	@echo "  appimage         - Build a self-contained AppImage"
+	@echo "  install-skill    - Install the /gsurf agent skill into ~/.agents/skills"
+	@echo "                     and link it from ~/.claude and ~/.grok (SKILLS_LINK=1"
+	@echo "                     links this tree instead of copying; also install-skills)"
+	@echo "  uninstall-skill  - Remove the /gsurf agent skill"
+	@echo "  test-skill       - Check the skill's structure (part of test)"
 	@echo "  adblock-lists    - Fetch EasyList + uBlock Origin filter lists"
 	@echo "                     JSON for the adblock content_filters: option"
 	@echo "  help             - Show this help message"

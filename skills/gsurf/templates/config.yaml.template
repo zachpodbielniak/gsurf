@@ -1,0 +1,100 @@
+# ~/.config/gsurf/config.yaml - a complete gsurf configuration.
+# The modules: block REPLACES the built-in one: every module you use must
+# be listed here with enabled: true. Restart gsurf after editing.
+
+browser:
+  homepage: "about:blank"
+  new_view_uri: "about:blank"
+
+user_agent: ""                       # "" = engine default
+
+webkit:
+  javascript: true
+  images: true
+  webgl: false
+  media_stream: false
+  webrtc: false
+  hyperlink_auditing: false
+  default_font_size: 16
+
+tls:
+  strict: true
+
+storage:
+  cookie_jar: "~/.local/share/gsurf/cookies.sqlite"
+  enable_disk_cache: true
+
+network:
+  proxy:
+    mode: default                    # default | none | custom
+    uri: ""
+  do_not_track: true                 # sent while hardening is enabled
+
+window:
+  title: gsurf
+  geometry: 1280x800
+
+keybinds:
+  "Ctrl+r": reload
+  "Ctrl+Shift+r": reload-nocache
+  "Escape": stop
+  "Alt+Left": back
+  "Alt+Right": forward
+  "Ctrl+f": find
+  "F11": toggle-fullscreen
+  "Ctrl+q": quit
+  "question": show-keybinds
+  "o": open-prompt
+  "Ctrl+l": open-prompt
+
+mousebinds:
+  "Button8": back
+  "Button9": forward
+  "Button2": open-new-view-background
+  "Ctrl+Button1": open-new-view-background
+
+modules:
+  modal:          { enabled: true, start_mode: normal, hint_font_size: 13 }
+  chromebar:      { enabled: true }
+  find_bar:       { enabled: true }
+  homepage:       { enabled: true, uri: "about:blank" }
+  history:        { enabled: true, log_titles: true }
+  downloads:      { enabled: true, dir: "~/Downloads" }
+  notifications:  { enabled: true, allow_web_notifications: ask }
+  site_styles:    { enabled: true }
+  cookie_policy:  { enabled: true, policy: no-third-party }
+  toggles:
+    enabled: true
+    keys: { javascript: "Ctrl+Shift+s", images: "Ctrl+Shift+m", webgl: "Ctrl+Shift+w" }
+  search_engines:
+    enabled: true
+    default: ddg
+    default_is_search: true
+    engines:
+      ddg:  { prefix: "d ", url: "https://duckduckgo.com/?q=%s" }
+      wiki: { prefix: "w ", url: "https://en.wikipedia.org/w/index.php?search=%s" }
+      gh:   { prefix: "gh ", url: "https://github.com/search?q=%s" }
+  tabs:
+    enabled: true
+    strip: true
+    sidebar: false                   # Ctrl+Shift+. toggles the tree sidebar
+    sidebar_position: left
+    on_close_parent: promote
+  containers:
+    enabled: true
+    new_tab: default                 # temporary | default | <container id>
+    containers:
+      - name: Media
+        color: "#f9e2af"
+        hosts: ['(^|\.)youtube\.com$']
+  hardening:
+    enabled: true
+    https_only: true
+    exempt:
+      - match: '^(localhost|127\.0\.0\.1)$'
+        skip: [https_only]
+  wmux:
+    enabled: false                   # true: C-b % splits; C-h/j/k/l move
+  session:
+    enabled: false
+    key_save: "Ctrl+Alt+s"

@@ -1,0 +1,98 @@
+/*
+ * config.c - gsurf C configuration (~/.config/gsurf/config.c)
+ *
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * gsurf compiles this file with crispy (cached by content hash) and calls
+ * gsurf_config_init() after the YAML configuration, so it wins. Scalars
+ * are struct assignments; module options live in the embedded YAML below,
+ * which REPLACES the whole modules: mapping: list every module you use.
+ */
+
+/* An installed gsurf (headers in /usr/include/gsurf) needs this line;
+ * a source-tree build finds its headers without it. */
+#define CRISPY_PARAMS "-I/usr/include/gsurf"
+
+#include <gsurf/gsurf.h>
+
+/* The complete modules block, two spaces per YAML level. */
+static const char *MODULES_YAML =
+"modules:\n"
+"  modal:\n"
+"    enabled: true\n"
+"    start_mode: normal\n"
+"    hint_font_size: 13\n"
+"  chromebar: { enabled: true }\n"
+"  find_bar: { enabled: true }\n"
+"  homepage: { enabled: true }\n"
+"  history: { enabled: true }\n"
+"  downloads:\n"
+"    enabled: true\n"
+"    dir: \"~/Downloads\"\n"
+"  notifications: { enabled: true }\n"
+"  site_styles: { enabled: true }\n"
+"  cookie_policy:\n"
+"    enabled: true\n"
+"    policy: no-third-party\n"
+"  toggles: { enabled: true }\n"
+"  search_engines:\n"
+"    enabled: true\n"
+"    default: ddg\n"
+"    engines:\n"
+"      ddg: { prefix: \"d \", url: \"https://duckduckgo.com/?q=%s\" }\n"
+"      gh:  { prefix: \"gh \", url: \"https://github.com/search?q=%s\" }\n"
+"  tabs:\n"
+"    enabled: true\n"
+"    strip: false\n"            /* tabs only in the Ctrl+Shift+. sidebar */
+"    sidebar: true\n"
+"  containers:\n"
+"    enabled: true\n"
+"    new_tab: temporary\n"
+"    temp_cleanup_delay: 900\n"
+"    containers:\n"
+"      - name: Media\n"
+"        color: \"#af51f5\"\n"
+"        hosts:\n"
+"          - '(^|\\.)youtube\\.com$'\n";
+
+/**
+ * gsurf_config_init:
+ *
+ * Called once by gsurf after the YAML configuration is loaded and before
+ * any module is configured. Overrides the defaults and the YAML.
+ *
+ * Returns: %TRUE on success; %FALSE makes gsurf log the failure and keep
+ *   the YAML configuration.
+ */
+G_MODULE_EXPORT gboolean
+gsurf_config_init(
+	void
+){
+	GsurfConfig *config;
+	GsurfSettings *settings;
+
+	/* The process-wide config gsurf is building. */
+	config = gsurf_config_get_default();
+	if (config == NULL)
+		return FALSE;
+	settings = config->settings;
+
+	/* Browser and window: free each string before replacing it. */
+	g_free(config->homepage);
+	config->homepage = g_strdup("about:blank");
+	config->window_width = 1280;
+	config->window_height = 800;
+
+	/* Web engine: privacy-leaning defaults. */
+	settings->webgl = FALSE;
+	settings->webrtc = FALSE;
+	settings->hyperlink_auditing = FALSE;
+	config->tls_strict = TRUE;
+
+	/* Bindings go through the setters, which normalise the key string. */
+	gsurf_config_set_keybind(config, "Ctrl+Shift+l", GSURF_ACTION_OPEN_PROMPT);
+	gsurf_config_set_mousebind(config, "Button2", GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND);
+
+	/* Module options last; a YAML error fails the config visibly. */
+	return gsurf_config_load_from_data(config, MODULES_YAML, -1, NULL);
+}

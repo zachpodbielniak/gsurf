@@ -1,0 +1,107 @@
+/* gsurf-quicklinks-module.c - typed aliases ("gl") open fixed URIs
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * Config: modules.quicklinks: { enabled: true, links: { gl: "https://gitlab.com" } }
+ * Rename quicklinks / Quicklinks / QUICKLINKS throughout for a new module. */
+
+#include <gsurf/gsurf.h>
+#include <gmodule.h>
+#include <yaml-glib.h>
+#define GSURF_TYPE_QUICKLINKS_MODULE (gsurf_quicklinks_module_get_type())
+G_DECLARE_FINAL_TYPE(GsurfQuicklinksModule, gsurf_quicklinks_module,
+	GSURF, QUICKLINKS_MODULE, GsurfModule)
+
+struct _GsurfQuicklinksModule
+{
+	GsurfModule  parent_instance;
+	GHashTable  *links;       /* alias (gchar *) -> uri (gchar *) */
+};
+
+/* GsurfUriHandler::rewrite_uri: the alias's URI, or NULL to let others try. */
+static gchar *
+gsurf_quicklinks_rewrite_uri(
+	GsurfUriHandler	*handler,
+	const gchar	*input
+){
+	GsurfQuicklinksModule *self = GSURF_QUICKLINKS_MODULE(handler);
+	g_autofree gchar *key = g_strstrip(g_strdup(input != NULL ? input : ""));
+
+	return (gchar *)g_strdup(g_hash_table_lookup(self->links, key));
+}
+
+static void
+gsurf_quicklinks_uri_handler_init(
+	GsurfUriHandlerInterface	*iface
+){
+	iface->rewrite_uri = gsurf_quicklinks_rewrite_uri;
+}
+
+G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfQuicklinksModule, gsurf_quicklinks_module, GSURF_TYPE_MODULE,
+	G_IMPLEMENT_INTERFACE(GSURF_TYPE_URI_HANDLER, gsurf_quicklinks_uri_handler_init))
+
+/* modules.<name> section the manager and configure() read. */
+static const gchar *
+gsurf_quicklinks_get_name(
+	GsurfModule	*module
+){
+	return "quicklinks";
+}
+
+/* Starts from the defaults (no links) every time, so a second configure()
+ * replaces the first; a bad entry warns and is skipped. */
+static void
+gsurf_quicklinks_configure(
+	GsurfModule	*module,
+	gpointer	config_ptr
+){
+	GsurfQuicklinksModule *self = GSURF_QUICKLINKS_MODULE(module);
+	YamlNode *node;
+	YamlMapping *links;
+	GList *names, *l;
+
+	g_hash_table_remove_all(self->links);
+	node = gsurf_config_get_module_node((GsurfConfig *)config_ptr, "quicklinks");
+	if (node == NULL || yaml_node_get_node_type(node) != YAML_NODE_MAPPING)
+		return;
+	links = yaml_mapping_get_mapping_member(yaml_node_get_mapping(node), "links");
+	names = (links != NULL) ? yaml_mapping_get_members(links) : NULL;
+	for (l = names; l != NULL; l = l->next) {
+		const gchar *uri = yaml_mapping_get_string_member(links, l->data);
+		if (uri == NULL || g_uri_peek_scheme(uri) == NULL)
+			g_warning("quicklinks.links.%s: not an absolute URI; skipped", (const gchar *)l->data);
+		else
+			g_hash_table_replace(self->links, g_strdup(l->data), g_strdup(uri));
+	}
+	g_list_free(names);
+}
+
+static void
+gsurf_quicklinks_module_finalize(
+	GObject	*object
+){
+	g_clear_pointer(&GSURF_QUICKLINKS_MODULE(object)->links, g_hash_table_unref);
+	G_OBJECT_CLASS(gsurf_quicklinks_module_parent_class)->finalize(object);
+}
+
+static void
+gsurf_quicklinks_module_class_init(
+	GsurfQuicklinksModuleClass	*klass
+){
+	G_OBJECT_CLASS(klass)->finalize = gsurf_quicklinks_module_finalize;
+	GSURF_MODULE_CLASS(klass)->get_name = gsurf_quicklinks_get_name;
+	GSURF_MODULE_CLASS(klass)->configure = gsurf_quicklinks_configure;
+}
+
+static void
+gsurf_quicklinks_module_init(
+	GsurfQuicklinksModule	*self
+){
+	self->links = g_hash_table_new_full(g_str_hash, g_str_equal, g_free, g_free);
+}
+
+/* Entry point the module manager looks up in every .so it loads. */
+G_MODULE_EXPORT GType
+gsurf_module_register(
+	void
+){
+	return GSURF_TYPE_QUICKLINKS_MODULE;
+}
