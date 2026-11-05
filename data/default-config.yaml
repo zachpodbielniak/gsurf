@@ -107,8 +107,9 @@ keybinds:
 mousebinds:
   "Button8": back                  # back thumb button
   "Button9": forward               # forward thumb button
-  "Ctrl+Button1": open-new-view
-  "Button2": open-new-view         # middle-click link -> new tab
+  "Ctrl+Button1": open-new-view-background  # Ctrl-click link -> background child tab
+  "Button2": open-new-view-background       # middle-click link -> background child tab
+  # open-new-view opens the link in a foreground tab instead
 
 # ===== Search engines (search-engines module) =====
 search_engines:
@@ -239,6 +240,8 @@ modules:
     indent: 14                     # px per tree level (0-64)
     max_depth: 8                   # deepest drawn indentation (0-64)
     on_close_parent: promote       # promote | close_children
+    wmux_groups: true              # sidebar grouped by wmux window (with wmux)
+    background_label: "Background" # heading of tabs in no pane (grouped sidebar)
     key_sidebar: "Ctrl+Shift+greater"     # == Ctrl+Shift+period (Ctrl+Shift+.)
     key_collapse: "Ctrl+Shift+bracketleft"
     key_move_up: "Ctrl+Shift+Page_Up"

@@ -10,7 +10,18 @@
  *   - the tree sidebar beside the page: one row per view with indentation,
  *     a twisty, the favicon, the title, a close button and a container
  *     colour stripe. Rows are kept and updated in place: a change only
- *     touches the rows (and the properties) it affects.
+ *     touches the rows (and the properties) it affects. The rows come
+ *     from gsurf_tab_tree_build_rows() (the opener tree) or, while the
+ *     window's layout has groups and wmux_groups is on, from
+ *     gsurf_tab_tree_build_grouped_rows(): a heading row per group
+ *     ("0:name*", click to show that group) with the tabs its panes show
+ *     and their background descendants, then a background group.
+ *
+ * Tab rows are drag sources (GSURF_LAYOUT_VIEW_MIME_TYPE, same app):
+ * dropped on another tab row they re-parent the tab (upper quarter:
+ * before it, lower quarter: after it, middle: under it); dropped on a
+ * window layout (wmux panes) the layout takes them. A plain primary click
+ * (released without a drag) activates the tab.
  *
  * All toolkit calls go through modules/include/gsurf-chrome-compat.h, so
  * this file builds unchanged on GTK3 and GTK4.
@@ -42,7 +53,9 @@ enum {
 
 struct _GsurfTabsRow
 {
-	guint64    id;
+	guint64    id;       /* the row key: a view id, or GSURF_TAB_GROUP_KEY() */
+	GsurfTabRowKind kind;
+	guint      group;    /* a heading's group index */
 	GtkWidget *row;      /* retained; the clickable (GTK3: an event box) */
 	GtkWidget *box;      /* horizontal content box, indented */
 	GtkWidget *stripe;
@@ -57,8 +70,15 @@ struct _GsurfTabsRow
 	gint       visible;
 	gint       active;
 	gint       in_pane;  /* on screen in another pane (a window layout) */
+	gint       current;  /* a heading: its group is on screen */
 	gchar     *container_class;
+	gchar     *label;    /* a heading's text, as last set */
+	const gchar *drop_class; /* the drop indicator shown, or NULL */
 };
+
+/* Whether a row key names a group heading (view ids never set the top
+ * bit). */
+#define KEY_IS_GROUP(key) (((key) & GSURF_TAB_GROUP_KEY(0)) != 0)
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -133,10 +153,16 @@ build_css(GsurfTabsModule *self)
 		".gsurf-tab-visible { background-color: %s; }\n"
 		".gsurf-tab-row-visible { background-color: %s; }\n"
 		".gsurf-tab-stripe { min-width: 3px; }\n"
-		".gsurf-tab-stripe-on { background-color: %s; }\n",
+		".gsurf-tab-stripe-on { background-color: %s; }\n"
+		".gsurf-tab-group label { font-weight: bold; }\n"
+		".gsurf-tab-group-current { background-color: %s; }\n"
+		".gsurf-tab-drop-before { box-shadow: inset 0px 2px %s; }\n"
+		".gsurf-tab-drop-after { box-shadow: inset 0px -2px %s; }\n"
+		".gsurf-tab-drop-child { box-shadow: inset 0px 0px 0px 2px %s; }\n",
 		self->bg_color, self->fg_color, self->fg_color,
 		self->active_color, self->active_color,
-		self->visible_color, self->visible_color, self->fg_color);
+		self->visible_color, self->visible_color, self->fg_color,
+		self->visible_color, self->fg_color, self->fg_color, self->fg_color);
 
 	/* Container colours come later, so they win over the plain stripe. */
 	if (self->registry != NULL) {
@@ -542,12 +568,151 @@ on_row_menu(GtkWidget *widget, gpointer user_data)
 	menu_popup(self, gsurf_tabs_get_widget_id(widget), widget, self->sidebar_box);
 }
 
+/* A primary click on a group heading shows that group (the background
+ * heading has nothing to show: it collapses or expands instead). */
+static void
+on_group_click(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint index = (guint)(gsurf_tabs_get_widget_id(widget) & G_MAXUINT32);
+
+	if (index == GSURF_TAB_GROUP_BACKGROUND)
+		gsurf_tabs_toggle_group(self, index);
+	else
+		gsurf_tabs_select_group(self, index);
+}
+
 static void
 on_row_twisty_clicked(GtkButton *button, gpointer user_data)
 {
-	gsurf_tabs_toggle_collapse(GSURF_TABS_MODULE(user_data),
-		gsurf_tabs_get_widget_id(GTK_WIDGET(button)));
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint64 key = gsurf_tabs_get_widget_id(GTK_WIDGET(button));
+
+	if (KEY_IS_GROUP(key))
+		gsurf_tabs_toggle_group(self, (guint)(key & G_MAXUINT32));
+	else
+		gsurf_tabs_toggle_collapse(self, key);
 }
+
+/* --- Drag and drop on tab rows --- */
+
+/* The row behind a tab row widget. */
+static GsurfTabsRow *
+row_of(GsurfTabsModule *self, GtkWidget *widget)
+{
+	guint64 key = gsurf_tabs_get_widget_id(widget);
+
+	return self->rows != NULL ? g_hash_table_lookup(self->rows, &key) : NULL;
+}
+
+/* Show (or, with NULL, hide) a row's drop indicator. */
+static void
+row_set_drop(GsurfTabsRow *row, const gchar *drop_class)
+{
+	if (row->drop_class == drop_class)
+		return;
+	if (row->drop_class != NULL)
+		gsurf_chrome_widget_remove_class(row->row, row->drop_class);
+	if (drop_class != NULL)
+		gsurf_chrome_widget_add_class(row->row, drop_class);
+	row->drop_class = drop_class;
+}
+
+/* Where a drop at @y (row coordinates) on a row of @height goes: the
+ * upper quarter before the row's tab, the lower quarter after it (as a
+ * sibling), the middle under it (as its last child). */
+static GsurfTabTreeDrop
+drop_where(gint y, gint height)
+{
+	if (height > 0 && y < height / 4)
+		return GSURF_TAB_TREE_DROP_BEFORE;
+	if (height > 0 && y >= height - height / 4)
+		return GSURF_TAB_TREE_DROP_AFTER;
+	return GSURF_TAB_TREE_DROP_CHILD;
+}
+
+static const gchar *
+drop_class_of(GsurfTabTreeDrop where)
+{
+	switch (where) {
+	case GSURF_TAB_TREE_DROP_BEFORE: return GSURF_TABS_DROP_BEFORE_CLASS;
+	case GSURF_TAB_TREE_DROP_AFTER:  return GSURF_TABS_DROP_AFTER_CLASS;
+	case GSURF_TAB_TREE_DROP_CHILD:
+	default:                         return GSURF_TABS_DROP_CHILD_CLASS;
+	}
+}
+
+static gchar *
+on_row_drag_payload(GtkWidget *widget, gpointer user_data)
+{
+	(void)user_data;
+	return g_strdup_printf("%" G_GUINT64_FORMAT, gsurf_tabs_get_widget_id(widget));
+}
+
+static void
+on_row_drag_begin(GtkWidget *widget, gpointer user_data)
+{
+	gsurf_tabs_drag_begin(GSURF_TABS_MODULE(user_data), gsurf_tabs_get_widget_id(widget));
+}
+
+static void
+on_row_drag_end(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint i;
+
+	(void)widget;
+	gsurf_tabs_drag_end(self);
+	for (i = 0; self->row_order != NULL && i < self->row_order->len; i++)
+		row_set_drop(g_ptr_array_index(self->row_order, i), NULL);
+}
+
+static gboolean
+on_row_drop_motion(GtkWidget *widget, gint x, gint y, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	GsurfTabsRow *row = row_of(self, widget);
+
+	(void)x;
+	if (row == NULL || !gsurf_tabs_can_drop(self, row->id)) {
+		if (row != NULL)
+			row_set_drop(row, NULL);
+		return FALSE;
+	}
+	row_set_drop(row, drop_class_of(drop_where(y, gsurf_chrome_widget_get_height(widget))));
+	return TRUE;
+}
+
+static void
+on_row_drop_leave(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsRow *row = row_of(GSURF_TABS_MODULE(user_data), widget);
+
+	if (row != NULL)
+		row_set_drop(row, NULL);
+}
+
+static gboolean
+on_row_drop(GtkWidget *widget, gint x, gint y, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint64 target = gsurf_tabs_get_widget_id(widget);
+
+	(void)x;
+	return gsurf_tabs_drop(self, target, drop_where(y, gsurf_chrome_widget_get_height(widget)));
+}
+
+static const GsurfChromeDragFuncs row_drag_funcs = {
+	on_row_drag_payload,
+	on_row_drag_begin,
+	on_row_drag_end
+};
+
+static const GsurfChromeDropFuncs row_drop_funcs = {
+	on_row_drop_motion,
+	on_row_drop_leave,
+	on_row_drop
+};
 
 static void
 on_row_close_clicked(GtkButton *button, gpointer user_data)
@@ -557,14 +722,18 @@ on_row_close_clicked(GtkButton *button, gpointer user_data)
 }
 
 /* Build one row: [stripe][twisty][favicon][title.........][close],
- * indented by the content box's start margin. */
+ * indented by the content box's start margin. A group heading keeps only
+ * the twisty and the title. */
 static GsurfTabsRow *
-row_new(GsurfTabsModule *self, guint64 id)
+row_new(GsurfTabsModule *self, guint64 id, GsurfTabRowKind kind)
 {
 	GsurfTabsRow *row;
 
 	row = g_new0(GsurfTabsRow, 1);
 	row->id = id;
+	row->kind = kind;
+	row->group = (guint)(id & G_MAXUINT32);
+	row->current = -1;
 	row->indent = -1;
 	row->twisty_state = TWISTY_UNSET;
 	row->visible = -1;
@@ -604,12 +773,33 @@ row_new(GsurfTabsModule *self, guint64 id)
 	gsurf_chrome_box_pack(row->box, row->title, TRUE, 0);
 	gsurf_chrome_box_pack(row->box, row->close, FALSE, 0);
 
-	/* Clicks: primary activates, middle closes, secondary opens the
-	 * context menu. The twisty and close buttons keep their own presses. */
 	row->row = g_object_ref_sink(gsurf_chrome_clickable_new(row->box));
-	gsurf_chrome_widget_add_class(row->row, "gsurf-tab-row");
+	gsurf_chrome_widget_add_class(row->row, GSURF_TABS_ROW_CLASS);
 	gsurf_tabs_set_widget_id(row->row, id);
-	gsurf_chrome_connect_click(row->row, 1, on_row_click, self);
+
+	/* A heading: a click shows its group; no favicon, close or stripe. */
+	if (kind == GSURF_TAB_ROW_GROUP) {
+		gsurf_chrome_widget_add_class(row->row, GSURF_TABS_GROUP_CLASS);
+		gtk_widget_set_visible(row->icon, FALSE);
+		gtk_widget_set_visible(row->close, FALSE);
+		gtk_widget_set_visible(row->stripe, FALSE);
+#ifdef GSURF_BACKEND_GTK3
+		gtk_widget_set_no_show_all(row->icon, TRUE);
+		gtk_widget_set_no_show_all(row->close, TRUE);
+		gtk_widget_set_no_show_all(row->stripe, TRUE);
+#endif
+		gsurf_chrome_connect_release(row->row, 1, on_group_click, self);
+		return row;
+	}
+
+	/* A tab: draggable (set up before the clicks, so on GTK3 the drag
+	 * sees the press first), a drop target for other tabs; a primary
+	 * click released without a drag activates, middle closes, secondary
+	 * opens the context menu. The twisty and close buttons keep their
+	 * own presses. */
+	gsurf_chrome_drag_source_add(row->row, GSURF_LAYOUT_VIEW_MIME_TYPE, &row_drag_funcs, self);
+	gsurf_chrome_drop_target_add(row->row, GSURF_LAYOUT_VIEW_MIME_TYPE, &row_drop_funcs, self);
+	gsurf_chrome_connect_release(row->row, 1, on_row_click, self);
 	gsurf_chrome_connect_click(row->row, 2, on_row_middle_click, self);
 	gsurf_chrome_connect_click(row->row, 3, on_row_menu, self);
 	return row;
@@ -620,11 +810,13 @@ static void
 row_free(GsurfTabsModule *self, GsurfTabsRow *row)
 {
 	gsurf_chrome_disconnect_click(row->row, self);
+	gsurf_chrome_disconnect_dnd(row->row, self);
 	g_signal_handlers_disconnect_by_data(row->twisty, self);
 	g_signal_handlers_disconnect_by_data(row->close, self);
 	gsurf_chrome_widget_detach(row->row);
 	g_clear_object(&row->row);
 	g_free(row->container_class);
+	g_free(row->label);
 	g_free(row);
 }
 
@@ -632,13 +824,20 @@ row_free(GsurfTabsModule *self, GsurfTabsRow *row)
 static void
 row_update_content(GsurfTabsModule *self, GsurfTabsRow *row)
 {
-	GsurfView *view = gsurf_view_lookup(row->id);
-	GsurfContainer *container = view_container(self, view);
-	const gchar *text = view_label(view);
-	const gchar *container_id = container != NULL ? gsurf_container_get_id(container) : NULL;
+	GsurfView *view;
+	GsurfContainer *container;
+	const gchar *text;
+	const gchar *container_id;
 	g_autofree gchar *wanted_class = NULL;
 	g_autofree gchar *tooltip = NULL;
 
+	/* A heading's text comes with each sync (row_update_group()). */
+	if (row->kind == GSURF_TAB_ROW_GROUP)
+		return;
+	view = gsurf_view_lookup(row->id);
+	container = view_container(self, view);
+	text = view_label(view);
+	container_id = container != NULL ? gsurf_container_get_id(container) : NULL;
 	gtk_label_set_text(GTK_LABEL(row->title), text);
 	gsurf_chrome_image_set_native(row->icon,
 		view != NULL ? gsurf_view_get_favicon(view) : NULL, GSURF_TABS_FAVICON_SIZE);
@@ -669,12 +868,42 @@ row_update_content(GsurfTabsModule *self, GsurfTabsRow *row)
 	gtk_widget_set_tooltip_text(row->row, tooltip);
 }
 
+/* A heading's text ("0:name*" for the current group, "1:name" for the
+ * others, the background label for the background group) and its
+ * current-group style, touching only what changed. */
+static void
+row_update_group(GsurfTabsModule *self, GsurfTabsRow *row, GsurfLayoutGroup *group)
+{
+	g_autofree gchar *label = NULL;
+	gint current;
+
+	if (row->group == GSURF_TAB_GROUP_BACKGROUND || group == NULL) {
+		label = g_strdup(self->background_label);
+		current = 0;
+	} else {
+		current = gsurf_layout_group_get_current(group) ? 1 : 0;
+		label = g_strdup_printf("%u:%s%s", gsurf_layout_group_get_index(group),
+			gsurf_layout_group_get_name(group), current ? "*" : "");
+	}
+	if (g_strcmp0(label, row->label) != 0) {
+		gtk_label_set_text(GTK_LABEL(row->title), label);
+		gtk_widget_set_tooltip_text(row->row, label);
+		g_free(row->label);
+		row->label = g_steal_pointer(&label);
+	}
+	if (current != row->current) {
+		gsurf_chrome_widget_set_class(row->row, GSURF_TABS_GROUP_CURRENT_CLASS, current);
+		row->current = current;
+	}
+}
+
 /* Indentation, twisty, visibility and highlight of one row, touching
  * only what changed since the last sync. The highlight is the active
  * tab's style, or the "visible" style for a tab a window layout shows in
- * another pane. */
+ * another pane; headings have neither. */
 static void
-row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
+row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, const GsurfTabDisplayRow *d,
+                guint64 active)
 {
 	gint indent;
 	gint twisty;
@@ -682,17 +911,16 @@ row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 	gint is_active;
 	gint in_pane;
 
-	indent = (gint)gsurf_tab_tree_get_display_depth(self->tree, row->id,
-		(guint)self->max_depth) * self->indent;
+	indent = (gint)MIN(d->depth, (guint)self->max_depth) * self->indent;
 	if (indent != row->indent) {
 		gtk_widget_set_margin_start(row->box, indent);
 		row->indent = indent;
 	}
 
-	if (gsurf_tab_tree_get_n_children(self->tree, row->id) == 0)
+	if (!d->has_children)
 		twisty = TWISTY_NONE;
 	else
-		twisty = gsurf_tab_tree_get_collapsed(self->tree, row->id) ? TWISTY_SHUT : TWISTY_OPEN;
+		twisty = d->collapsed ? TWISTY_SHUT : TWISTY_OPEN;
 	if (twisty != row->twisty_state) {
 		gtk_button_set_label(GTK_BUTTON(row->twisty),
 			twisty == TWISTY_OPEN ? TWISTY_EXPANDED
@@ -701,12 +929,14 @@ row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 		row->twisty_state = twisty;
 	}
 
-	visible = gsurf_tab_tree_is_visible(self->tree, row->id) ? 1 : 0;
+	visible = d->visible ? 1 : 0;
 	if (visible != row->visible) {
 		gtk_widget_set_visible(row->row, visible);
 		row->visible = visible;
 	}
 
+	if (row->kind == GSURF_TAB_ROW_GROUP)
+		return;
 	is_active = (row->id == active) ? 1 : 0;
 	if (is_active != row->active) {
 		gsurf_chrome_widget_set_class(row->row, "gsurf-tab-row-active", is_active);
@@ -720,12 +950,65 @@ row_update_tree(GsurfTabsModule *self, GsurfTabsRow *row, guint64 active)
 	}
 }
 
-/* Bring the rows in line with the tree: create missing rows, put every
- * row at its tree position, update what changed and drop rows of tabs
- * that left. */
+/*
+ * build_display_rows:
+ * @groups: (out) (transfer full) (nullable): the layout's groups when the
+ *   rows are grouped by them
+ *
+ * The sidebar's rows: grouped by the window layout's groups (wmux
+ * windows) when wmux_groups is on and the layout has groups, else the
+ * opener tree as it is.
+ */
+static GArray *
+build_display_rows(GsurfTabsModule *self, GPtrArray **groups)
+{
+	g_autoptr(GArray) specs = NULL;
+	GArray *rows;
+	guint i;
+
+	*groups = gsurf_tabs_list_groups(self);
+	if (*groups == NULL)
+		return gsurf_tab_tree_build_rows(self->tree);
+
+	specs = g_array_sized_new(FALSE, TRUE, sizeof(GsurfTabGroupSpec), (*groups)->len);
+	for (i = 0; i < (*groups)->len; i++) {
+		GsurfLayoutGroup *group = g_ptr_array_index(*groups, i);
+		GsurfTabGroupSpec spec;
+
+		spec.ids = gsurf_layout_group_get_view_ids(group, &spec.n_ids);
+		spec.index = gsurf_layout_group_get_index(group);
+		spec.collapsed = gsurf_tabs_group_collapsed(self, spec.index);
+		g_array_append_val(specs, spec);
+	}
+	rows = gsurf_tab_tree_build_grouped_rows(self->tree, (GsurfTabGroupSpec *)(gpointer)specs->data,
+		specs->len, self->background_collapsed);
+	return rows;
+}
+
+/* The group with @index in @groups, or NULL. */
+static GsurfLayoutGroup *
+find_group(GPtrArray *groups, guint index)
+{
+	guint i;
+
+	for (i = 0; groups != NULL && i < groups->len; i++) {
+		GsurfLayoutGroup *group = g_ptr_array_index(groups, i);
+
+		if (gsurf_layout_group_get_index(group) == index)
+			return group;
+	}
+	return NULL;
+}
+
+/* Bring the rows in line with the display rows: create missing rows, put
+ * every row at its position, update what changed and drop rows that are
+ * gone (closed tabs, killed groups, a regrouping). */
 static void
 sidebar_sync(GsurfTabsModule *self)
 {
+	g_autoptr(GPtrArray) groups = NULL;
+	g_autoptr(GArray) display = NULL;
+	g_autoptr(GHashTable) wanted = NULL;
 	guint64 active = 0;
 	guint i;
 	guint n;
@@ -735,15 +1018,31 @@ sidebar_sync(GsurfTabsModule *self)
 	if (self->window != NULL && gsurf_window_get_active_view(self->window) != NULL)
 		active = gsurf_view_get_id(gsurf_window_get_active_view(self->window));
 
-	n = gsurf_tab_tree_get_n_tabs(self->tree);
+	display = build_display_rows(self, &groups);
+	n = display->len;
+
+	/* 1. Rows whose key is gone go first (indices stay simple). */
+	wanted = g_hash_table_new(g_int64_hash, g_int64_equal);
+	for (i = 0; i < n; i++)
+		g_hash_table_add(wanted, &g_array_index(display, GsurfTabDisplayRow, i).key);
+	for (i = self->row_order->len; i > 0; i--) {
+		GsurfTabsRow *row = g_ptr_array_index(self->row_order, i - 1);
+
+		if (g_hash_table_contains(wanted, &row->id))
+			continue;
+		g_ptr_array_remove_index(self->row_order, i - 1);
+		g_hash_table_remove(self->rows, &row->id);
+		row_free(self, row);
+	}
+
 	for (i = 0; i < n; i++) {
-		guint64 id = gsurf_tab_tree_get_nth(self->tree, i);
-		GsurfTabsRow *row = g_hash_table_lookup(self->rows, &id);
+		const GsurfTabDisplayRow *d = &g_array_index(display, GsurfTabDisplayRow, i);
+		GsurfTabsRow *row = g_hash_table_lookup(self->rows, &d->key);
 		guint at;
 
-		/* 1. A new tab gets a row (appended, then moved below). */
+		/* 2. A new row (appended, then moved below). */
 		if (row == NULL) {
-			row = row_new(self, id);
+			row = row_new(self, d->key, d->kind);
 			g_hash_table_insert(self->rows, &row->id, row);
 			g_ptr_array_add(self->row_order, row);
 			gsurf_chrome_box_pack(self->sidebar_list, row->row, FALSE, 0);
@@ -751,7 +1050,7 @@ sidebar_sync(GsurfTabsModule *self)
 			row_update_content(self, row);
 		}
 
-		/* 2. Move it to position i if it is elsewhere. */
+		/* 3. Move it to position i if it is elsewhere. */
 		if (g_ptr_array_index(self->row_order, i) != row &&
 		    g_ptr_array_find(self->row_order, row, &at)) {
 			g_ptr_array_steal_index(self->row_order, at);
@@ -759,16 +1058,10 @@ sidebar_sync(GsurfTabsModule *self)
 			gsurf_chrome_box_move_child(self->sidebar_list, row->row, i);
 		}
 
-		/* 3. Tree state. */
-		row_update_tree(self, row, active);
-	}
-
-	/* 4. Rows past the live tabs belong to closed tabs. */
-	while (self->row_order->len > n) {
-		GsurfTabsRow *row = g_ptr_array_steal_index(self->row_order, self->row_order->len - 1);
-
-		g_hash_table_remove(self->rows, &row->id);
-		row_free(self, row);
+		/* 4. Tree state, and a heading's text. */
+		if (row->kind == GSURF_TAB_ROW_GROUP)
+			row_update_group(self, row, find_group(groups, row->group));
+		row_update_tree(self, row, d, active);
 	}
 }
 

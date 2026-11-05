@@ -7,8 +7,10 @@
  * after the opener's last descendant, nesting, promote vs close_children,
  * collapse and expansion on activation, moving subtrees, max_depth,
  * orphaned openers, rebuilding from the window order alone, handing a
- * tab's place to its replacement (reopen in another container), and a
- * randomized stress run against the structural invariants.
+ * tab's place to its replacement (reopen in another container), drag and
+ * drop re-parenting (move_to), the sidebar's display rows (the opener
+ * tree, and grouped by a window layout's groups such as wmux windows),
+ * and a randomized stress run against the structural invariants.
  *
  * Part 2 loads the real tabs.so (no window, no display) and checks its
  * configuration through the keys it reports: defaults, custom keys, a
@@ -382,6 +384,186 @@ test_move_subtrees(void)
 /* ------------------------------------------------------------------ */
 /* Depth cap, orphans and rebuilding                                   */
 /* ------------------------------------------------------------------ */
+/* Drag and drop re-parenting                                          */
+/* ------------------------------------------------------------------ */
+
+/* sample_tree(): 1 [ 2 [ 3 4 ] 5 ] 6 */
+static void
+test_move_to(void)
+{
+	g_autoptr(GsurfTabTree) tree = sample_tree();
+
+	/* 1. Never into its own subtree, never onto itself, never unknown. */
+	g_assert_false(gsurf_tab_tree_move_to(tree, 2, 3, GSURF_TAB_TREE_DROP_CHILD));
+	g_assert_false(gsurf_tab_tree_move_to(tree, 2, 2, GSURF_TAB_TREE_DROP_BEFORE));
+	g_assert_false(gsurf_tab_tree_move_to(tree, 1, 4, GSURF_TAB_TREE_DROP_AFTER));
+	g_assert_false(gsurf_tab_tree_move_to(tree, 42, 1, GSURF_TAB_TREE_DROP_CHILD));
+	g_assert_false(gsurf_tab_tree_move_to(tree, 1, 42, GSURF_TAB_TREE_DROP_CHILD));
+	assert_order(tree, "1 2 3 4 5 6");
+	g_assert_true(gsurf_tab_tree_is_in_subtree(tree, 4, 1));
+	g_assert_true(gsurf_tab_tree_is_in_subtree(tree, 2, 2));
+	g_assert_false(gsurf_tab_tree_is_in_subtree(tree, 6, 1));
+	g_assert_false(gsurf_tab_tree_is_in_subtree(tree, 1, 2));
+
+	/* 2. Under another tab: 2's whole block becomes 6's last child. */
+	g_assert_true(gsurf_tab_tree_move_to(tree, 2, 6, GSURF_TAB_TREE_DROP_CHILD));
+	assert_order(tree, "1 5 6 2 3 4");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 2), ==, 6);
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 3), ==, 2);
+	g_assert_cmpuint(gsurf_tab_tree_get_depth(tree, 4), ==, 2);
+	assert_invariants(tree);
+
+	/* 3. Before a tab: a sibling of it, at its parent. */
+	g_assert_true(gsurf_tab_tree_move_to(tree, 4, 1, GSURF_TAB_TREE_DROP_BEFORE));
+	assert_order(tree, "4 1 5 6 2 3");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 4), ==, 0);
+	g_assert_true(gsurf_tab_tree_move_to(tree, 3, 5, GSURF_TAB_TREE_DROP_BEFORE));
+	assert_order(tree, "4 1 3 5 6 2");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 3), ==, 1);
+	assert_invariants(tree);
+
+	/* 4. After a tab: after its whole block, at its parent. */
+	g_assert_true(gsurf_tab_tree_move_to(tree, 4, 1, GSURF_TAB_TREE_DROP_AFTER));
+	assert_order(tree, "1 3 5 4 6 2");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 4), ==, 0);
+	/* A child moved after its own parent leaves it. */
+	g_assert_true(gsurf_tab_tree_move_to(tree, 2, 6, GSURF_TAB_TREE_DROP_AFTER));
+	assert_order(tree, "1 3 5 4 6 2");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 2), ==, 0);
+	/* A descendant moved under an ancestor becomes its last child. */
+	g_assert_true(gsurf_tab_tree_move_to(tree, 3, 1, GSURF_TAB_TREE_DROP_CHILD));
+	assert_order(tree, "1 5 3 4 6 2");
+	g_assert_cmpuint(gsurf_tab_tree_get_parent(tree, 3), ==, 1);
+	assert_invariants(tree);
+}
+
+/* ------------------------------------------------------------------ */
+/* Display rows                                                        */
+/* ------------------------------------------------------------------ */
+
+/* The rows as "key:depth[flags] ..." where a group key is shown as
+ * "G<index>" ("Gbg" for the background group) and flags are c (has
+ * children), x (collapsed) and h (hidden). */
+static gchar *
+rows_string(GArray *rows)
+{
+	GString *s = g_string_new(NULL);
+	guint i;
+
+	for (i = 0; i < rows->len; i++) {
+		GsurfTabDisplayRow *r = &g_array_index(rows, GsurfTabDisplayRow, i);
+
+		if (i > 0)
+			g_string_append_c(s, ' ');
+		if (r->kind == GSURF_TAB_ROW_GROUP) {
+			g_assert_true(r->key == GSURF_TAB_GROUP_KEY(r->group));
+			if (r->group == GSURF_TAB_GROUP_BACKGROUND)
+				g_string_append(s, "Gbg");
+			else
+				g_string_append_printf(s, "G%u", r->group);
+		} else {
+			g_string_append_printf(s, "%" G_GUINT64_FORMAT, r->key);
+		}
+		g_string_append_printf(s, ":%u%s%s%s", r->depth, r->has_children ? "c" : "",
+			r->collapsed ? "x" : "", r->visible ? "" : "h");
+	}
+	return g_string_free(s, FALSE);
+}
+
+#define ASSERT_ROWS(rows, expected) G_STMT_START { \
+	g_autofree gchar *got_ = rows_string(rows); \
+	g_assert_cmpstr(got_, ==, (expected)); \
+} G_STMT_END
+
+/* Without groups the rows are the opener tree, exactly. */
+static void
+test_rows_flat(void)
+{
+	g_autoptr(GsurfTabTree) tree = sample_tree();
+	g_autoptr(GArray) rows = gsurf_tab_tree_build_rows(tree);
+	g_autoptr(GArray) after = NULL;
+
+	ASSERT_ROWS(rows, "1:0c 2:1c 3:2 4:2 5:1 6:0");
+	gsurf_tab_tree_set_collapsed(tree, 2, TRUE);
+	after = gsurf_tab_tree_build_rows(tree);
+	ASSERT_ROWS(after, "1:0c 2:1cx 3:2h 4:2h 5:1 6:0");
+	/* Collapsing a leaf shows nothing as collapsed. */
+	gsurf_tab_tree_set_collapsed(tree, 6, TRUE);
+	g_clear_pointer(&after, g_array_unref);
+	after = gsurf_tab_tree_build_rows(tree);
+	ASSERT_ROWS(after, "1:0c 2:1cx 3:2h 4:2h 5:1 6:0");
+}
+
+/* Grouped: pane tabs under their group in pane order, each with its
+ * background descendants; descendants in panes are listed under their
+ * own pane; the rest under the background group. */
+static void
+test_rows_grouped(void)
+{
+	g_autoptr(GsurfTabTree) tree = sample_tree();
+	g_autoptr(GArray) rows = NULL;
+	/* Window 0 shows 5 and 1 (pane order), window 1 shows 3; 7 is a
+	 * stale id the tree does not know. */
+	static const guint64 win0[] = { 5, 1, 7 };
+	static const guint64 win1[] = { 3 };
+	GsurfTabGroupSpec groups[2] = {
+		{ win0, G_N_ELEMENTS(win0), 0, FALSE },
+		{ win1, G_N_ELEMENTS(win1), 1, FALSE },
+	};
+
+	/* 1. 1's subtree: 2 (background) with 4 under it; 3 is in a pane
+	 *    (window 1) and listed there; 5 is a pane of its own, listed
+	 *    first. 6 is in no pane and no pane tab's subtree. */
+	rows = gsurf_tab_tree_build_grouped_rows(tree, groups, 2, FALSE);
+	ASSERT_ROWS(rows, "G0:0c 5:1 1:1c 2:2c 4:3 G1:0c 3:1 Gbg:0c 6:1");
+	g_clear_pointer(&rows, g_array_unref);
+
+	/* 2. A collapsed group heading hides its whole group; a collapsed
+	 *    tab its nested rows; the background heading collapses too. */
+	groups[0].collapsed = TRUE;
+	gsurf_tab_tree_set_collapsed(tree, 2, TRUE);
+	rows = gsurf_tab_tree_build_grouped_rows(tree, groups, 2, TRUE);
+	ASSERT_ROWS(rows, "G0:0cx 5:1h 1:1ch 2:2cxh 4:3h G1:0c 3:1 Gbg:0cx 6:1h");
+	g_clear_pointer(&rows, g_array_unref);
+	groups[0].collapsed = FALSE;
+	rows = gsurf_tab_tree_build_grouped_rows(tree, groups, 2, FALSE);
+	ASSERT_ROWS(rows, "G0:0c 5:1 1:1c 2:2cx 4:3h G1:0c 3:1 Gbg:0c 6:1");
+	g_clear_pointer(&rows, g_array_unref);
+	gsurf_tab_tree_set_collapsed(tree, 2, FALSE);
+
+	/* 3. Every tab in a pane: no background group. An empty group still
+	 *    has its heading, without children. A tab listed by two groups
+	 *    shows in the first only. */
+	{
+		static const guint64 all[] = { 1, 6 };
+		static const guint64 dup[] = { 6 };
+		GsurfTabGroupSpec g2[3] = {
+			{ all, G_N_ELEMENTS(all), 0, FALSE },
+			{ NULL, 0, 4, FALSE },
+			{ dup, G_N_ELEMENTS(dup), 5, FALSE },
+		};
+
+		rows = gsurf_tab_tree_build_grouped_rows(tree, g2, 3, FALSE);
+		ASSERT_ROWS(rows, "G0:0c 1:1c 2:2c 3:3 4:3 5:2 6:1 G4:0 G5:0");
+		g_clear_pointer(&rows, g_array_unref);
+	}
+
+	/* 4. No groups at all: everything is background, at depth + 1. */
+	rows = gsurf_tab_tree_build_grouped_rows(tree, NULL, 0, FALSE);
+	ASSERT_ROWS(rows, "Gbg:0c 1:1c 2:2c 3:3 4:3 5:2 6:1");
+	g_clear_pointer(&rows, g_array_unref);
+
+	/* 5. An empty tree: no rows but the group headings. */
+	{
+		g_autoptr(GsurfTabTree) empty = gsurf_tab_tree_new();
+
+		rows = gsurf_tab_tree_build_grouped_rows(empty, groups, 2, FALSE);
+		ASSERT_ROWS(rows, "G0:0 G1:0");
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
 
 static void
 test_max_depth(void)
@@ -661,6 +843,8 @@ test_module_bad_config(void)
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.indent*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.max_depth*");
 	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING, "*tabs.on_close_parent*");
+	g_test_expect_message(G_LOG_DOMAIN, G_LOG_LEVEL_WARNING,
+		"*tabs.background_label must be a non-empty string*");
 	configure_with(module,
 		"modules:\n  tabs:\n    enabled: true\n"
 		"    position: sideways\n"
@@ -671,6 +855,8 @@ test_module_bad_config(void)
 		"    indent: -3\n"
 		"    max_depth: 1000\n"
 		"    on_close_parent: explode\n"
+		"    wmux_groups: false\n"
+		"    background_label: \"\"\n"
 		"    key_move_down: \"Alt+Down\"\n");
 	g_test_assert_expected_messages();
 	g_assert_cmpstr(key_for(module, "tab-move-down", entries), ==, "Alt+Down");
@@ -691,6 +877,9 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/tab-tree/max-depth", test_max_depth);
 	g_test_add_func("/gsurf/tab-tree/orphan", test_orphaned_opener);
 	g_test_add_func("/gsurf/tab-tree/rebuild", test_rebuild_from_window_order);
+	g_test_add_func("/gsurf/tab-tree/move-to", test_move_to);
+	g_test_add_func("/gsurf/tab-tree/rows-flat", test_rows_flat);
+	g_test_add_func("/gsurf/tab-tree/rows-grouped", test_rows_grouped);
 	g_test_add_func("/gsurf/tab-tree/stress", test_stress);
 	g_test_add_func("/gsurf/tabs/config", test_module_config);
 	g_test_add_func("/gsurf/tabs/bad-config", test_module_bad_config);

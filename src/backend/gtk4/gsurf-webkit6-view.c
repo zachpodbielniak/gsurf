@@ -39,10 +39,9 @@ on_context_menu(WebKitWebView *wv, WebKitContextMenu *menu,
                 WebKitHitTestResult *hit, gpointer user_data)
 {
 	(void) wv;
-	(void) user_data;
 	if (gsurf_kiosk_is_enabled())
 		return TRUE;
-	gsurf_webkit_common_populate_menu(menu, hit);
+	gsurf_webkit_common_populate_menu(GSURF_VIEW(user_data), menu, hit);
 	return FALSE;
 }
 

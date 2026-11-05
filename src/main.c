@@ -189,6 +189,8 @@ static void       load_uri_rewritten(GsurfView *view, const gchar *input);
 static void       setup_view(GsurfApplication *app, GsurfWindow *window, GsurfView *view);
 static GsurfView *make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri,
                            gboolean related);
+static GsurfView *make_tab_full(GsurfWindow *window, GsurfView *opener, const gchar *uri,
+                                gboolean related, gboolean activate);
 static GsurfView *make_tab_popup(GsurfWindow *window, GsurfView *opener,
                                  const gchar *hint);
 
@@ -255,6 +257,14 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 		/* A link opened in a new view is a child of this view in the
 		 * tab tree; a blank new view has no opener. */
 		make_tab(window, link ? view : NULL, uri, FALSE);
+		return TRUE;
+	}
+	case GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND: {
+		const gchar *hovered = gsurf_view_get_hovered_uri(view);
+
+		/* Only over a link: a child tab of this view, behind it. */
+		if (hovered != NULL && *hovered != '\0')
+			make_tab_full(window, view, hovered, FALSE, FALSE);
 		return TRUE;
 	}
 	case GSURF_ACTION_TOGGLE_FULLSCREEN:
@@ -387,13 +397,17 @@ on_button_press(GsurfWindow *window, guint button, guint state, gpointer user_da
 	/* Mouse "open in new view" (middle-click / Ctrl-click) only fires over a
 	 * hovered link. Off a link we pass through so the engine keeps native
 	 * middle-click behavior (paste / autoscroll). */
-	if (action == GSURF_ACTION_OPEN_NEW_VIEW) {
+	if (action == GSURF_ACTION_OPEN_NEW_VIEW ||
+	    action == GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND) {
 		const gchar *hovered = (view != NULL) ? gsurf_view_get_hovered_uri(view) : NULL;
 		if (hovered == NULL || *hovered == '\0')
 			return FALSE;
 		if (opt_kiosk)
 			return TRUE;
-		make_tab(window, view, hovered, FALSE);
+		/* Either way a child of this view in the tab tree; the
+		 * background variant leaves this view active. */
+		make_tab_full(window, view, hovered, FALSE,
+			action == GSURF_ACTION_OPEN_NEW_VIEW);
 		return TRUE;
 	}
 
@@ -512,6 +526,21 @@ on_create_view(GsurfView *source, const gchar *uri, gpointer user_data)
 	return make_tab_popup(window, source, uri);
 }
 
+/* The page context menu's "Open Link in New Tab" (and any other
+ * gsurf_view_request_new_view() caller): an unrelated tab whose opener is
+ * @source, so the tab tree shows it as @source's child. */
+static gboolean
+on_new_view_requested(GsurfView *source, const gchar *uri, gboolean background,
+                      gpointer user_data)
+{
+	GsurfApplication *app = user_data;
+	GsurfWindow *window = gsurf_application_get_active_window(app);
+
+	if (window == NULL || opt_kiosk || uri == NULL || *uri == '\0')
+		return FALSE;
+	return make_tab_full(window, source, uri, FALSE, !background) != NULL;
+}
+
 /* Wire the host-level signals every view needs, regardless of how it was
  * created (initial view, tab module, or WebKit popup). Invoked from the
  * window's "view-added" signal so it covers all of them uniformly. */
@@ -525,6 +554,7 @@ setup_view(GsurfApplication *app, GsurfWindow *window, GsurfView *view)
 	g_signal_connect(view, "title-changed", G_CALLBACK(on_view_title_changed), window);
 	g_signal_connect(view, "load-changed", G_CALLBACK(on_view_load_changed), NULL);
 	g_signal_connect(view, "create-view", G_CALLBACK(on_create_view), app);
+	g_signal_connect(view, "new-view-requested", G_CALLBACK(on_new_view_requested), app);
 }
 
 static void
@@ -541,6 +571,16 @@ on_view_added(GsurfWindow *window, GsurfView *view, gpointer user_data)
 static GsurfView *
 make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri, gboolean related)
 {
+	return make_tab_full(window, opener, uri, related, TRUE);
+}
+
+/* make_tab(), optionally leaving the active view as it is (@activate
+ * FALSE: a background tab; with a window layout such as wmux it stays a
+ * background tab instead of taking the active pane). */
+static GsurfView *
+make_tab_full(GsurfWindow *window, GsurfView *opener, const gchar *uri, gboolean related,
+              gboolean activate)
+{
 	GsurfConfig *cfg = gsurf_config_get_default();
 	GsurfView *view = gsurf_view_new_full(opener, NULL, uri, related);
 
@@ -551,7 +591,8 @@ make_tab(GsurfWindow *window, GsurfView *opener, const gchar *uri, gboolean rela
 		gsurf_view_apply_settings(view, cfg->settings);
 
 	gsurf_window_add_view(window, view);          /* fires "view-added" -> setup_view */
-	gsurf_window_set_active_view(window, view);
+	if (activate)
+		gsurf_window_set_active_view(window, view);
 
 	if (uri != NULL && *uri != '\0')
 		load_uri_rewritten(view, uri);

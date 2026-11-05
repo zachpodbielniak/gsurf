@@ -20,7 +20,10 @@
  *
  * This file also implements #GsurfWindowLayout for the module: the window
  * hands views in (add_view), takes them out (remove_view), makes one
- * active (activate_view) and asks for visibility and a saved state.
+ * active (activate_view) and asks for visibility and a saved state; the
+ * tab sidebar lists the tmux windows as layout groups (list_groups,
+ * select_group, notified through gsurf_wmux_notify_groups()) and drops
+ * dragged tabs on panes (begin/end_view_drag, show_view_at).
  */
 
 #include <yaml-glib.h>
@@ -538,6 +541,78 @@ gsurf_wmux_break_pane(GsurfWmuxModule *self)
 	gsurf_wmux_show_active(self);
 }
 
+/*
+ * gsurf_wmux_show_view_at:
+ * @view: a view of the window, on screen or a background tab
+ * @target: a view in a pane of the current window, on screen
+ * @zone: CENTER, or the edge of @target's pane to split
+ *
+ * A tab dropped on a pane:
+ *   - CENTER: @target's pane shows @view and becomes active. When @view
+ *     was in another pane (of any window), the two swap places (tmux
+ *     swap-pane): nothing leaves the screen. Otherwise @target becomes a
+ *     background tab;
+ *   - an edge: @target's pane splits on that side (split_ratio) and the
+ *     new pane shows @view. When @view was in another pane, that pane
+ *     closes first (tmux join-pane), so a tab is never in two panes.
+ * Dropping a pane's own tab on its centre just selects the pane; on an
+ * edge it does nothing.
+ *
+ * Returns: whether the arrangement changed (or the pane was selected)
+ */
+gboolean
+gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view, GsurfView *target,
+                        GsurfWmuxDrop zone)
+{
+	GsurfWmuxWin *win = gsurf_wmux_current(self);
+	guint64 id;
+	guint64 target_id;
+	guint tw;
+	guint tp;
+	guint vw;
+	guint vp;
+
+	if (win == NULL || self->window == NULL || !self->attached || view == NULL ||
+	    target == NULL || gsurf_window_get_view_index(self->window, view) < 0)
+		return FALSE;
+	id = gsurf_view_get_id(view);
+	target_id = gsurf_view_get_id(target);
+
+	/* 1. The target must be on screen: in a pane of the current window,
+	 *    not hidden by a zoom. */
+	if (!gsurf_wmux_view_visible(self, target) ||
+	    !gsurf_wmux_find_view(self, target_id, &tw, &tp))
+		return FALSE;
+
+	/* 2. A pane's own tab. */
+	if (id == target_id) {
+		if (zone != GSURF_WMUX_DROP_CENTER)
+			return FALSE;
+		gsurf_wmux_select_pane(self, tp);
+		return TRUE;
+	}
+
+	/* 3. An edge: split the target's pane, the tab in the new one
+	 *    (gsurf_wmux_split() takes it out of its old pane first). */
+	if (zone != GSURF_WMUX_DROP_CENTER)
+		return gsurf_wmux_split(self, tp,
+			(zone == GSURF_WMUX_DROP_LEFT || zone == GSURF_WMUX_DROP_RIGHT)
+				? GSURF_WMUX_SPLIT_H : GSURF_WMUX_SPLIT_V,
+			zone == GSURF_WMUX_DROP_LEFT || zone == GSURF_WMUX_DROP_TOP,
+			FALSE, 0, FALSE, NULL, view);
+
+	/* 4. The centre: swap with the tab's old pane, or replace. */
+	if (gsurf_wmux_find_view(self, id, &vw, &vp)) {
+		GsurfWmuxWin *other = g_ptr_array_index(self->wins, vw);
+
+		gsurf_wmux_layout_set_payload(other->layout, vp, target_id);
+	}
+	gsurf_wmux_layout_set_payload(win->layout, tp, id);
+	gsurf_wmux_layout_set_active(win->layout, tp);
+	gsurf_wmux_show_active(self);
+	return TRUE;
+}
+
 void
 gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name)
 {
@@ -555,6 +630,47 @@ gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name)
 /* View signals                                                        */
 /* ------------------------------------------------------------------ */
 
+/* The groups as the sidebar shows them: each window's display name,
+ * whether it is current, and the views its panes show. */
+static gchar *
+groups_signature(GsurfWmuxModule *self)
+{
+	GString *sig = g_string_new(NULL);
+	guint i;
+	guint j;
+
+	if (!self->attached || self->wins == NULL)
+		return g_string_free(sig, FALSE);
+	for (i = 0; i < self->wins->len; i++) {
+		GsurfWmuxWin *win = g_ptr_array_index(self->wins, i);
+		g_autoptr(GArray) panes = gsurf_wmux_layout_list_panes(win->layout);
+		g_autofree gchar *name = gsurf_wmux_win_display_name(self, i);
+
+		g_string_append_printf(sig, "%u%s%s:", i, i == self->current ? "*" : "", name);
+		for (j = 0; j < panes->len; j++) {
+			GsurfView *view = gsurf_wmux_pane_view(self, win, g_array_index(panes, guint, j));
+
+			if (view != NULL)
+				g_string_append_printf(sig, "%" G_GUINT64_FORMAT ",", gsurf_view_get_id(view));
+		}
+		g_string_append_c(sig, '\n');
+	}
+	return g_string_free(sig, FALSE);
+}
+
+void
+gsurf_wmux_notify_groups(GsurfWmuxModule *self)
+{
+	g_autofree gchar *sig = groups_signature(self);
+
+	if (g_strcmp0(sig, self->groups_sig) == 0)
+		return;
+	g_free(self->groups_sig);
+	self->groups_sig = g_steal_pointer(&sig);
+	if (self->window != NULL && self->installed && self->attached)
+		gsurf_window_layout_notify_groups(self->window);
+}
+
 static void
 on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data)
 {
@@ -562,6 +678,8 @@ on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data)
 
 	(void)view;
 	(void)title;
+	/* An automatically named window follows its active pane's title. */
+	gsurf_wmux_notify_groups(self);
 	gsurf_wmux_ui_update_status(self);
 	if (self->chooser_open)
 		gsurf_wmux_ui_chooser_refresh(self);
@@ -597,7 +715,9 @@ gsurf_wmux_session_clear(GsurfWmuxModule *self)
 	self->current = 0;
 	self->last_win = -1;
 	self->in_activate = 0;
+	self->drag_view = 0;
 	g_clear_pointer(&self->visible_sig, g_free);
+	g_clear_pointer(&self->groups_sig, g_free);
 }
 
 /* ------------------------------------------------------------------ */
@@ -901,6 +1021,90 @@ wmux_restore(GsurfWindowLayout *layout, GsurfWindow *window, const gchar *text,
 	return TRUE;
 }
 
+/* The tmux windows as layout groups: index, status-line name, current,
+ * and the views their panes show in pane (layout) order. */
+static GPtrArray *
+wmux_list_groups(GsurfWindowLayout *layout, GsurfWindow *window)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+	GPtrArray *groups;
+	guint i;
+	guint j;
+
+	if (!self->attached || window != self->window || self->wins == NULL)
+		return NULL;
+	groups = g_ptr_array_new_with_free_func((GDestroyNotify)gsurf_layout_group_unref);
+	for (i = 0; i < self->wins->len; i++) {
+		GsurfWmuxWin *win = g_ptr_array_index(self->wins, i);
+		g_autoptr(GArray) panes = gsurf_wmux_layout_list_panes(win->layout);
+		g_autofree gchar *name = gsurf_wmux_win_display_name(self, i);
+		GsurfLayoutGroup *group = gsurf_layout_group_new(i, name, i == self->current);
+
+		for (j = 0; j < panes->len; j++) {
+			GsurfView *view = gsurf_wmux_pane_view(self, win, g_array_index(panes, guint, j));
+
+			if (view != NULL)
+				gsurf_layout_group_add_view_id(group, gsurf_view_get_id(view));
+		}
+		g_ptr_array_add(groups, group);
+	}
+	return groups;
+}
+
+/* select-window from the sidebar. */
+static gboolean
+wmux_select_group(GsurfWindowLayout *layout, GsurfWindow *window, guint index)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+
+	if (!self->attached || window != self->window || self->wins == NULL ||
+	    index >= self->wins->len)
+		return FALSE;
+	gsurf_wmux_select_window(self, index);
+	return TRUE;
+}
+
+static gboolean
+wmux_show_view_at(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view,
+                  GsurfView *target, GsurfLayoutDropZone zone)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+	GsurfWmuxDrop drop;
+
+	if (window != self->window)
+		return FALSE;
+	switch (zone) {
+	case GSURF_LAYOUT_DROP_LEFT:   drop = GSURF_WMUX_DROP_LEFT; break;
+	case GSURF_LAYOUT_DROP_RIGHT:  drop = GSURF_WMUX_DROP_RIGHT; break;
+	case GSURF_LAYOUT_DROP_TOP:    drop = GSURF_WMUX_DROP_TOP; break;
+	case GSURF_LAYOUT_DROP_BOTTOM: drop = GSURF_WMUX_DROP_BOTTOM; break;
+	case GSURF_LAYOUT_DROP_CENTER:
+	default:                       drop = GSURF_WMUX_DROP_CENTER; break;
+	}
+	return gsurf_wmux_show_view_at(self, view, target, drop);
+}
+
+/* A sidebar drag: drop targets over the panes for its duration. */
+static void
+wmux_begin_view_drag(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+
+	if (!self->attached || window != self->window || !self->mouse)
+		return;
+	gsurf_wmux_ui_set_drag(self, view);
+}
+
+static void
+wmux_end_view_drag(GsurfWindowLayout *layout, GsurfWindow *window)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+
+	if (window != self->window)
+		return;
+	gsurf_wmux_ui_set_drag(self, NULL);
+}
+
 void
 gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface)
 {
@@ -913,4 +1117,9 @@ gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->is_view_visible = wmux_is_view_visible;
 	iface->serialize = wmux_serialize;
 	iface->restore = wmux_restore;
+	iface->list_groups = wmux_list_groups;
+	iface->select_group = wmux_select_group;
+	iface->show_view_at = wmux_show_view_at;
+	iface->begin_view_drag = wmux_begin_view_drag;
+	iface->end_view_drag = wmux_end_view_drag;
 }

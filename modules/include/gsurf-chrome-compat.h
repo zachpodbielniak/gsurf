@@ -21,6 +21,7 @@
 #define GSURF_CHROME_COMPAT_H
 
 #include <gtk/gtk.h>
+#include <string.h>
 
 #if !defined(GSURF_BACKEND_GTK3) && !defined(GSURF_BACKEND_GTK4)
 #error "gsurf-chrome-compat.h needs GSURF_BACKEND_GTK3 or GSURF_BACKEND_GTK4"
@@ -827,9 +828,10 @@ gsurf_chrome_connect_click(GtkWidget            *widget,
  * @widget: a widget passed to gsurf_chrome_connect_click()
  * @user_data: the data it was connected with
  *
- * Undoes every gsurf_chrome_connect_click() on @widget made with
- * @user_data; on GTK4 the gestures are removed from @widget too. Safe to
- * call more than once.
+ * Undoes every gsurf_chrome_connect_click() and
+ * gsurf_chrome_connect_release() on @widget made with @user_data; on
+ * GTK4 the gestures are removed from @widget too. Safe to call more than
+ * once.
  */
 static inline void
 gsurf_chrome_disconnect_click(GtkWidget *widget, gpointer user_data)
@@ -848,7 +850,10 @@ gsurf_chrome_disconnect_click(GtkWidget *widget, gpointer user_data)
 		GtkEventController *c = g_list_model_get_item(controllers, i);
 		const gchar *name = gtk_event_controller_get_name(c);
 
-		if (name != NULL && g_str_has_prefix(name, GSURF_CHROME_CLICK_CONTROLLER_PREFIX) &&
+		/* Release gestures too ("gsurf-chrome-release-N"). */
+		if (name != NULL &&
+		    (g_str_has_prefix(name, GSURF_CHROME_CLICK_CONTROLLER_PREFIX) ||
+		     g_str_has_prefix(name, "gsurf-chrome-release-")) &&
 		    g_signal_handlers_disconnect_by_data(c, user_data) > 0)
 			g_ptr_array_add(doomed, c);
 		else
@@ -860,6 +865,505 @@ gsurf_chrome_disconnect_click(GtkWidget *widget, gpointer user_data)
 	g_signal_handlers_disconnect_by_data(widget, user_data);
 	if (g_object_get_data(G_OBJECT(widget), GSURF_CHROME_CLICK_CONNECTED_DATA) == user_data)
 		g_object_set_data(G_OBJECT(widget), GSURF_CHROME_CLICK_CONNECTED_DATA, NULL);
+	if (g_object_get_data(G_OBJECT(widget), "gsurf-chrome-release-connected") == user_data)
+		g_object_set_data(G_OBJECT(widget), "gsurf-chrome-release-connected", NULL);
+#endif
+}
+
+/**
+ * gsurf_chrome_widget_get_height:
+ * @widget: a widget
+ *
+ * Returns: the allocated height of @widget in pixels (0 before the
+ *   first allocation)
+ */
+static inline gint
+gsurf_chrome_widget_get_height(GtkWidget *widget)
+{
+#ifdef GSURF_BACKEND_GTK4
+	return gtk_widget_get_height(widget);
+#else
+	return gtk_widget_get_allocated_height(widget);
+#endif
+}
+
+/**
+ * gsurf_chrome_widget_get_width:
+ * @widget: a widget
+ *
+ * Returns: the allocated width of @widget in pixels (0 before the first
+ *   allocation)
+ */
+static inline gint
+gsurf_chrome_widget_get_width(GtkWidget *widget)
+{
+#ifdef GSURF_BACKEND_GTK4
+	return gtk_widget_get_width(widget);
+#else
+	return gtk_widget_get_allocated_width(widget);
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* Releases (a click that may also start a drag)                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * GSURF_CHROME_RELEASE_CONTROLLER_PREFIX:
+ *
+ * Prefix of the name given (on GTK4) to each GtkGestureClick that
+ * gsurf_chrome_connect_release() attaches; the button number follows.
+ */
+#define GSURF_CHROME_RELEASE_CONTROLLER_PREFIX "gsurf-chrome-release-"
+
+/* Object-data key of the GTK3 release callbacks ("...-<button>"). */
+#define GSURF_CHROME_RELEASE_FUNC_DATA "gsurf-chrome-release-func"
+#define GSURF_CHROME_RELEASE_CONNECTED_DATA "gsurf-chrome-release-connected"
+
+#ifdef GSURF_BACKEND_GTK4
+/* GTK4 trampoline: "released" on a per-button GtkGestureClick. A drag
+ * source on the same widget claims the sequence once a drag starts, so
+ * the gesture is cancelled and never reports that release. */
+static inline void
+gsurf_chrome_on_click_released(GtkGestureClick *gesture,
+                               gint             n_press,
+                               gdouble          x,
+                               gdouble          y,
+                               gpointer         user_data)
+{
+	GtkWidget *widget;
+	GtkWidget *hit;
+	GsurfChromeClickFunc func;
+
+	if (n_press != 1)
+		return;
+	widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+	hit = gtk_widget_pick(widget, x, y, GTK_PICK_DEFAULT);
+	if (gsurf_chrome_hit_is_nested_button(widget, hit))
+		return;
+	func = (GsurfChromeClickFunc)g_object_get_data(G_OBJECT(gesture),
+		GSURF_CHROME_CLICK_FUNC_DATA);
+	if (func != NULL)
+		func(widget, user_data);
+}
+#else
+/* GTK3 trampoline: the widget's "button-release-event" signal. Once a
+ * drag starts, the drag owns the pointer and the release never comes. */
+static inline gboolean
+gsurf_chrome_on_button_release_event(GtkWidget      *widget,
+                                     GdkEventButton *event,
+                                     gpointer        user_data)
+{
+	g_autofree gchar *key = NULL;
+	GsurfChromeClickFunc func;
+	gpointer hit = NULL;
+
+	if (event->type != GDK_BUTTON_RELEASE)
+		return FALSE;
+	if (event->window != NULL)
+		gdk_window_get_user_data(event->window, &hit);
+	if (hit != NULL && GTK_IS_WIDGET(hit) &&
+	    gsurf_chrome_hit_is_nested_button(widget, GTK_WIDGET(hit)))
+		return FALSE;
+	key = g_strdup_printf(GSURF_CHROME_RELEASE_FUNC_DATA "-%u", event->button);
+	func = (GsurfChromeClickFunc)g_object_get_data(G_OBJECT(widget), key);
+	if (func == NULL)
+		return FALSE;
+	func(widget, user_data);
+	return TRUE;
+}
+#endif
+
+/**
+ * gsurf_chrome_connect_release:
+ * @widget: a widget from gsurf_chrome_clickable_new()
+ * @button: the mouse button
+ * @func: (scope notified): the handler
+ * @user_data: (closure): data for @func; also the signal data, so
+ *   gsurf_chrome_disconnect_click() with it removes the handler
+ *
+ * Like gsurf_chrome_connect_click(), but @func runs when the button is
+ * released over @widget without a drag having started in between: a
+ * widget that is also a drag source (gsurf_chrome_drag_source_add())
+ * acts on a plain click only. GTK4 adds a #GtkGestureClick named
+ * %GSURF_CHROME_RELEASE_CONTROLLER_PREFIX plus the button number.
+ */
+static inline void
+gsurf_chrome_connect_release(GtkWidget            *widget,
+                             guint                 button,
+                             GsurfChromeClickFunc  func,
+                             gpointer              user_data)
+{
+#ifdef GSURF_BACKEND_GTK4
+	GtkGesture *gesture;
+	g_autofree gchar *name = NULL;
+
+	name = g_strdup_printf(GSURF_CHROME_RELEASE_CONTROLLER_PREFIX "%u", button);
+	gesture = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), button);
+	gtk_event_controller_set_name(GTK_EVENT_CONTROLLER(gesture), name);
+	g_object_set_data(G_OBJECT(gesture), GSURF_CHROME_CLICK_FUNC_DATA, (gpointer)func);
+	g_signal_connect(gesture, "released", G_CALLBACK(gsurf_chrome_on_click_released), user_data);
+	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gesture));
+#else
+	g_autofree gchar *key = NULL;
+
+	key = g_strdup_printf(GSURF_CHROME_RELEASE_FUNC_DATA "-%u", button);
+	g_object_set_data(G_OBJECT(widget), key, (gpointer)func);
+	if (g_object_get_data(G_OBJECT(widget), GSURF_CHROME_RELEASE_CONNECTED_DATA) != user_data) {
+		gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
+		g_signal_connect(widget, "button-release-event",
+			G_CALLBACK(gsurf_chrome_on_button_release_event), user_data);
+		g_object_set_data(G_OBJECT(widget), GSURF_CHROME_RELEASE_CONNECTED_DATA, user_data);
+	}
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* Drag and drop of a private, same-application target                 */
+/* ------------------------------------------------------------------ */
+
+/* Controller names (GTK4) and object-data keys of the DnD helpers. */
+#define GSURF_CHROME_DRAG_SOURCE_NAME  "gsurf-chrome-drag-source"
+#define GSURF_CHROME_DROP_TARGET_NAME  "gsurf-chrome-drop-target"
+#define GSURF_CHROME_DRAG_FUNCS_DATA   "gsurf-chrome-drag-funcs"
+#define GSURF_CHROME_DROP_FUNCS_DATA   "gsurf-chrome-drop-funcs"
+#define GSURF_CHROME_DND_MIME_DATA     "gsurf-chrome-dnd-mime"
+
+/**
+ * GsurfChromeDragFuncs:
+ * @payload: the data the drag carries (transfer full), or %NULL to
+ *   refuse the drag
+ * @begin: (nullable): the drag started
+ * @end: (nullable): the drag ended, dropped or not
+ *
+ * What a drag source asks of its owner. Every callback gets the widget
+ * and the data given to gsurf_chrome_drag_source_add(). The table must
+ * outlive the widget (a static const).
+ */
+typedef struct {
+	gchar *(*payload) (GtkWidget *widget, gpointer user_data);
+	void   (*begin)   (GtkWidget *widget, gpointer user_data);
+	void   (*end)     (GtkWidget *widget, gpointer user_data);
+} GsurfChromeDragFuncs;
+
+/**
+ * GsurfChromeDropFuncs:
+ * @motion: the drag is over (@x, @y) in the widget's coordinates: show
+ *   where a drop would go; %TRUE when a drop there is accepted
+ * @leave: (nullable): the drag left the widget (or dropped): hide it
+ * @drop: a drop at (@x, @y): act on it; %TRUE when it was taken
+ *
+ * What a drop target asks of its owner (see #GsurfChromeDragFuncs).
+ */
+typedef struct {
+	gboolean (*motion) (GtkWidget *widget, gint x, gint y, gpointer user_data);
+	void     (*leave)  (GtkWidget *widget, gpointer user_data);
+	gboolean (*drop)   (GtkWidget *widget, gint x, gint y, gpointer user_data);
+} GsurfChromeDropFuncs;
+
+#ifdef GSURF_BACKEND_GTK4
+static inline GdkContentProvider *
+gsurf_chrome_on_drag_prepare(GtkDragSource *source, gdouble x, gdouble y, gpointer user_data)
+{
+	GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source));
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(source),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+	const gchar *mime = g_object_get_data(G_OBJECT(source), GSURF_CHROME_DND_MIME_DATA);
+	gchar *payload;
+	gsize len;
+
+	(void)x;
+	(void)y;
+	if (funcs == NULL || mime == NULL || (payload = funcs->payload(widget, user_data)) == NULL)
+		return NULL;
+	len = strlen(payload);
+	return gdk_content_provider_new_for_bytes(mime, g_bytes_new_take(payload, len));
+}
+
+static inline void
+gsurf_chrome_on_drag_begin(GtkDragSource *source, GdkDrag *drag, gpointer user_data)
+{
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(source),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+
+	(void)drag;
+	if (funcs != NULL && funcs->begin != NULL)
+		funcs->begin(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source)), user_data);
+}
+
+static inline void
+gsurf_chrome_on_drag_end(GtkDragSource *source, GdkDrag *drag, gboolean delete_data,
+                         gpointer user_data)
+{
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(source),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+
+	(void)drag;
+	(void)delete_data;
+	if (funcs != NULL && funcs->end != NULL)
+		funcs->end(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(source)), user_data);
+}
+
+static inline GdkDragAction
+gsurf_chrome_on_drop_motion(GtkDropTargetAsync *target, GdkDrop *drop, gdouble x, gdouble y,
+                            gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(target),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+
+	(void)drop;
+	if (funcs == NULL ||
+	    !funcs->motion(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)),
+	                   (gint)x, (gint)y, user_data))
+		return 0;
+	return GDK_ACTION_MOVE;
+}
+
+static inline void
+gsurf_chrome_on_drop_leave(GtkDropTargetAsync *target, GdkDrop *drop, gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(target),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+
+	(void)drop;
+	if (funcs != NULL && funcs->leave != NULL)
+		funcs->leave(gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target)), user_data);
+}
+
+static inline gboolean
+gsurf_chrome_on_drop(GtkDropTargetAsync *target, GdkDrop *drop, gdouble x, gdouble y,
+                     gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(target),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+	GtkWidget *widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(target));
+	gboolean taken;
+
+	taken = funcs != NULL && funcs->drop(widget, (gint)x, (gint)y, user_data);
+	if (funcs != NULL && funcs->leave != NULL)
+		funcs->leave(widget, user_data);
+	/* A test drives the handler without a real drop. */
+	if (drop != NULL)
+		gdk_drop_finish(drop, taken ? GDK_ACTION_MOVE : 0);
+	return taken;
+}
+#else
+static inline void
+gsurf_chrome_on_drag_begin(GtkWidget *widget, GdkDragContext *context, gpointer user_data)
+{
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+
+	(void)context;
+	if (funcs != NULL && funcs->begin != NULL)
+		funcs->begin(widget, user_data);
+}
+
+static inline void
+gsurf_chrome_on_drag_end(GtkWidget *widget, GdkDragContext *context, gpointer user_data)
+{
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+
+	(void)context;
+	if (funcs != NULL && funcs->end != NULL)
+		funcs->end(widget, user_data);
+}
+
+static inline void
+gsurf_chrome_on_drag_data_get(GtkWidget *widget, GdkDragContext *context,
+                              GtkSelectionData *data, guint info, guint time_,
+                              gpointer user_data)
+{
+	const GsurfChromeDragFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DRAG_FUNCS_DATA);
+	g_autofree gchar *payload = NULL;
+
+	(void)context;
+	(void)info;
+	(void)time_;
+	if (funcs == NULL || (payload = funcs->payload(widget, user_data)) == NULL)
+		return;
+	gtk_selection_data_set(data, gtk_selection_data_get_target(data), 8,
+		(const guchar *)payload, (gint)strlen(payload));
+}
+
+static inline gboolean
+gsurf_chrome_on_drag_motion(GtkWidget *widget, GdkDragContext *context, gint x, gint y,
+                            guint time_, gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+	gboolean ok;
+
+	ok = funcs != NULL && funcs->motion(widget, x, y, user_data);
+	/* A test drives the handler without a real drag context. */
+	if (context != NULL)
+		gdk_drag_status(context, ok ? GDK_ACTION_MOVE : 0, time_);
+	return ok;
+}
+
+static inline void
+gsurf_chrome_on_drag_leave(GtkWidget *widget, GdkDragContext *context, guint time_,
+                           gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+
+	(void)context;
+	(void)time_;
+	if (funcs != NULL && funcs->leave != NULL)
+		funcs->leave(widget, user_data);
+}
+
+static inline gboolean
+gsurf_chrome_on_drag_drop(GtkWidget *widget, GdkDragContext *context, gint x, gint y,
+                          guint time_, gpointer user_data)
+{
+	const GsurfChromeDropFuncs *funcs = g_object_get_data(G_OBJECT(widget),
+		GSURF_CHROME_DROP_FUNCS_DATA);
+	gboolean taken;
+
+	taken = funcs != NULL && funcs->drop(widget, x, y, user_data);
+	if (funcs != NULL && funcs->leave != NULL)
+		funcs->leave(widget, user_data);
+	if (context != NULL)
+		gtk_drag_finish(context, taken, FALSE, time_);
+	return TRUE;
+}
+#endif
+
+/**
+ * gsurf_chrome_drag_source_add:
+ * @widget: the widget to drag (GTK3: one with its own window, such as a
+ *   widget from gsurf_chrome_clickable_new())
+ * @mime: the private target, e.g. %GSURF_LAYOUT_VIEW_MIME_TYPE (static)
+ * @funcs: (not nullable): the callbacks, outliving @widget
+ * @user_data: (closure): their data; also the signal data, so
+ *   gsurf_chrome_disconnect_dnd() with it removes the source
+ *
+ * Makes @widget a primary-button drag source for @mime within the
+ * application. GTK3: gtk_drag_source_set() with a same-app target; call
+ * it before gsurf_chrome_connect_click() so the drag sees the press
+ * first. GTK4: a #GtkDragSource named %GSURF_CHROME_DRAG_SOURCE_NAME.
+ */
+static inline void
+gsurf_chrome_drag_source_add(GtkWidget                  *widget,
+                             const gchar                *mime,
+                             const GsurfChromeDragFuncs *funcs,
+                             gpointer                    user_data)
+{
+#ifdef GSURF_BACKEND_GTK4
+	GtkDragSource *source = gtk_drag_source_new();
+
+	gtk_drag_source_set_actions(source, GDK_ACTION_MOVE);
+	gtk_event_controller_set_name(GTK_EVENT_CONTROLLER(source), GSURF_CHROME_DRAG_SOURCE_NAME);
+	g_object_set_data(G_OBJECT(source), GSURF_CHROME_DRAG_FUNCS_DATA, (gpointer)funcs);
+	g_object_set_data(G_OBJECT(source), GSURF_CHROME_DND_MIME_DATA, (gpointer)mime);
+	g_signal_connect(source, "prepare", G_CALLBACK(gsurf_chrome_on_drag_prepare), user_data);
+	g_signal_connect(source, "drag-begin", G_CALLBACK(gsurf_chrome_on_drag_begin), user_data);
+	g_signal_connect(source, "drag-end", G_CALLBACK(gsurf_chrome_on_drag_end), user_data);
+	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(source));
+#else
+	GtkTargetEntry entry = { (gchar *)mime, GTK_TARGET_SAME_APP, 0 };
+
+	gtk_drag_source_set(widget, GDK_BUTTON1_MASK, &entry, 1, GDK_ACTION_MOVE);
+	g_object_set_data(G_OBJECT(widget), GSURF_CHROME_DRAG_FUNCS_DATA, (gpointer)funcs);
+	g_signal_connect(widget, "drag-begin", G_CALLBACK(gsurf_chrome_on_drag_begin), user_data);
+	g_signal_connect(widget, "drag-end", G_CALLBACK(gsurf_chrome_on_drag_end), user_data);
+	g_signal_connect(widget, "drag-data-get", G_CALLBACK(gsurf_chrome_on_drag_data_get),
+		user_data);
+#endif
+}
+
+/**
+ * gsurf_chrome_drop_target_add:
+ * @widget: the widget to drop on (GTK3: one with its own window)
+ * @mime: the private target it accepts (static)
+ * @funcs: (not nullable): the callbacks, outliving @widget
+ * @user_data: (closure): their data, as for gsurf_chrome_drag_source_add()
+ *
+ * Makes @widget accept drops of @mime (move only). GTK3:
+ * gtk_drag_dest_set() with no default behaviour, the drag-motion /
+ * drag-leave / drag-drop signals; GTK4: a #GtkDropTargetAsync named
+ * %GSURF_CHROME_DROP_TARGET_NAME. The owner knows what is dragged (it
+ * started the drag), so the drop never reads the data back.
+ */
+static inline void
+gsurf_chrome_drop_target_add(GtkWidget                  *widget,
+                             const gchar                *mime,
+                             const GsurfChromeDropFuncs *funcs,
+                             gpointer                    user_data)
+{
+#ifdef GSURF_BACKEND_GTK4
+	const gchar *mimes[] = { mime, NULL };
+	GdkContentFormats *formats = gdk_content_formats_new(mimes, 1);
+	GtkDropTargetAsync *target = gtk_drop_target_async_new(formats, GDK_ACTION_MOVE);
+
+	gtk_event_controller_set_name(GTK_EVENT_CONTROLLER(target), GSURF_CHROME_DROP_TARGET_NAME);
+	g_object_set_data(G_OBJECT(target), GSURF_CHROME_DROP_FUNCS_DATA, (gpointer)funcs);
+	g_signal_connect(target, "drag-enter", G_CALLBACK(gsurf_chrome_on_drop_motion), user_data);
+	g_signal_connect(target, "drag-motion", G_CALLBACK(gsurf_chrome_on_drop_motion), user_data);
+	g_signal_connect(target, "drag-leave", G_CALLBACK(gsurf_chrome_on_drop_leave), user_data);
+	g_signal_connect(target, "drop", G_CALLBACK(gsurf_chrome_on_drop), user_data);
+	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(target));
+#else
+	GtkTargetEntry entry = { (gchar *)mime, GTK_TARGET_SAME_APP, 0 };
+
+	gtk_drag_dest_set(widget, 0, &entry, 1, GDK_ACTION_MOVE);
+	g_object_set_data(G_OBJECT(widget), GSURF_CHROME_DROP_FUNCS_DATA, (gpointer)funcs);
+	g_signal_connect(widget, "drag-motion", G_CALLBACK(gsurf_chrome_on_drag_motion), user_data);
+	g_signal_connect(widget, "drag-leave", G_CALLBACK(gsurf_chrome_on_drag_leave), user_data);
+	g_signal_connect(widget, "drag-drop", G_CALLBACK(gsurf_chrome_on_drag_drop), user_data);
+#endif
+}
+
+/**
+ * gsurf_chrome_disconnect_dnd:
+ * @widget: a widget passed to gsurf_chrome_drag_source_add() or
+ *   gsurf_chrome_drop_target_add()
+ * @user_data: the data it was added with
+ *
+ * Removes the drag source and drop target added with @user_data (GTK4:
+ * their controllers; GTK3: the handlers, and the widget stops being a
+ * source and a destination). Safe to call more than once.
+ */
+static inline void
+gsurf_chrome_disconnect_dnd(GtkWidget *widget, gpointer user_data)
+{
+#ifdef GSURF_BACKEND_GTK4
+	g_autoptr(GListModel) controllers = NULL;
+	g_autoptr(GPtrArray) doomed = NULL;
+	guint i;
+	guint n;
+
+	doomed = g_ptr_array_new_with_free_func(g_object_unref);
+	controllers = gtk_widget_observe_controllers(widget);
+	n = g_list_model_get_n_items(controllers);
+	for (i = 0; i < n; i++) {
+		GtkEventController *c = g_list_model_get_item(controllers, i);
+		const gchar *name = gtk_event_controller_get_name(c);
+
+		if ((g_strcmp0(name, GSURF_CHROME_DRAG_SOURCE_NAME) == 0 ||
+		     g_strcmp0(name, GSURF_CHROME_DROP_TARGET_NAME) == 0) &&
+		    g_signal_handlers_disconnect_by_data(c, user_data) > 0)
+			g_ptr_array_add(doomed, c);
+		else
+			g_object_unref(c);
+	}
+	for (i = 0; i < doomed->len; i++)
+		gtk_widget_remove_controller(widget, g_ptr_array_index(doomed, i));
+#else
+	if (g_object_get_data(G_OBJECT(widget), GSURF_CHROME_DRAG_FUNCS_DATA) != NULL) {
+		gtk_drag_source_unset(widget);
+		g_object_set_data(G_OBJECT(widget), GSURF_CHROME_DRAG_FUNCS_DATA, NULL);
+	}
+	if (g_object_get_data(G_OBJECT(widget), GSURF_CHROME_DROP_FUNCS_DATA) != NULL) {
+		gtk_drag_dest_unset(widget);
+		g_object_set_data(G_OBJECT(widget), GSURF_CHROME_DROP_FUNCS_DATA, NULL);
+	}
+	g_signal_handlers_disconnect_by_data(widget, user_data);
 #endif
 }
 

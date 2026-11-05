@@ -34,6 +34,7 @@ enum {
 	SIG_VIEW_MOVED,
 	SIG_VIEW_REPLACED,
 	SIG_VISIBLE_VIEWS_CHANGED,
+	SIG_LAYOUT_GROUPS_CHANGED,
 	N_SIGNALS
 };
 
@@ -356,6 +357,22 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 	 */
 	signals[SIG_VISIBLE_VIEWS_CHANGED] = g_signal_new(
 		"visible-views-changed", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+		G_TYPE_NONE, 0);
+
+	/**
+	 * GsurfWindow::layout-groups-changed:
+	 * @window: the window
+	 *
+	 * Emitted when the groups of the installed #GsurfWindowLayout may
+	 * have changed (gsurf_window_layout_list_groups()): a layout was
+	 * installed or removed, or the layout called
+	 * gsurf_window_layout_notify_groups().
+	 *
+	 * Since: 0.4.2
+	 */
+	signals[SIG_LAYOUT_GROUPS_CHANGED] = g_signal_new(
+		"layout-groups-changed", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 0);
 }
@@ -685,6 +702,7 @@ gsurf_window_set_layout(GsurfWindow *self, GsurfWindowLayout *layout)
 	}
 
 	g_signal_emit(self, signals[SIG_VISIBLE_VIEWS_CHANGED], 0);
+	g_signal_emit(self, signals[SIG_LAYOUT_GROUPS_CHANGED], 0);
 	return TRUE;
 }
 
@@ -705,6 +723,14 @@ gsurf_window_layout_notify_visible(GsurfWindow *window)
 	g_return_if_fail(GSURF_IS_WINDOW(window));
 
 	g_signal_emit(window, signals[SIG_VISIBLE_VIEWS_CHANGED], 0);
+}
+
+void
+gsurf_window_layout_notify_groups(GsurfWindow *window)
+{
+	g_return_if_fail(GSURF_IS_WINDOW(window));
+
+	g_signal_emit(window, signals[SIG_LAYOUT_GROUPS_CHANGED], 0);
 }
 
 gboolean

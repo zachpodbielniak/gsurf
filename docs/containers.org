@@ -92,8 +92,7 @@ The very first tab at startup is placed the same way (with the startup URL as it
 
 When a tab navigates its main frame to a host assigned (by =hosts=) to another container, the navigation is cancelled and the URL is opened in a new tab in that container:
 
-- The new tab takes the old tab's *place*. If the old tab had nothing to lose — it never left a blank page (=about:blank=, =new_view_uri= or =homepage=) and has no back history — it is closed and the new tab gets its position and its opener. Otherwise the old tab stays where it is, and the new tab opens right after it with the old tab as its opener (so it appears as its child in the tab tree).
-- The new tab becomes the active tab.
+- The new tab takes the old tab's *place*. If the old tab had nothing to lose — it never left a blank page (=about:blank=, =new_view_uri= or =homepage=) and has no back history — it is replaced through =gsurf_window_replace_view()=: the new tab gets its position, its place in the tab tree (its parent, even one that already closed, and its children), its pane in a window layout such as =wmux=, and its activeness: a link opened in a background tab (a middle click) whose first load lands on another container's host stays a background child tab. Otherwise the old tab stays where it is, and the new tab opens right after it with the old tab as its opener (so it appears as its child in the tab tree) and becomes the active tab.
 - Leaving an assigned host for an unassigned one never moves a tab: a tab stays in its container until it navigates to a host assigned elsewhere.
 
 ** When it happens

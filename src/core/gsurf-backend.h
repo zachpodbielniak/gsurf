@@ -192,6 +192,30 @@ GsurfWindow *gsurf_window_new(void);
 GsurfView *gsurf_window_reopen_view(GsurfWindow *window, GsurfView *view,
                                     const gchar *container_id);
 
+/**
+ * gsurf_window_replace_view:
+ * @window: the #GsurfWindow holding @view
+ * @view: the view to replace
+ * @container_id: (nullable): the container for the new view, as for
+ *   gsurf_window_reopen_view()
+ * @uri: (nullable): what the new view loads; %NULL is @view's URI (as
+ *   gsurf_window_reopen_view() picks it)
+ *
+ * Like gsurf_window_reopen_view(), but the new view loads @uri and only
+ * becomes the active view when @view was: a background tab stays in the
+ * background (the containers module moving a tab that was opened behind
+ * the current one into its rule's container). The new view keeps
+ * @view's opener id even when the opener has closed, and @view's place
+ * in the tab tree and in a layout (#GsurfWindow::view-replaced).
+ *
+ * Returns: (transfer none) (nullable): the new view, owned by @window,
+ *   or %NULL when @view is not in @window or no view could be created
+ *
+ * Since: 0.4.2
+ */
+GsurfView *gsurf_window_replace_view(GsurfWindow *window, GsurfView *view,
+                                     const gchar *container_id, const gchar *uri);
+
 G_END_DECLS
 
 #endif /* GSURF_BACKEND_H */

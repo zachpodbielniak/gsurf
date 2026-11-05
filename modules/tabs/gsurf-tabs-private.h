@@ -36,6 +36,7 @@ G_DECLARE_FINAL_TYPE(GsurfTabsModule, gsurf_tabs_module, GSURF, TABS_MODULE, Gsu
 #define GSURF_TABS_DEFAULT_SIDEBAR_WIDTH (240)
 #define GSURF_TABS_DEFAULT_INDENT        (14)
 #define GSURF_TABS_DEFAULT_MAX_DEPTH     (8)
+#define GSURF_TABS_DEFAULT_BACKGROUND_LABEL "Background"
 #define GSURF_TABS_FAVICON_SIZE          (16)
 
 /* Widget names the tests (and CSS) can rely on. */
@@ -48,6 +49,14 @@ G_DECLARE_FINAL_TYPE(GsurfTabsModule, gsurf_tabs_module, GSURF, TABS_MODULE, Gsu
 #define GSURF_TABS_ROW_CLOSE_NAME    "gsurf-tab-close"
 #define GSURF_TABS_ROW_STRIPE_NAME   "gsurf-tab-stripe"
 #define GSURF_TABS_ROW_BOX_NAME      "gsurf-tab-row-box"
+
+/* CSS classes of the sidebar rows (tests rely on them too). */
+#define GSURF_TABS_ROW_CLASS           "gsurf-tab-row"
+#define GSURF_TABS_GROUP_CLASS         "gsurf-tab-group"
+#define GSURF_TABS_GROUP_CURRENT_CLASS "gsurf-tab-group-current"
+#define GSURF_TABS_DROP_BEFORE_CLASS   "gsurf-tab-drop-before"
+#define GSURF_TABS_DROP_AFTER_CLASS    "gsurf-tab-drop-after"
+#define GSURF_TABS_DROP_CHILD_CLASS    "gsurf-tab-drop-child"
 
 /* Object-data key holding a tab widget's view id (a guint64*). */
 #define GSURF_TABS_ID_DATA "gsurf-tab-view-id"
@@ -97,6 +106,8 @@ struct _GsurfTabsModule
 	gint     indent;              /* px per tree level */
 	gint     max_depth;           /* indentation cap */
 	GsurfTabTreeClosePolicy on_close_parent;
+	gboolean wmux_groups;         /* group the sidebar by layout groups */
+	gchar   *background_label;    /* heading of the background group */
 
 	/* --- Runtime state (activate() .. deactivate()) --- */
 	GsurfWindow  *window;         /* weak ref: cleanup when it finalizes */
@@ -105,13 +116,16 @@ struct _GsurfTabsModule
 	gboolean      syncing;        /* we are reordering the window ourselves */
 	GsurfContainerRegistry *registry; /* the default registry while connected */
 	GQueue       *closed_uris;    /* recently closed URIs, most recent first */
+	GHashTable   *collapsed_groups; /* collapsed group indices (GUINT_TO_POINTER(i + 1)) */
+	gboolean      background_collapsed;
+	guint64       drag_id;        /* the tab a sidebar drag carries, or 0 */
 
 	/* --- UI (gsurf-tabs-ui.c); all widgets retained until cleanup --- */
 	GtkCssProvider *css;
 	GtkWidget      *bar;          /* horizontal strip */
 	GtkWidget      *sidebar_box;  /* the side panel */
 	GtkWidget      *sidebar_list; /* vertical box of rows */
-	GHashTable     *rows;         /* view id (guint64*) -> GsurfTabsRow* */
+	GHashTable     *rows;         /* row key (guint64*) -> GsurfTabsRow* */
 	GPtrArray      *row_order;    /* GsurfTabsRow* in the list's child order */
 	GSimpleActionGroup *menu_actions; /* "tab.*" context menu actions */
 	GtkWidget      *menu;         /* open context menu, or NULL */
@@ -141,6 +155,27 @@ G_GNUC_INTERNAL void      gsurf_tabs_reopen_tab(GsurfTabsModule *self, guint64 i
                                                 const gchar *container);
 G_GNUC_INTERNAL void      gsurf_tabs_split_tab(GsurfTabsModule *self, guint64 id,
                                                GsurfAction action);
+
+/* Layout groups (a #GsurfWindowLayout such as wmux): show group @index
+ * (gsurf_window_layout_select_group()); collapse or expand a group's
+ * heading (GSURF_TAB_GROUP_BACKGROUND for the background group). */
+G_GNUC_INTERNAL void      gsurf_tabs_select_group(GsurfTabsModule *self, guint index);
+G_GNUC_INTERNAL void      gsurf_tabs_toggle_group(GsurfTabsModule *self, guint index);
+G_GNUC_INTERNAL gboolean  gsurf_tabs_group_collapsed(GsurfTabsModule *self, guint index);
+
+/* The groups of the window's layout when the sidebar groups by them
+ * (wmux_groups on and the layout has groups), else NULL. */
+G_GNUC_INTERNAL GPtrArray *gsurf_tabs_list_groups(GsurfTabsModule *self);
+
+/* Sidebar drag and drop. A drag of tab @id begins (a window layout is
+ * told, so it can show its drop targets) and ends; a drop of the dragged
+ * tab on tab @target re-parents it in the tree (before / after / under
+ * @target). */
+G_GNUC_INTERNAL void      gsurf_tabs_drag_begin(GsurfTabsModule *self, guint64 id);
+G_GNUC_INTERNAL void      gsurf_tabs_drag_end(GsurfTabsModule *self);
+G_GNUC_INTERNAL gboolean  gsurf_tabs_can_drop(GsurfTabsModule *self, guint64 target);
+G_GNUC_INTERNAL gboolean  gsurf_tabs_drop(GsurfTabsModule *self, guint64 target,
+                                          GsurfTabTreeDrop where);
 
 /* Whether the tab @view is on screen in a pane other than the active
  * one (only ever TRUE while a #GsurfWindowLayout is installed). */

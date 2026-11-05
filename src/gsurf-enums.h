@@ -123,6 +123,30 @@ typedef enum {
 } GsurfChromeEdge;
 
 /**
+ * GsurfLayoutDropZone:
+ * @GSURF_LAYOUT_DROP_CENTER: the middle of the target: show the view in
+ *   the target's place
+ * @GSURF_LAYOUT_DROP_LEFT: the left edge band: split the target, the
+ *   view on the left
+ * @GSURF_LAYOUT_DROP_RIGHT: the right edge band: split, the view on the
+ *   right
+ * @GSURF_LAYOUT_DROP_TOP: the top edge band: split, the view above
+ * @GSURF_LAYOUT_DROP_BOTTOM: the bottom edge band: split, the view below
+ *
+ * Where a view dropped on another view's place should go
+ * (gsurf_window_layout_show_view_at()).
+ *
+ * Since: 0.4.2
+ */
+typedef enum {
+	GSURF_LAYOUT_DROP_CENTER,
+	GSURF_LAYOUT_DROP_LEFT,
+	GSURF_LAYOUT_DROP_RIGHT,
+	GSURF_LAYOUT_DROP_TOP,
+	GSURF_LAYOUT_DROP_BOTTOM
+} GsurfLayoutDropZone;
+
+/**
  * GsurfLoadEvent:
  * @GSURF_LOAD_STARTED: navigation started
  * @GSURF_LOAD_REDIRECTED: a redirect occurred
@@ -356,6 +380,9 @@ typedef enum {
 	 * showing the view (or the active pane) */
 	GSURF_ACTION_PANE_SPLIT_RIGHT,
 	GSURF_ACTION_PANE_SPLIT_DOWN,
+	/* Open the hovered link in a new tab, a child of the current one,
+	 * without leaving the current one (since 0.4.2) */
+	GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND,
 	GSURF_ACTION_LAST
 } GsurfAction;
 
@@ -366,6 +393,7 @@ GType gsurf_key_mod_get_type(void) G_GNUC_CONST;
 GType gsurf_mode_policy_get_type(void) G_GNUC_CONST;
 GType gsurf_load_event_get_type(void) G_GNUC_CONST;
 GType gsurf_chrome_edge_get_type(void) G_GNUC_CONST;
+GType gsurf_layout_drop_zone_get_type(void) G_GNUC_CONST;
 GType gsurf_policy_decision_get_type(void) G_GNUC_CONST;
 GType gsurf_filter_verdict_get_type(void) G_GNUC_CONST;
 GType gsurf_tls_decision_get_type(void) G_GNUC_CONST;
@@ -380,6 +408,7 @@ GType gsurf_action_get_type(void) G_GNUC_CONST;
 #define GSURF_TYPE_MODE_POLICY        (gsurf_mode_policy_get_type())
 #define GSURF_TYPE_LOAD_EVENT         (gsurf_load_event_get_type())
 #define GSURF_TYPE_CHROME_EDGE        (gsurf_chrome_edge_get_type())
+#define GSURF_TYPE_LAYOUT_DROP_ZONE   (gsurf_layout_drop_zone_get_type())
 #define GSURF_TYPE_POLICY_DECISION    (gsurf_policy_decision_get_type())
 #define GSURF_TYPE_FILTER_VERDICT     (gsurf_filter_verdict_get_type())
 #define GSURF_TYPE_TLS_DECISION       (gsurf_tls_decision_get_type())

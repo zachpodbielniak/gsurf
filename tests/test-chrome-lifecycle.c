@@ -828,12 +828,14 @@ has_click_handler(GtkWidget *widget, gpointer module)
 #endif
 }
 
-/* Press mouse @button on a sidebar row. */
+/* Click mouse @button on a sidebar row: the primary button acts on its
+ * release (a press may start a drag), the others on their press. */
 static void
 click_row(GtkWidget *row, guint button)
 {
 #ifdef GSURF_BACKEND_GTK4
-	g_autofree gchar *name = g_strdup_printf(CHROME_CLICK_PREFIX "%u", button);
+	g_autofree gchar *name = g_strdup_printf("%s%u",
+		button == 1 ? "gsurf-chrome-release-" : CHROME_CLICK_PREFIX, button);
 	g_autoptr(GListModel) controllers = gtk_widget_observe_controllers(row);
 	GtkEventController *found = NULL;
 	guint i;
@@ -845,13 +847,14 @@ click_row(GtkWidget *row, guint button)
 			found = c; /* still owned by the row */
 	}
 	g_assert_nonnull(found);
-	g_signal_emit_by_name(found, "pressed", 1, -1.0, -1.0);
+	g_signal_emit_by_name(found, button == 1 ? "released" : "pressed", 1, -1.0, -1.0);
 #else
-	GdkEvent *event = gdk_event_new(GDK_BUTTON_PRESS);
+	GdkEvent *event = gdk_event_new(button == 1 ? GDK_BUTTON_RELEASE : GDK_BUTTON_PRESS);
 	gboolean handled = FALSE;
 
 	event->button.button = button;
-	g_signal_emit_by_name(row, "button-press-event", event, &handled);
+	g_signal_emit_by_name(row, button == 1 ? "button-release-event" : "button-press-event",
+		event, &handled);
 	gdk_event_free(event);
 	g_assert_true(handled);
 #endif

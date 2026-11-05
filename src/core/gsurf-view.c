@@ -37,6 +37,7 @@ enum {
 	PROP_CONTAINER_ID,
 	PROP_RELATED,
 	PROP_INITIAL_URI,
+	PROP_OPENER_ID,
 	N_PROPS
 };
 
@@ -57,6 +58,7 @@ enum {
 	SIG_FAVICON_CHANGED,
 	SIG_CREATE_VIEW,
 	SIG_SCRIPT_MESSAGE,
+	SIG_NEW_VIEW_REQUESTED,
 	N_SIGNALS
 };
 
@@ -155,6 +157,12 @@ gsurf_view_set_property(GObject *object, guint prop_id,
 		g_free(priv->initial_uri);
 		priv->initial_uri = g_value_dup_string(value);
 		break;
+	case PROP_OPENER_ID:
+		/* Only a fallback: a live #GsurfView:opener names its own id
+		 * (whichever of the two construct properties is set first). */
+		if (priv->opener == NULL && g_value_get_uint64(value) != 0)
+			priv->opener_id = g_value_get_uint64(value);
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -172,6 +180,7 @@ gsurf_view_get_property(GObject *object, guint prop_id,
 	case PROP_CONTAINER_ID: g_value_set_string(value, priv->container_id); break;
 	case PROP_RELATED:      g_value_set_boolean(value, priv->related); break;
 	case PROP_INITIAL_URI:  g_value_set_string(value, priv->initial_uri); break;
+	case PROP_OPENER_ID:    g_value_set_uint64(value, priv->opener_id); break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -228,6 +237,20 @@ gsurf_view_class_init(GsurfViewClass *klass)
 	 */
 	props[PROP_INITIAL_URI] = g_param_spec_string("initial-uri", NULL, NULL,
 		NULL, G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:opener-id:
+	 *
+	 * The id of the view this one was opened from (0 for none). Kept
+	 * after the opener closes. On construction it is a fallback for a
+	 * view whose opener is already gone (a tab reopened in another
+	 * container keeps its place in the tab tree): a live
+	 * #GsurfView:opener always wins.
+	 *
+	 * Since: 0.4.2
+	 */
+	props[PROP_OPENER_ID] = g_param_spec_uint64("opener-id", NULL, NULL,
+		0, G_MAXUINT64, 0,
+		G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 	g_object_class_install_properties(object_class, N_PROPS, props);
 
 	/**
@@ -331,6 +354,27 @@ gsurf_view_class_init(GsurfViewClass *klass)
 		"script-message", G_TYPE_FROM_CLASS(klass),
 		G_SIGNAL_RUN_LAST | G_SIGNAL_DETAILED, 0, NULL, NULL, NULL,
 		G_TYPE_NONE, 2, G_TYPE_STRING, G_TYPE_STRING);
+
+	/**
+	 * GsurfView::new-view-requested:
+	 * @view: the view the request comes from
+	 * @uri: the address to open
+	 * @background: %TRUE to keep @view the active view, %FALSE to
+	 *   activate the new one
+	 *
+	 * Emitted by gsurf_view_request_new_view() (the page context menu's
+	 * "Open Link in New Tab"): the host opens @uri in a new, unrelated
+	 * view whose opener is @view, so tab chrome shows it as @view's
+	 * child.
+	 *
+	 * Returns: %TRUE when a handler opened the view
+	 *
+	 * Since: 0.4.2
+	 */
+	signals[SIG_NEW_VIEW_REQUESTED] = g_signal_new(
+		"new-view-requested", G_TYPE_FROM_CLASS(klass),
+		G_SIGNAL_RUN_LAST, 0, g_signal_accumulator_true_handled, NULL, NULL,
+		G_TYPE_BOOLEAN, 2, G_TYPE_STRING, G_TYPE_BOOLEAN);
 }
 
 static void
@@ -1015,6 +1059,26 @@ gsurf_view_emit_create_view(GsurfView *self, const gchar *uri)
 		return NULL;
 	g_signal_emit(self, signals[SIG_CREATE_VIEW], 0, uri ? uri : "", &result);
 	return result;
+}
+
+gboolean
+gsurf_view_request_new_view(GsurfView *self, const gchar *uri, gboolean background)
+{
+	gboolean handled = FALSE;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+	if (uri == NULL || *uri == '\0' || gsurf_kiosk_is_enabled())
+		return FALSE;
+	g_signal_emit(self, signals[SIG_NEW_VIEW_REQUESTED], 0, uri, background != FALSE, &handled);
+	return handled;
+}
+
+gboolean
+gsurf_view_has_new_view_handler(GsurfView *self)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	return g_signal_has_handler_pending(self, signals[SIG_NEW_VIEW_REQUESTED], 0, FALSE);
 }
 
 /* --- Signal emission helpers --- */

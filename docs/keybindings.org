@@ -150,11 +150,13 @@ In a C config: =gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS
 * Actions
 
 Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
-=open-prompt=, =open-new-view=. Scroll: =scroll-{up,down,left,right,top,bottom}=,
+=open-prompt=, =open-new-view=, =open-new-view-background=. Scroll: =scroll-{up,down,left,right,top,bottom}=,
 =page-{up,down}=, =half-page-{up,down}=. Zoom: =zoom-{in,out,reset}=. Find:
 =find=, =find-next=, =find-prev=. Tabs: =tab-{new,close,next,prev,reopen}=.
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
+
+=open-new-view= opens the hovered link in a new foreground tab, =open-new-view-background= in a new tab behind the current one (since 0.4.2); both make the new tab a child of the current one in the =tabs= tree, and both do nothing off a link when bound to a mouse button (the engine keeps its own middle-click behaviour). The default mousebinds map middle click and =Ctrl+Button1= to =open-new-view-background=, like Firefox and Sidebery; bind them to =open-new-view= to follow the link into the new tab.
 
 Handled by modules (the core table forwards them; each does nothing unless its module is enabled): tree sidebar (=tabs=, default keys =Ctrl+Shift+.=, =Ctrl+Shift+[=, =Ctrl+Shift+Page_Up= / =Page_Down=): =tab-sidebar-toggle=, =tab-tree-collapse=, =tab-move-{up,down}=. Containers (=containers=): =container-new-temp=, =container-reopen-next=. Dark mode (=dark_mode=): =dark-mode-toggle=, =dark-mode-toggle-site=. Autofill (=form_autofill=): =form-autofill=. Panes (=wmux=, or any module that installs a window layout and handles them): =pane-split-right=, =pane-split-down= — for the view they are dispatched with, split the pane showing it with a new tab when it is visible, otherwise split the active pane and show that view in the new pane (the =tabs= context menu dispatches them for a chosen tab); they have no default key. Kiosk mode refuses =container-new-temp=, =container-reopen-next= and the two pane splits like every action that opens a view.
 

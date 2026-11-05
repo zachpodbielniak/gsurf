@@ -79,6 +79,8 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_PROMPT_ENTRY_NAME   "gsurf-wmux-prompt-entry"
 #define GSURF_WMUX_CHOOSER_NAME        "gsurf-wmux-chooser"
 #define GSURF_WMUX_PANE_NUMBER_NAME    "gsurf-wmux-pane-number"
+#define GSURF_WMUX_DROP_NAME           "gsurf-wmux-drop"
+#define GSURF_WMUX_DROP_ZONE_NAME      "gsurf-wmux-drop-zone"
 
 /* CSS classes. */
 #define GSURF_WMUX_PANE_CLASS           "wmux-pane"
@@ -89,6 +91,8 @@ G_DECLARE_FINAL_TYPE(GsurfWmuxModule, gsurf_wmux_module, GSURF, WMUX_MODULE, Gsu
 #define GSURF_WMUX_STATUS_CURRENT_CLASS "wmux-status-current"
 #define GSURF_WMUX_CHOOSER_ROW_CLASS    "wmux-chooser-row"
 #define GSURF_WMUX_CHOOSER_SEL_CLASS    "wmux-chooser-selected"
+#define GSURF_WMUX_DROP_CLASS           "wmux-drop"
+#define GSURF_WMUX_DROP_ZONE_CLASS      "wmux-drop-zone"
 
 /* Object data: on the module, its GtkCssProvider (borrowed) while the UI
  * exists; on a pane frame, the id of the view it shows (a guint64*); on a
@@ -120,6 +124,10 @@ typedef struct {
  * @overlay: the GtkOverlay holding the web view and @number
  * @number: the display-panes number label
  * @webview: the view's widget while it is parented here (a reference)
+ * @drop: the drop target over the web view, shown only while a tab is
+ *   dragged (so the page keeps every other pointer event)
+ * @zone: the highlight inside @drop: where a drop would put the tab
+ * @zone_shown: the zone highlighted (a #GsurfWmuxDrop), or -1
  *
  * The widgets around one visible view.
  */
@@ -129,6 +137,9 @@ typedef struct {
 	GtkWidget *overlay;
 	GtkWidget *number;
 	GtkWidget *webview;
+	GtkWidget *drop;
+	GtkWidget *zone;
+	gint       zone_shown;
 } GsurfWmuxFrame;
 
 /* What the status-line entry is asking for. */
@@ -189,6 +200,8 @@ struct _GsurfWmuxModule
 	gint               in_activate;       /* activate_view nesting depth */
 	guint64            removing;          /* the view remove_view handles */
 	gchar             *visible_sig;       /* the visible views at the last sync */
+	gchar             *groups_sig;        /* the groups at the last notification */
+	guint64            drag_view;         /* the tab being dragged in, or 0 */
 
 	/* Keys. */
 	gboolean           prefix_active;     /* the next key is a prefix command */
@@ -269,6 +282,13 @@ G_GNUC_INTERNAL void     gsurf_wmux_new_window(GsurfWmuxModule *self, const gcha
                                                const gchar *uri);
 G_GNUC_INTERNAL void     gsurf_wmux_break_pane(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void     gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name);
+/* Show @view (a view of the window) in place of (CENTER) or beside @target
+ * (a view on screen): see wmux_show_view_at() in gsurf-wmux-session.c. */
+G_GNUC_INTERNAL gboolean gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view,
+                                                 GsurfView *target, GsurfWmuxDrop zone);
+/* Tell the window when the groups (the tmux windows: names, current,
+ * the views their panes show) changed since the last call. */
+G_GNUC_INTERNAL void     gsurf_wmux_notify_groups(GsurfWmuxModule *self);
 /* After a model change in the current window: make the active pane's view
  * the window's active view and focus it, and bring the widgets in line. */
 G_GNUC_INTERNAL void     gsurf_wmux_show_active(GsurfWmuxModule *self);
@@ -295,6 +315,9 @@ G_GNUC_INTERNAL void      gsurf_wmux_ui_prompt(GsurfWmuxModule *self, GsurfWmuxP
                                                const gchar *prompt, const gchar *initial);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_prompt_close(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_display_panes(GsurfWmuxModule *self, gboolean show);
+/* A tab drag from chrome began (@view) or ended (NULL): show or hide the
+ * drop targets over the panes. */
+G_GNUC_INTERNAL void      gsurf_wmux_ui_set_drag(GsurfWmuxModule *self, GsurfView *view);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_open(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_close(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void      gsurf_wmux_ui_chooser_refresh(GsurfWmuxModule *self);

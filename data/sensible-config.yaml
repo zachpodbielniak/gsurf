@@ -85,8 +85,8 @@ keybinds:
 mousebinds:
   "Button8": back
   "Button9": forward
-  "Button2": open-new-view
-  "Ctrl+Button1": open-new-view
+  "Button2": open-new-view-background
+  "Ctrl+Button1": open-new-view-background
 
 # ===== Modules =====
 modules:

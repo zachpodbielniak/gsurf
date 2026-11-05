@@ -19,6 +19,8 @@ test_action_from_string(void)
 		GSURF_ACTION_PANE_SPLIT_RIGHT);
 	g_assert_cmpint(gsurf_action_from_string("pane_split_down"), ==,
 		GSURF_ACTION_PANE_SPLIT_DOWN);
+	g_assert_cmpint(gsurf_action_from_string("open-new-view-background"), ==,
+		GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND);
 
 	/* Underscores are accepted as equivalent to hyphens. */
 	g_assert_cmpint(gsurf_action_from_string("reload_nocache"), ==, GSURF_ACTION_RELOAD_NOCACHE);
@@ -39,6 +41,10 @@ test_action_to_string(void)
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_SHOW_KEYBINDS), ==, "show-keybinds");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_PANE_SPLIT_RIGHT), ==, "pane-split-right");
 	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_PANE_SPLIT_DOWN), ==, "pane-split-down");
+	g_assert_cmpstr(gsurf_action_to_string(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND), ==,
+		"open-new-view-background");
+	/* Appended last: the values before it keep their numbers. */
+	g_assert_cmpint(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND, ==, GSURF_ACTION_PANE_SPLIT_DOWN + 1);
 }
 
 static void
@@ -53,6 +59,8 @@ test_action_description(void)
 		"Split the pane, the new pane on the right");
 	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_PANE_SPLIT_DOWN), ==,
 		"Split the pane, the new pane below");
+	g_assert_cmpstr(gsurf_action_get_description(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND), ==,
+		"Open in a new background tab");
 }
 
 static void
@@ -75,6 +83,7 @@ test_enum_types(void)
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_POLICY_DECISION));
 	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_MODE_POLICY));
 	g_assert_true(G_TYPE_IS_FLAGS(GSURF_TYPE_KEY_MOD));
+	g_assert_true(G_TYPE_IS_ENUM(GSURF_TYPE_LAYOUT_DROP_ZONE));
 }
 
 static void
@@ -91,6 +100,17 @@ test_enum_values(void)
 	g_assert_nonnull(v);
 	g_assert_cmpstr(v->value_nick, ==, "started");
 
+	g_type_class_unref(klass);
+
+	/* The drop zones, by nick. */
+	klass = g_type_class_ref(GSURF_TYPE_LAYOUT_DROP_ZONE);
+	v = g_enum_get_value_by_nick(klass, "center");
+	g_assert_nonnull(v);
+	g_assert_cmpint(v->value, ==, GSURF_LAYOUT_DROP_CENTER);
+	v = g_enum_get_value_by_nick(klass, "bottom");
+	g_assert_nonnull(v);
+	g_assert_cmpint(v->value, ==, GSURF_LAYOUT_DROP_BOTTOM);
+	g_assert_cmpuint(klass->n_values, ==, 5);
 	g_type_class_unref(klass);
 }
 

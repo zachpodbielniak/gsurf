@@ -451,6 +451,53 @@ G_GNUC_INTERNAL gboolean gsurf_wmux_layout_move_border(GsurfWmuxLayout *layout,
                                                        gint width, gint height, gint gap,
                                                        gint position);
 
+/* --- Drops --- */
+
+/**
+ * GsurfWmuxDrop:
+ * @GSURF_WMUX_DROP_CENTER: the middle of a pane
+ * @GSURF_WMUX_DROP_LEFT: its left edge band
+ * @GSURF_WMUX_DROP_RIGHT: its right edge band
+ * @GSURF_WMUX_DROP_TOP: its top edge band
+ * @GSURF_WMUX_DROP_BOTTOM: its bottom edge band
+ *
+ * Where in a pane a tab is dropped (the same order as the core's
+ * GsurfLayoutDropZone).
+ */
+typedef enum {
+	GSURF_WMUX_DROP_CENTER,
+	GSURF_WMUX_DROP_LEFT,
+	GSURF_WMUX_DROP_RIGHT,
+	GSURF_WMUX_DROP_TOP,
+	GSURF_WMUX_DROP_BOTTOM
+} GsurfWmuxDrop;
+
+/**
+ * GSURF_WMUX_DROP_EDGE_PCT:
+ *
+ * The width of the edge bands, in percent of the pane's width (left,
+ * right) or height (top, bottom).
+ */
+#define GSURF_WMUX_DROP_EDGE_PCT (25)
+
+/**
+ * gsurf_wmux_drop_zone:
+ * @width: the pane's width in pixels
+ * @height: its height
+ * @x: the pointer, in pane coordinates
+ * @y: the pointer
+ * @edge_pct: the edge band width in percent (0..50, clamped)
+ *
+ * The zone under (@x, @y): an edge when the point lies in that edge's
+ * band (the band it is relatively deepest into wins where two meet, in
+ * the order left, right, top, bottom on a tie), else the centre. A pane
+ * without size is all centre.
+ *
+ * Returns: the #GsurfWmuxDrop zone
+ */
+G_GNUC_INTERNAL GsurfWmuxDrop gsurf_wmux_drop_zone(gint width, gint height, gint x, gint y,
+                                                   guint edge_pct);
+
 /* --- Serialization --- */
 
 /**

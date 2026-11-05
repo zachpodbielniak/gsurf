@@ -416,6 +416,64 @@ gsurf_tab_tree_move_subtree(GsurfTabTree *tree, guint64 id, gint direction)
 	return TRUE;
 }
 
+gboolean
+gsurf_tab_tree_is_in_subtree(GsurfTabTree *tree, guint64 id, guint64 ancestor)
+{
+	TabNode *node = lookup(tree, id);
+	TabNode *top = lookup(tree, ancestor);
+
+	if (node == NULL || top == NULL)
+		return FALSE;
+	return node->index >= top->index && node->index < top->index + top->size;
+}
+
+gboolean
+gsurf_tab_tree_move_to(GsurfTabTree *tree, guint64 id, guint64 target, GsurfTabTreeDrop where)
+{
+	g_autoptr(GArray) block = NULL;
+	TabNode *node;
+	TabNode *tnode;
+	guint64 parent;
+	guint target_size;
+	guint at;
+	guint i;
+
+	node = lookup(tree, id);
+	tnode = lookup(tree, target);
+	if (node == NULL || tnode == NULL || id == target ||
+	    gsurf_tab_tree_is_in_subtree(tree, target, id))
+		return FALSE;
+
+	/* 1. The new logical parent, and the size of the target's block
+	 *    once ours is out of it (we may be one of its descendants). */
+	parent = (where == GSURF_TAB_TREE_DROP_CHILD) ? target : tnode->parent;
+	target_size = tnode->size;
+	if (gsurf_tab_tree_is_in_subtree(tree, id, target))
+		target_size -= node->size;
+
+	/* 2. Take our block out of the order. */
+	block = g_array_sized_new(FALSE, FALSE, sizeof(guint64), node->size);
+	g_array_append_vals(block, &g_array_index(tree->order, guint64, node->index), node->size);
+	g_array_remove_range(tree->order, node->index, node->size);
+
+	/* 3. Where the target is now, and where we go relative to it. */
+	at = 0;
+	for (i = 0; i < tree->order->len; i++) {
+		if (g_array_index(tree->order, guint64, i) == target) {
+			at = i;
+			break;
+		}
+	}
+	if (where != GSURF_TAB_TREE_DROP_BEFORE)
+		at += target_size;
+
+	/* 4. Back in, re-parented, and re-derived. */
+	node->hint = parent;
+	g_array_insert_vals(tree->order, at, block->data, block->len);
+	derive(tree);
+	return TRUE;
+}
+
 /* --- Queries --- */
 
 guint64
@@ -518,4 +576,129 @@ gsurf_tab_tree_expand_ancestors(GsurfTabTree *tree, guint64 id)
 	if (changed)
 		derive(tree);
 	return changed;
+}
+
+/* --- Display rows --- */
+
+/* Fill in has_children, collapsed and visible from the depths: a row has
+ * children when the next row is deeper; a collapsed row with children
+ * hides every deeper row after it until one at its depth or above. */
+static void
+finish_rows(GArray *rows)
+{
+	guint hide_depth = G_MAXUINT;
+	guint i;
+
+	for (i = 0; i < rows->len; i++) {
+		GsurfTabDisplayRow *row = &g_array_index(rows, GsurfTabDisplayRow, i);
+		GsurfTabDisplayRow *next = i + 1 < rows->len
+			? &g_array_index(rows, GsurfTabDisplayRow, i + 1) : NULL;
+
+		row->has_children = (next != NULL && next->depth > row->depth);
+		if (!row->has_children)
+			row->collapsed = FALSE;
+		if (row->depth > hide_depth) {
+			row->visible = FALSE;
+			continue;
+		}
+		hide_depth = G_MAXUINT;
+		row->visible = TRUE;
+		if (row->collapsed)
+			hide_depth = row->depth;
+	}
+}
+
+static void
+append_row(GArray *rows, GsurfTabRowKind kind, guint64 key, guint group, guint depth,
+           gboolean collapsed)
+{
+	GsurfTabDisplayRow row = { kind, key, group, depth, FALSE, collapsed, TRUE };
+
+	g_array_append_val(rows, row);
+}
+
+GArray *
+gsurf_tab_tree_build_rows(GsurfTabTree *tree)
+{
+	GArray *rows = g_array_new(FALSE, FALSE, sizeof(GsurfTabDisplayRow));
+	guint i;
+
+	for (i = 0; i < tree->order->len; i++) {
+		TabNode *node = node_at(tree, i);
+
+		append_row(rows, GSURF_TAB_ROW_TAB, node->id, 0, node->depth, node->collapsed);
+	}
+	finish_rows(rows);
+	return rows;
+}
+
+GArray *
+gsurf_tab_tree_build_grouped_rows(GsurfTabTree *tree, const GsurfTabGroupSpec *groups,
+                                  guint n_groups, gboolean background_collapsed)
+{
+	GArray *rows = g_array_new(FALSE, FALSE, sizeof(GsurfTabDisplayRow));
+	g_autoptr(GHashTable) in_pane = g_hash_table_new(g_int64_hash, g_int64_equal);
+	g_autoptr(GHashTable) listed = g_hash_table_new(g_int64_hash, g_int64_equal);
+	gboolean any_background = FALSE;
+	guint g;
+	guint j;
+	guint i;
+
+	/* 1. Every tab some pane shows (the first group listing it wins). */
+	for (g = 0; g < n_groups; g++) {
+		for (j = 0; j < groups[g].n_ids; j++) {
+			TabNode *node = lookup(tree, groups[g].ids[j]);
+
+			if (node != NULL)
+				g_hash_table_add(in_pane, &node->id);
+		}
+	}
+
+	/* 2. Each group: its heading, its pane tabs, and under each pane tab
+	 *    its descendants that no pane shows. */
+	for (g = 0; g < n_groups; g++) {
+		append_row(rows, GSURF_TAB_ROW_GROUP, GSURF_TAB_GROUP_KEY(groups[g].index),
+			groups[g].index, 0, groups[g].collapsed);
+		for (j = 0; j < groups[g].n_ids; j++) {
+			TabNode *top = lookup(tree, groups[g].ids[j]);
+
+			if (top == NULL || g_hash_table_contains(listed, &top->id))
+				continue;
+			g_hash_table_add(listed, &top->id);
+			append_row(rows, GSURF_TAB_ROW_TAB, top->id, groups[g].index, 1, top->collapsed);
+			for (i = top->index + 1; i < top->index + top->size; i++) {
+				TabNode *node = node_at(tree, i);
+
+				/* A descendant in a pane is listed under its own pane,
+				 * its subtree with it. */
+				if (g_hash_table_contains(in_pane, &node->id)) {
+					i = node->index + node->size - 1;
+					continue;
+				}
+				g_hash_table_add(listed, &node->id);
+				append_row(rows, GSURF_TAB_ROW_TAB, node->id, groups[g].index,
+					1 + node->depth - top->depth, node->collapsed);
+			}
+		}
+	}
+
+	/* 3. The background group: whatever no group listed, in tree order.
+	 *    Every ancestor of such a tab is unlisted too (a pane tab lists
+	 *    its whole subtree), so its tree depth is its depth here. */
+	for (i = 0; i < tree->order->len; i++) {
+		TabNode *node = node_at(tree, i);
+
+		if (g_hash_table_contains(listed, &node->id))
+			continue;
+		if (!any_background) {
+			append_row(rows, GSURF_TAB_ROW_GROUP,
+				GSURF_TAB_GROUP_KEY(GSURF_TAB_GROUP_BACKGROUND),
+				GSURF_TAB_GROUP_BACKGROUND, 0, background_collapsed);
+			any_background = TRUE;
+		}
+		append_row(rows, GSURF_TAB_ROW_TAB, node->id, GSURF_TAB_GROUP_BACKGROUND,
+			1 + node->depth, node->collapsed);
+	}
+	finish_rows(rows);
+	return rows;
 }

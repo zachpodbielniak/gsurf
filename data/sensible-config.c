@@ -201,8 +201,8 @@ gsurf_config_init(void)
 	/* ===== Mousebinds ===== */
 	gsurf_config_set_mousebind(config, "Button8",      GSURF_ACTION_BACK);
 	gsurf_config_set_mousebind(config, "Button9",      GSURF_ACTION_FORWARD);
-	gsurf_config_set_mousebind(config, "Button2",      GSURF_ACTION_OPEN_NEW_VIEW);
-	gsurf_config_set_mousebind(config, "Ctrl+Button1", GSURF_ACTION_OPEN_NEW_VIEW);
+	gsurf_config_set_mousebind(config, "Button2",      GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND);
+	gsurf_config_set_mousebind(config, "Ctrl+Button1", GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND);
 
 	/* ===== Modules ===== (read from a YAML mapping; layered via the loader) */
 	gsurf_config_load_from_data(config, SENSIBLE_MODULES_YAML, -1, NULL);
