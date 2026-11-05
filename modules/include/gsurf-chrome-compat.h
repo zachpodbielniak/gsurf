@@ -853,7 +853,8 @@ gsurf_chrome_disconnect_click(GtkWidget *widget, gpointer user_data)
 		/* Release gestures too ("gsurf-chrome-release-N"). */
 		if (name != NULL &&
 		    (g_str_has_prefix(name, GSURF_CHROME_CLICK_CONTROLLER_PREFIX) ||
-		     g_str_has_prefix(name, "gsurf-chrome-release-")) &&
+		     g_str_has_prefix(name, "gsurf-chrome-release-") ||
+		     g_str_has_prefix(name, "gsurf-chrome-dblclick-")) &&
 		    g_signal_handlers_disconnect_by_data(c, user_data) > 0)
 			g_ptr_array_add(doomed, c);
 		else
@@ -1016,6 +1017,92 @@ gsurf_chrome_connect_release(GtkWidget            *widget,
 			G_CALLBACK(gsurf_chrome_on_button_release_event), user_data);
 		g_object_set_data(G_OBJECT(widget), GSURF_CHROME_RELEASE_CONNECTED_DATA, user_data);
 	}
+#endif
+}
+
+/* ------------------------------------------------------------------ */
+/* Double clicks                                                       */
+/* ------------------------------------------------------------------ */
+
+/*
+ * GSURF_CHROME_DOUBLE_CLICK_NAME:
+ *
+ * Name of the GtkGestureClick (GTK4) gsurf_chrome_connect_double_click()
+ * attaches.
+ */
+#define GSURF_CHROME_DOUBLE_CLICK_NAME "gsurf-chrome-dblclick-1"
+#define GSURF_CHROME_DOUBLE_FUNC_DATA  "gsurf-chrome-dblclick-func"
+
+#ifdef GSURF_BACKEND_GTK4
+static inline void
+gsurf_chrome_on_double_pressed(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y,
+                               gpointer user_data)
+{
+	GtkWidget *widget;
+	GsurfChromeClickFunc func;
+
+	if (n_press != 2)
+		return;
+	widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+	if (gsurf_chrome_hit_is_nested_button(widget, gtk_widget_pick(widget, x, y, GTK_PICK_DEFAULT)))
+		return;
+	func = (GsurfChromeClickFunc)g_object_get_data(G_OBJECT(gesture),
+		GSURF_CHROME_DOUBLE_FUNC_DATA);
+	if (func != NULL)
+		func(widget, user_data);
+}
+#else
+static inline gboolean
+gsurf_chrome_on_double_press_event(GtkWidget *widget, GdkEventButton *event, gpointer user_data)
+{
+	GsurfChromeClickFunc func;
+	gpointer hit = NULL;
+
+	if (event->type != GDK_2BUTTON_PRESS || event->button != 1)
+		return FALSE;
+	if (event->window != NULL)
+		gdk_window_get_user_data(event->window, &hit);
+	if (hit != NULL && GTK_IS_WIDGET(hit) &&
+	    gsurf_chrome_hit_is_nested_button(widget, GTK_WIDGET(hit)))
+		return FALSE;
+	func = (GsurfChromeClickFunc)g_object_get_data(G_OBJECT(widget), GSURF_CHROME_DOUBLE_FUNC_DATA);
+	if (func == NULL)
+		return FALSE;
+	func(widget, user_data);
+	return TRUE;
+}
+#endif
+
+/**
+ * gsurf_chrome_connect_double_click:
+ * @widget: a widget from gsurf_chrome_clickable_new()
+ * @func: (scope notified): the handler
+ * @user_data: (closure): data for @func; also the signal data, so
+ *   gsurf_chrome_disconnect_click() with it removes the handler
+ *
+ * Calls @func on a primary-button double click on @widget (not on a
+ * nested #GtkButton). GTK3: the second press arrives as a
+ * GDK_2BUTTON_PRESS "button-press-event"; GTK4: a #GtkGestureClick named
+ * %GSURF_CHROME_DOUBLE_CLICK_NAME reporting two presses. The single
+ * clicks of the same gesture still reach their own handlers.
+ */
+static inline void
+gsurf_chrome_connect_double_click(GtkWidget *widget, GsurfChromeClickFunc func,
+                                  gpointer user_data)
+{
+#ifdef GSURF_BACKEND_GTK4
+	GtkGesture *gesture = gtk_gesture_click_new();
+
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), 1);
+	gtk_event_controller_set_name(GTK_EVENT_CONTROLLER(gesture), GSURF_CHROME_DOUBLE_CLICK_NAME);
+	g_object_set_data(G_OBJECT(gesture), GSURF_CHROME_DOUBLE_FUNC_DATA, (gpointer)func);
+	g_signal_connect(gesture, "pressed", G_CALLBACK(gsurf_chrome_on_double_pressed), user_data);
+	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(gesture));
+#else
+	g_object_set_data(G_OBJECT(widget), GSURF_CHROME_DOUBLE_FUNC_DATA, (gpointer)func);
+	gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
+	g_signal_connect(widget, "button-press-event",
+		G_CALLBACK(gsurf_chrome_on_double_press_event), user_data);
 #endif
 }
 

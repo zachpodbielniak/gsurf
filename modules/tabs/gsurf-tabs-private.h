@@ -49,6 +49,7 @@ G_DECLARE_FINAL_TYPE(GsurfTabsModule, gsurf_tabs_module, GSURF, TABS_MODULE, Gsu
 #define GSURF_TABS_ROW_CLOSE_NAME    "gsurf-tab-close"
 #define GSURF_TABS_ROW_STRIPE_NAME   "gsurf-tab-stripe"
 #define GSURF_TABS_ROW_BOX_NAME      "gsurf-tab-row-box"
+#define GSURF_TABS_ROW_RENAME_NAME   "gsurf-tab-group-rename"
 
 /* CSS classes of the sidebar rows (tests rely on them too). */
 #define GSURF_TABS_ROW_CLASS           "gsurf-tab-row"
@@ -130,6 +131,7 @@ struct _GsurfTabsModule
 	GSimpleActionGroup *menu_actions; /* "tab.*" context menu actions */
 	GtkWidget      *menu;         /* open context menu, or NULL */
 	guint64         menu_tab;     /* the tab the context menu acts on */
+	guint           menu_group;   /* the group a heading's menu acts on */
 };
 
 /* --- Core, used by the UI (gsurf-tabs-module.c) --- */
@@ -162,6 +164,10 @@ G_GNUC_INTERNAL void      gsurf_tabs_split_tab(GsurfTabsModule *self, guint64 id
 G_GNUC_INTERNAL void      gsurf_tabs_select_group(GsurfTabsModule *self, guint index);
 G_GNUC_INTERNAL void      gsurf_tabs_toggle_group(GsurfTabsModule *self, guint index);
 G_GNUC_INTERNAL gboolean  gsurf_tabs_group_collapsed(GsurfTabsModule *self, guint index);
+/* Rename group @index (gsurf_window_layout_rename_group(); "" or NULL:
+ * automatic naming). Returns whether the layout took it. */
+G_GNUC_INTERNAL gboolean  gsurf_tabs_rename_group(GsurfTabsModule *self, guint index,
+                                                  const gchar *name);
 
 /* The groups of the window's layout when the sidebar groups by them
  * (wmux_groups on and the layout has groups), else NULL. */

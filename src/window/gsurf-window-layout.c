@@ -270,6 +270,20 @@ gsurf_window_layout_select_group(GsurfWindowLayout *self, GsurfWindow *window, g
 }
 
 gboolean
+gsurf_window_layout_rename_group(GsurfWindowLayout *self, GsurfWindow *window, guint index,
+                                 const gchar *name)
+{
+	GsurfWindowLayoutInterface *iface;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW_LAYOUT(self), FALSE);
+	g_return_val_if_fail(GSURF_IS_WINDOW(window), FALSE);
+
+	iface = GSURF_WINDOW_LAYOUT_GET_IFACE(self);
+	return iface->rename_group != NULL
+		? iface->rename_group(self, window, index, name) : FALSE;
+}
+
+gboolean
 gsurf_window_layout_show_view_at(GsurfWindowLayout *self, GsurfWindow *window,
                                  GsurfView *view, GsurfView *target, GsurfLayoutDropZone zone)
 {

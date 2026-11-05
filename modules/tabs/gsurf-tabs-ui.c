@@ -17,6 +17,12 @@
  *     ("0:name*", click to show that group) with the tabs its panes show
  *     and their background descendants, then a background group.
  *
+ * A heading can be renamed (the group, through
+ * gsurf_window_layout_rename_group(): wmux's rename-window) from its
+ * context menu ("Rename Window…"), a double click, or F2 while it has
+ * the keyboard focus: an entry takes the label's place, Enter applies
+ * (empty: automatic naming again), Escape cancels.
+ *
  * Tab rows are drag sources (GSURF_LAYOUT_VIEW_MIME_TYPE, same app):
  * dropped on another tab row they re-parent the tab (upper quarter:
  * before it, lower quarter: after it, middle: under it); dropped on a
@@ -63,6 +69,7 @@ struct _GsurfTabsRow
 	GtkWidget *icon;
 	GtkWidget *title;
 	GtkWidget *close;
+	GtkWidget *rename;   /* a heading's rename entry, hidden until renaming */
 
 	/* What was last applied, so a sync only touches what changed. */
 	gint       indent;
@@ -193,8 +200,10 @@ build_css(GsurfTabsModule *self)
  * the meantime makes them no-ops. */
 static const gchar *const menu_simple_actions[] = {
 	"reload", "duplicate", "split-right", "split-down", "toggle-collapse",
-	"close-children", "close", NULL
+	"close-children", "close", "rename-group", NULL
 };
+
+static void group_rename_begin(GsurfTabsModule *self, guint index);
 
 static void
 on_menu_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
@@ -217,6 +226,8 @@ on_menu_action(GSimpleAction *action, GVariant *parameter, gpointer user_data)
 		gsurf_tabs_close_children(self, id);
 	else if (g_strcmp0(name, "close") == 0)
 		gsurf_tabs_close_tab(self, id);
+	else if (g_strcmp0(name, "rename-group") == 0)
+		group_rename_begin(self, self->menu_group);
 	else if (g_strcmp0(name, "container") == 0 && parameter != NULL)
 		gsurf_tabs_reopen_tab(self, id, g_variant_get_string(parameter, NULL));
 }
@@ -356,47 +367,25 @@ menu_close(GsurfTabsModule *self)
 }
 
 /*
- * menu_popup:
- * @id: the tab the menu is for
+ * menu_show:
+ * @model: the menu
  * @anchor: the clicked widget (a sidebar row or a strip tab)
  * @parent: a long-lived ancestor of @anchor holding the "tab" actions
- *   (the sidebar or the strip); the menu hangs off it, so rebuilding the
- *   strip or dropping a row never leaves the menu without a parent
  *
- * Prepares the actions for @id (the current container checked, Close
- * disabled for the last tab) and shows the menu: a #GtkPopoverMenu on
- * GTK4, a #GtkMenu on GTK3. The model is published as object data even
- * when @anchor is not on screen (headless tests), where no menu widget
- * is created.
+ * Publishes @model as object data (also when @anchor is not on screen,
+ * for the headless tests) and pops it up: a #GtkPopoverMenu on GTK4, a
+ * #GtkMenu on GTK3. See menu_popup() for why it hangs off @parent.
  */
 static void
-menu_popup(GsurfTabsModule *self, guint64 id, GtkWidget *anchor, GtkWidget *parent)
+menu_show(GsurfTabsModule *self, GMenuModel *model, GtkWidget *anchor, GtkWidget *parent)
 {
-	g_autoptr(GMenuModel) model = NULL;
-	GsurfView *view = gsurf_view_lookup(id);
-	GAction *container;
-	const gchar *current;
-
-	if (self->menu_actions == NULL || view == NULL || self->window == NULL)
-		return;
-	menu_close(self);
-	self->menu_tab = id;
-
-	/* 1. Action state for this tab. */
-	current = gsurf_view_get_container_id(view);
-	container = g_action_map_lookup_action(G_ACTION_MAP(self->menu_actions), "container");
-	g_simple_action_set_state(G_SIMPLE_ACTION(container),
-		g_variant_new_string(current != NULL ? current : GSURF_CONTAINER_DEFAULT));
-	menu_set_enabled(self, "close", gsurf_window_get_n_views(self->window) > 1);
-
-	/* 2. The model. */
-	model = menu_model_new(self, id);
+	/* 1. Published for the tests, even off screen. */
 	g_object_set_data_full(G_OBJECT(self), GSURF_TABS_MENU_MODEL_DATA,
 		g_object_ref(model), g_object_unref);
 	if (!gtk_widget_get_mapped(anchor))
 		return;
 
-	/* 3. The menu widget. */
+	/* 2. The menu widget. */
 #ifdef GSURF_BACKEND_GTK4
 	{
 		graphene_rect_t bounds;
@@ -463,6 +452,44 @@ menu_popup(GsurfTabsModule *self, guint64 id, GtkWidget *anchor, GtkWidget *pare
 	}
 #endif
 	g_object_set_data(G_OBJECT(self), GSURF_TABS_MENU_WIDGET_DATA, self->menu);
+}
+/*
+ * menu_popup:
+ * @id: the tab the menu is for
+ * @anchor: the clicked widget (a sidebar row or a strip tab)
+ * @parent: a long-lived ancestor of @anchor holding the "tab" actions
+ *   (the sidebar or the strip); the menu hangs off it, so rebuilding the
+ *   strip or dropping a row never leaves the menu without a parent
+ *
+ * Prepares the actions for @id (the current container checked, Close
+ * disabled for the last tab) and shows the menu: a #GtkPopoverMenu on
+ * GTK4, a #GtkMenu on GTK3. The model is published as object data even
+ * when @anchor is not on screen (headless tests), where no menu widget
+ * is created.
+ */
+static void
+menu_popup(GsurfTabsModule *self, guint64 id, GtkWidget *anchor, GtkWidget *parent)
+{
+	g_autoptr(GMenuModel) model = NULL;
+	GsurfView *view = gsurf_view_lookup(id);
+	GAction *container;
+	const gchar *current;
+
+	if (self->menu_actions == NULL || view == NULL || self->window == NULL)
+		return;
+	menu_close(self);
+	self->menu_tab = id;
+
+	/* 1. Action state for this tab. */
+	current = gsurf_view_get_container_id(view);
+	container = g_action_map_lookup_action(G_ACTION_MAP(self->menu_actions), "container");
+	g_simple_action_set_state(G_SIMPLE_ACTION(container),
+		g_variant_new_string(current != NULL ? current : GSURF_CONTAINER_DEFAULT));
+	menu_set_enabled(self, "close", gsurf_window_get_n_views(self->window) > 1);
+
+	/* 2. The model, and the menu. */
+	model = menu_model_new(self, id);
+	menu_show(self, model, anchor, parent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -592,6 +619,117 @@ on_row_twisty_clicked(GtkButton *button, gpointer user_data)
 		gsurf_tabs_toggle_group(self, (guint)(key & G_MAXUINT32));
 	else
 		gsurf_tabs_toggle_collapse(self, key);
+}
+
+/* --- Renaming a group heading --- */
+
+/* The heading row of group @index, or NULL. */
+static GsurfTabsRow *
+group_row(GsurfTabsModule *self, guint index)
+{
+	guint64 key = GSURF_TAB_GROUP_KEY(index);
+
+	return self->rows != NULL ? g_hash_table_lookup(self->rows, &key) : NULL;
+}
+
+/* Put the label back in place of the entry; the keyboard goes back to
+ * the page. */
+static void
+group_rename_end(GsurfTabsModule *self, GsurfTabsRow *row)
+{
+	GsurfView *view;
+
+	if (row == NULL || row->rename == NULL || !gtk_widget_get_visible(row->rename))
+		return;
+	gtk_widget_set_visible(row->rename, FALSE);
+	gtk_widget_set_visible(row->title, TRUE);
+	view = self->window != NULL ? gsurf_window_get_active_view(self->window) : NULL;
+	if (view != NULL)
+		gsurf_view_focus(view);
+}
+
+/* The entry takes the label's place, holding the group's name, all
+ * selected, with the keyboard focus. Not for the background group. */
+static void
+group_rename_begin(GsurfTabsModule *self, guint index)
+{
+	GsurfTabsRow *row = group_row(self, index);
+	g_autoptr(GPtrArray) groups = NULL;
+	const gchar *name = "";
+	guint i;
+
+	if (row == NULL || row->rename == NULL || index == GSURF_TAB_GROUP_BACKGROUND)
+		return;
+	groups = gsurf_tabs_list_groups(self);
+	for (i = 0; groups != NULL && i < groups->len; i++) {
+		if (gsurf_layout_group_get_index(g_ptr_array_index(groups, i)) == index)
+			name = gsurf_layout_group_get_name(g_ptr_array_index(groups, i));
+	}
+	gsurf_chrome_editable_set_text(row->rename, name);
+	gtk_widget_set_visible(row->title, FALSE);
+	gtk_widget_set_visible(row->rename, TRUE);
+	gtk_widget_grab_focus(row->rename);
+	gtk_editable_select_region(GTK_EDITABLE(row->rename), 0, -1);
+}
+
+/* Keys in the rename entry: Enter applies, Escape cancels; the rest is
+ * typing. */
+static gboolean
+on_rename_key(GtkWidget *widget, guint keyval, GdkModifierType state, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint index = (guint)(gsurf_tabs_get_widget_id(widget) & G_MAXUINT32);
+	GsurfTabsRow *row = group_row(self, index);
+
+	(void)state;
+	if (keyval == GDK_KEY_Return || keyval == GDK_KEY_KP_Enter) {
+		g_autofree gchar *name = g_strstrip(g_strdup(gsurf_chrome_editable_get_text(widget)));
+
+		group_rename_end(self, row);
+		gsurf_tabs_rename_group(self, index, name);
+		return TRUE;
+	}
+	if (keyval == GDK_KEY_Escape) {
+		group_rename_end(self, row);
+		return TRUE;
+	}
+	return FALSE;
+}
+
+/* F2 on a focused heading starts renaming it. */
+static gboolean
+on_group_key(GtkWidget *widget, guint keyval, GdkModifierType state, gpointer user_data)
+{
+	if (keyval != GDK_KEY_F2 || (state & (GDK_CONTROL_MASK | GDK_SHIFT_MASK)) != 0)
+		return FALSE;
+	group_rename_begin(GSURF_TABS_MODULE(user_data),
+		(guint)(gsurf_tabs_get_widget_id(widget) & G_MAXUINT32));
+	return TRUE;
+}
+
+static void
+on_group_double_click(GtkWidget *widget, gpointer user_data)
+{
+	group_rename_begin(GSURF_TABS_MODULE(user_data),
+		(guint)(gsurf_tabs_get_widget_id(widget) & G_MAXUINT32));
+}
+
+/* Right click on a heading: its menu (Rename Window…). The background
+ * group has none. */
+static void
+on_group_menu(GtkWidget *widget, gpointer user_data)
+{
+	GsurfTabsModule *self = GSURF_TABS_MODULE(user_data);
+	guint index = (guint)(gsurf_tabs_get_widget_id(widget) & G_MAXUINT32);
+	g_autoptr(GMenu) menu = NULL;
+
+	if (index == GSURF_TAB_GROUP_BACKGROUND || self->menu_actions == NULL)
+		return;
+	menu_close(self);
+	self->menu_group = index;
+	menu = g_menu_new();
+	g_menu_append(menu, "Rename Window\u2026", GSURF_TABS_MENU_PREFIX ".rename-group");
+	menu_show(self, G_MENU_MODEL(menu), widget, self->sidebar_box);
 }
 
 /* --- Drag and drop on tab rows --- */
@@ -777,18 +915,36 @@ row_new(GsurfTabsModule *self, guint64 id, GsurfTabRowKind kind)
 	gsurf_chrome_widget_add_class(row->row, GSURF_TABS_ROW_CLASS);
 	gsurf_tabs_set_widget_id(row->row, id);
 
-	/* A heading: a click shows its group; no favicon, close or stripe. */
+	/* A heading: a click shows its group; a double click, F2 (it can
+	 * take the focus) or its menu renames it, in an entry next to the
+	 * (then hidden) title. No favicon, close or stripe. */
 	if (kind == GSURF_TAB_ROW_GROUP) {
 		gsurf_chrome_widget_add_class(row->row, GSURF_TABS_GROUP_CLASS);
+		row->rename = gtk_entry_new();
+		gtk_widget_set_name(row->rename, GSURF_TABS_ROW_RENAME_NAME);
+		gtk_widget_set_hexpand(row->rename, TRUE);
+		gsurf_tabs_set_widget_id(row->rename, id);
+		gsurf_chrome_connect_key_press(row->rename, on_rename_key, self);
+		gsurf_chrome_box_pack(row->box, row->rename, TRUE, 0);
 		gtk_widget_set_visible(row->icon, FALSE);
 		gtk_widget_set_visible(row->close, FALSE);
 		gtk_widget_set_visible(row->stripe, FALSE);
+		gtk_widget_set_visible(row->rename, FALSE);
 #ifdef GSURF_BACKEND_GTK3
 		gtk_widget_set_no_show_all(row->icon, TRUE);
 		gtk_widget_set_no_show_all(row->close, TRUE);
 		gtk_widget_set_no_show_all(row->stripe, TRUE);
+		gtk_widget_set_no_show_all(row->rename, TRUE);
+		gtk_widget_set_no_show_all(row->title, TRUE);
+		gtk_widget_show(row->title);
+		gtk_widget_set_can_focus(row->row, TRUE);
+#else
+		gtk_widget_set_focusable(row->row, TRUE);
 #endif
 		gsurf_chrome_connect_release(row->row, 1, on_group_click, self);
+		gsurf_chrome_connect_double_click(row->row, on_group_double_click, self);
+		gsurf_chrome_connect_click(row->row, 3, on_group_menu, self);
+		gsurf_chrome_connect_key_press(row->row, on_group_key, self);
 		return row;
 	}
 
@@ -811,6 +967,9 @@ row_free(GsurfTabsModule *self, GsurfTabsRow *row)
 {
 	gsurf_chrome_disconnect_click(row->row, self);
 	gsurf_chrome_disconnect_dnd(row->row, self);
+	gsurf_chrome_disconnect_key_press(row->row, self);
+	if (row->rename != NULL)
+		gsurf_chrome_disconnect_key_press(row->rename, self);
 	g_signal_handlers_disconnect_by_data(row->twisty, self);
 	g_signal_handlers_disconnect_by_data(row->close, self);
 	gsurf_chrome_widget_detach(row->row);

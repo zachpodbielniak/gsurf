@@ -293,6 +293,9 @@ G_GNUC_INTERNAL void     gsurf_wmux_new_window(GsurfWmuxModule *self, const gcha
                                                const gchar *uri);
 G_GNUC_INTERNAL void     gsurf_wmux_break_pane(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void     gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name);
+/* Rename tmux window @index ("" or NULL: automatic naming again). */
+G_GNUC_INTERNAL gboolean gsurf_wmux_rename_window_at(GsurfWmuxModule *self, guint index,
+                                                     const gchar *name);
 /* Show @view (a view of the window) in place of (CENTER) or beside @target
  * (a view on screen): see wmux_show_view_at() in gsurf-wmux-session.c. */
 G_GNUC_INTERNAL gboolean gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view,

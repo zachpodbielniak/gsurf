@@ -613,17 +613,28 @@ gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view, GsurfView *targe
 	return TRUE;
 }
 
-void
-gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name)
+/* rename-window and the sidebar's rename share this: the status line,
+ * the C-b , prompt's initial text, the sidebar heading and the saved
+ * session all read win->name / win->renamed. */
+gboolean
+gsurf_wmux_rename_window_at(GsurfWmuxModule *self, guint index, const gchar *name)
 {
-	GsurfWmuxWin *win = gsurf_wmux_current(self);
+	GsurfWmuxWin *win;
 
-	if (win == NULL)
-		return;
+	if (self->wins == NULL || index >= self->wins->len)
+		return FALSE;
+	win = g_ptr_array_index(self->wins, index);
 	g_free(win->name);
 	win->name = g_strdup(name != NULL ? name : "");
 	win->renamed = (name != NULL && *name != '\0');
 	gsurf_wmux_ui_sync(self);
+	return TRUE;
+}
+
+void
+gsurf_wmux_rename_window(GsurfWmuxModule *self, const gchar *name)
+{
+	gsurf_wmux_rename_window_at(self, self->current, name);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1084,6 +1095,18 @@ wmux_show_view_at(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *vie
 	return gsurf_wmux_show_view_at(self, view, target, drop);
 }
 
+/* rename-window for any window, from the sidebar. */
+static gboolean
+wmux_rename_group(GsurfWindowLayout *layout, GsurfWindow *window, guint index,
+                  const gchar *name)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(layout);
+
+	if (!self->attached || window != self->window)
+		return FALSE;
+	return gsurf_wmux_rename_window_at(self, index, name);
+}
+
 /* A sidebar drag: drop targets over the panes for its duration. */
 static void
 wmux_begin_view_drag(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view)
@@ -1122,4 +1145,5 @@ gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->show_view_at = wmux_show_view_at;
 	iface->begin_view_drag = wmux_begin_view_drag;
 	iface->end_view_drag = wmux_end_view_drag;
+	iface->rename_group = wmux_rename_group;
 }

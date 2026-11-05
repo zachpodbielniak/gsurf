@@ -182,6 +182,7 @@ typedef struct {
 	GsurfView  *drop_target;
 	gint        drop_zone;
 	gint        drags;        /* begin_view_drag - end_view_drag */
+	gchar      *renamed;      /* "<index>=<name>" of the last rename_group */
 } TestLayout;
 typedef struct { GObjectClass parent; } TestLayoutClass;
 
@@ -315,6 +316,19 @@ l_show_view_at(GsurfWindowLayout *self, GsurfWindow *window, GsurfView *view,
 	return view != target;
 }
 
+static gboolean
+l_rename_group(GsurfWindowLayout *self, GsurfWindow *window, guint index, const gchar *name)
+{
+	TestLayout *layout = (TestLayout *)self;
+
+	(void)window;
+	if (index > 1)
+		return FALSE;
+	g_free(layout->renamed);
+	layout->renamed = g_strdup_printf("%u=%s", index, name != NULL ? name : "(null)");
+	return TRUE;
+}
+
 static void
 l_begin_drag(GsurfWindowLayout *self, GsurfWindow *window, GsurfView *view)
 {
@@ -347,6 +361,7 @@ test_layout_iface_init(GsurfWindowLayoutInterface *iface)
 	iface->show_view_at = l_show_view_at;
 	iface->begin_view_drag = l_begin_drag;
 	iface->end_view_drag = l_end_drag;
+	iface->rename_group = l_rename_group;
 }
 
 static void
@@ -357,6 +372,7 @@ test_layout_finalize(GObject *object)
 	g_clear_object(&self->root);
 	g_clear_pointer(&self->visible, g_hash_table_unref);
 	g_clear_pointer(&self->name, g_free);
+	g_clear_pointer(&self->renamed, g_free);
 	G_OBJECT_CLASS(test_layout_parent_class)->finalize(object);
 }
 
@@ -924,6 +940,12 @@ test_groups_and_drops(void)
 	g_assert_true(gsurf_window_layout_select_group(l, window, 1));
 	g_assert_cmpint(layout->selected, ==, 1);
 	g_assert_false(gsurf_window_layout_select_group(l, window, 9));
+	/* 0.4.3: rename_group, NULL meaning automatic naming. */
+	g_assert_true(gsurf_window_layout_rename_group(l, window, 1, "docs"));
+	g_assert_cmpstr(layout->renamed, ==, "1=docs");
+	g_assert_true(gsurf_window_layout_rename_group(l, window, 0, NULL));
+	g_assert_cmpstr(layout->renamed, ==, "0=(null)");
+	g_assert_false(gsurf_window_layout_rename_group(l, window, 7, "x"));
 
 	/* 3. Drops and drags. */
 	g_assert_true(gsurf_window_layout_show_view_at(l, window, b, a, GSURF_LAYOUT_DROP_LEFT));
@@ -942,6 +964,7 @@ test_groups_and_drops(void)
 	 *    calls are harmless. */
 	g_assert_null(gsurf_window_layout_list_groups(m, window));
 	g_assert_false(gsurf_window_layout_select_group(m, window, 0));
+	g_assert_false(gsurf_window_layout_rename_group(m, window, 0, "x"));
 	g_assert_false(gsurf_window_layout_show_view_at(m, window, a, b, GSURF_LAYOUT_DROP_CENTER));
 	gsurf_window_layout_begin_view_drag(m, window, a);
 	gsurf_window_layout_end_view_drag(m, window);
