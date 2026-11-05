@@ -31,6 +31,17 @@
  *     (gsurf_window_layout_show_view_at()), and brackets the drag with
  *     gsurf_window_layout_begin_view_drag() / _end_view_drag() so the
  *     layout can show its drop targets.
+ *
+ * And since 0.4.4, for agents and scripts that drive the layout without
+ * linking against its module (the MCP server):
+ *   - panes: gsurf_window_layout_list_panes() lists the panes of a group
+ *     as #GsurfLayoutPane (index, id, the view shown, active, zoomed and
+ *     the rectangle in pixels and as a fraction of the layout's area);
+ *   - commands: gsurf_window_layout_run_command() runs one line of the
+ *     layout's command language (wmux: a tmux-subset command such as
+ *     "split-window -h") and reports parse and execution errors;
+ *   - description: gsurf_window_layout_describe() returns a vardict of
+ *     facts about the layout (wmux: its name and prefix key).
  */
 
 #ifndef GSURF_WINDOW_LAYOUT_H
@@ -165,7 +176,217 @@ gboolean          gsurf_layout_group_get_current(GsurfLayoutGroup *group);
  */
 const guint64    *gsurf_layout_group_get_view_ids(GsurfLayoutGroup *group, guint *n_ids);
 
+/**
+ * gsurf_layout_group_set_last:
+ * @group: a #GsurfLayoutGroup
+ * @last: whether the group is the previously current one (tmux
+ *   last-window)
+ *
+ * Since: 0.4.4
+ */
+void              gsurf_layout_group_set_last(GsurfLayoutGroup *group, gboolean last);
+
+/**
+ * gsurf_layout_group_get_last:
+ * @group: a #GsurfLayoutGroup
+ *
+ * Returns: whether the group is the previously current one; %FALSE for a
+ *   layout that does not track it
+ *
+ * Since: 0.4.4
+ */
+gboolean          gsurf_layout_group_get_last(GsurfLayoutGroup *group);
+
+/**
+ * gsurf_layout_group_set_zoomed:
+ * @group: a #GsurfLayoutGroup
+ * @zoomed: whether one pane of the group fills its whole area
+ *
+ * Since: 0.4.4
+ */
+void              gsurf_layout_group_set_zoomed(GsurfLayoutGroup *group, gboolean zoomed);
+
+/**
+ * gsurf_layout_group_get_zoomed:
+ * @group: a #GsurfLayoutGroup
+ *
+ * Returns: whether one pane of the group is zoomed
+ *
+ * Since: 0.4.4
+ */
+gboolean          gsurf_layout_group_get_zoomed(GsurfLayoutGroup *group);
+
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GsurfLayoutGroup, gsurf_layout_group_unref)
+
+/* --- Panes (since 0.4.4) --- */
+
+#define GSURF_TYPE_LAYOUT_PANE (gsurf_layout_pane_get_type())
+
+/**
+ * GsurfLayoutPane:
+ *
+ * One pane of a #GsurfWindowLayout group: its index in the group's pane
+ * order (what wmux's "select-pane -t" takes), the layout's own id for it
+ * (stable while the pane lives), the id of the view it shows (0 for an
+ * empty pane), whether it is the group's active pane, whether it is
+ * zoomed, and its rectangle in pixels and as fractions (0..1) of the
+ * layout's area. An opaque, reference-counted boxed type; the layout
+ * builds them in its @list_panes vfunc.
+ *
+ * Since: 0.4.4
+ */
+typedef struct _GsurfLayoutPane GsurfLayoutPane;
+
+GType            gsurf_layout_pane_get_type(void) G_GNUC_CONST;
+
+/**
+ * gsurf_layout_pane_new:
+ * @index: the pane's position in its group's pane order
+ * @id: the layout's id for the pane
+ * @view_id: the id (gsurf_view_get_id()) of the view it shows, 0 for none
+ * @active: whether it is the group's active pane
+ *
+ * Returns: (transfer full): a new pane with an empty rectangle
+ *
+ * Since: 0.4.4
+ */
+GsurfLayoutPane *gsurf_layout_pane_new(guint index, guint id, guint64 view_id, gboolean active);
+
+/**
+ * gsurf_layout_pane_ref:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: (transfer full): @pane
+ *
+ * Since: 0.4.4
+ */
+GsurfLayoutPane *gsurf_layout_pane_ref(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_unref:
+ * @pane: (transfer full): a #GsurfLayoutPane
+ *
+ * Drops a reference; the last one frees the pane.
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_unref(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_get_index:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: the pane's position in its group's pane order
+ *
+ * Since: 0.4.4
+ */
+guint            gsurf_layout_pane_get_index(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_get_id:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: the layout's id for the pane
+ *
+ * Since: 0.4.4
+ */
+guint            gsurf_layout_pane_get_id(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_get_view_id:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: the id of the view the pane shows, 0 for none
+ *
+ * Since: 0.4.4
+ */
+guint64          gsurf_layout_pane_get_view_id(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_get_active:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: whether the pane is its group's active pane
+ *
+ * Since: 0.4.4
+ */
+gboolean         gsurf_layout_pane_get_active(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_set_zoomed:
+ * @pane: a #GsurfLayoutPane
+ * @zoomed: whether the pane fills its group's whole area
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_set_zoomed(GsurfLayoutPane *pane, gboolean zoomed);
+
+/**
+ * gsurf_layout_pane_get_zoomed:
+ * @pane: a #GsurfLayoutPane
+ *
+ * Returns: whether the pane is zoomed
+ *
+ * Since: 0.4.4
+ */
+gboolean         gsurf_layout_pane_get_zoomed(GsurfLayoutPane *pane);
+
+/**
+ * gsurf_layout_pane_set_rect:
+ * @pane: a #GsurfLayoutPane
+ * @x: left edge in pixels, relative to the layout's area
+ * @y: top edge in pixels
+ * @width: width in pixels
+ * @height: height in pixels
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_set_rect(GsurfLayoutPane *pane, gint x, gint y,
+                                            gint width, gint height);
+
+/**
+ * gsurf_layout_pane_get_rect:
+ * @pane: a #GsurfLayoutPane
+ * @x: (out) (optional): left edge in pixels
+ * @y: (out) (optional): top edge in pixels
+ * @width: (out) (optional): width in pixels
+ * @height: (out) (optional): height in pixels
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_get_rect(GsurfLayoutPane *pane, gint *x, gint *y,
+                                            gint *width, gint *height);
+
+/**
+ * gsurf_layout_pane_set_fraction:
+ * @pane: a #GsurfLayoutPane
+ * @x: left edge as a fraction (0..1) of the layout's width
+ * @y: top edge as a fraction of the layout's height
+ * @width: width as a fraction of the layout's width
+ * @height: height as a fraction of the layout's height
+ *
+ * The rectangle independent of the window size (and of gaps). Values are
+ * clamped to 0..1.
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_set_fraction(GsurfLayoutPane *pane, gdouble x, gdouble y,
+                                                gdouble width, gdouble height);
+
+/**
+ * gsurf_layout_pane_get_fraction:
+ * @pane: a #GsurfLayoutPane
+ * @x: (out) (optional): left edge fraction
+ * @y: (out) (optional): top edge fraction
+ * @width: (out) (optional): width fraction
+ * @height: (out) (optional): height fraction
+ *
+ * Since: 0.4.4
+ */
+void             gsurf_layout_pane_get_fraction(GsurfLayoutPane *pane, gdouble *x, gdouble *y,
+                                                gdouble *width, gdouble *height);
+
+G_DEFINE_AUTOPTR_CLEANUP_FUNC(GsurfLayoutPane, gsurf_layout_pane_unref)
 
 /**
  * GsurfWindowLayoutInterface:
@@ -207,6 +428,15 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GsurfLayoutGroup, gsurf_layout_group_unref)
  * @rename_group: optional (since 0.4.3); give the group with @index the
  *   name @name; %NULL or "" goes back to the layout's automatic naming;
  *   %FALSE for an unknown index
+ * @list_panes: optional (since 0.4.4); the panes of the group with index
+ *   @group (0 for a layout without groups) in pane order, as a new
+ *   #GPtrArray of #GsurfLayoutPane (with a free function), or %NULL for an
+ *   unknown group
+ * @run_command: optional (since 0.4.4); run one line of the layout's
+ *   command language on @window; %FALSE with @error set when it does not
+ *   parse or cannot be carried out
+ * @describe: optional (since 0.4.4); facts about the layout as a vardict
+ *   (#GVariant of type a{sv}); may be floating
  *
  * Virtual table for #GsurfWindowLayout. Every vfunc runs on the main
  * thread; the window guarantees @attach before and @detach after every
@@ -246,6 +476,13 @@ struct _GsurfWindowLayoutInterface
 	/* Since 0.4.3 */
 	gboolean   (*rename_group)    (GsurfWindowLayout *self, GsurfWindow *window,
 	                               guint index, const gchar *name);
+
+	/* Since 0.4.4 */
+	GPtrArray *(*list_panes)      (GsurfWindowLayout *self, GsurfWindow *window,
+	                               guint group);
+	gboolean   (*run_command)     (GsurfWindowLayout *self, GsurfWindow *window,
+	                               const gchar *command, GError **error);
+	GVariant  *(*describe)        (GsurfWindowLayout *self, GsurfWindow *window);
 };
 
 /* --- Interface wrappers (the window calls these; so may tests) --- */
@@ -454,6 +691,62 @@ void       gsurf_window_layout_begin_view_drag(GsurfWindowLayout *self, GsurfWin
  * Since: 0.4.2
  */
 void       gsurf_window_layout_end_view_drag(GsurfWindowLayout *self, GsurfWindow *window);
+
+/**
+ * gsurf_window_layout_list_panes:
+ * @self: a #GsurfWindowLayout
+ * @window: the window
+ * @group: a group index (gsurf_layout_group_get_index()); 0 for a layout
+ *   without groups
+ *
+ * Lists the panes of a group in pane order (wmux: left to right, top to
+ * bottom), with the view each shows and its rectangle.
+ *
+ * Returns: (transfer full) (element-type GsurfLayoutPane) (nullable): the
+ *   panes, or %NULL when the layout cannot list them or has no such group
+ *
+ * Since: 0.4.4
+ */
+GPtrArray *gsurf_window_layout_list_panes(GsurfWindowLayout *self, GsurfWindow *window,
+                                          guint group);
+
+/**
+ * gsurf_window_layout_run_command:
+ * @self: a #GsurfWindowLayout
+ * @window: the window
+ * @command: one line of the layout's command language (wmux: a tmux-subset
+ *   command such as "split-window -h -p 30")
+ * @error: return location for a #GError
+ *
+ * Runs @command as if it were typed at the layout's own command prompt,
+ * so a program can reach every operation of the layout without linking
+ * against its module. A layout without a command language fails with
+ * %G_IO_ERROR_NOT_SUPPORTED.
+ *
+ * Returns: %TRUE when @command ran; %FALSE with @error set when it did not
+ *   parse or could not be carried out (the message says why)
+ *
+ * Since: 0.4.4
+ */
+gboolean   gsurf_window_layout_run_command(GsurfWindowLayout *self, GsurfWindow *window,
+                                           const gchar *command, GError **error);
+
+/**
+ * gsurf_window_layout_describe:
+ * @self: a #GsurfWindowLayout
+ * @window: the window
+ *
+ * Facts about the layout as a vardict. Keys a layout may set: "name" (s,
+ * e.g. "wmux"), "prefix" (s, the prefix key), "status" (b, whether its
+ * status line is shown), "mouse" (b), "width" and "height" (i, the area
+ * its panes share, in pixels).
+ *
+ * Returns: (transfer full) (nullable): a non-floating #GVariant of type
+ *   a{sv}, or %NULL when the layout does not describe itself
+ *
+ * Since: 0.4.4
+ */
+GVariant  *gsurf_window_layout_describe(GsurfWindowLayout *self, GsurfWindow *window);
 
 /**
  * GSURF_LAYOUT_VIEW_MIME_TYPE:

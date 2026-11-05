@@ -64,6 +64,13 @@ GSURF_DEFINE_ENUM_TYPE(GsurfLayoutDropZone, gsurf_layout_drop_zone, {
 	END_EV
 })
 
+GSURF_DEFINE_ENUM_TYPE(GsurfTabTreePosition, gsurf_tab_tree_position, {
+	EV(GSURF_TAB_TREE_POSITION_BEFORE, "before"),
+	EV(GSURF_TAB_TREE_POSITION_AFTER, "after"),
+	EV(GSURF_TAB_TREE_POSITION_CHILD, "child"),
+	END_EV
+})
+
 GSURF_DEFINE_ENUM_TYPE(GsurfLrgRenderMode, gsurf_lrg_render_mode, {
 	EV(GSURF_LRG_RENDER_MODE_2D, "2d"),
 	EV(GSURF_LRG_RENDER_MODE_3D, "3d"),

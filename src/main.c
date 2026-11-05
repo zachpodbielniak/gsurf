@@ -300,6 +300,15 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 		view, action);
 }
 
+/* The module manager's action executor (gsurf_module_manager_execute_action()):
+ * modules such as the MCP server's run_action perform any action the way a
+ * keybinding does. @user_data is the application. */
+static gboolean
+action_executor(GsurfWindow *window, GsurfView *view, GsurfAction action, gpointer user_data)
+{
+	return execute_action(GSURF_APPLICATION(user_data), window, view, action);
+}
+
 static gboolean
 on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
              gpointer user_data)
@@ -838,6 +847,7 @@ main(int argc, char *argv[])
 
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 	gsurf_module_manager_set_application(mgr, app);
+	gsurf_module_manager_set_action_executor(mgr, action_executor, app, NULL);
 	gsurf_module_manager_set_config(mgr, config);
 	if (!opt_no_modules) {
 		/* The binary's policy: $GSURF_MODULE_PATH, else <exe-dir>/modules,
@@ -917,6 +927,8 @@ main(int argc, char *argv[])
 	g_unix_signal_add(SIGTERM, on_quit_signal, app);
 	g_unix_signal_add(SIGHUP, on_quit_signal, app);
 	gsurf_application_run(app);
+	/* The executor borrows the application; drop it first. */
+	gsurf_module_manager_set_action_executor(mgr, NULL, NULL, NULL);
 	g_object_unref(app);
 
 	return EXIT_SUCCESS;

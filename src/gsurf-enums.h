@@ -147,6 +147,26 @@ typedef enum {
 } GsurfLayoutDropZone;
 
 /**
+ * GsurfTabTreePosition:
+ * @GSURF_TAB_TREE_POSITION_BEFORE: the moved tab becomes the target's
+ *   previous sibling (same parent), right before it
+ * @GSURF_TAB_TREE_POSITION_AFTER: the moved tab becomes the target's next
+ *   sibling, after the target's whole subtree
+ * @GSURF_TAB_TREE_POSITION_CHILD: the moved tab becomes the target's last
+ *   child
+ *
+ * Where gsurf_tab_tree_provider_move_view() puts a tab (with its subtree)
+ * relative to another tab; the same three places a sidebar drop offers.
+ *
+ * Since: 0.4.4
+ */
+typedef enum {
+	GSURF_TAB_TREE_POSITION_BEFORE,
+	GSURF_TAB_TREE_POSITION_AFTER,
+	GSURF_TAB_TREE_POSITION_CHILD
+} GsurfTabTreePosition;
+
+/**
  * GsurfLoadEvent:
  * @GSURF_LOAD_STARTED: navigation started
  * @GSURF_LOAD_REDIRECTED: a redirect occurred
@@ -394,6 +414,7 @@ GType gsurf_mode_policy_get_type(void) G_GNUC_CONST;
 GType gsurf_load_event_get_type(void) G_GNUC_CONST;
 GType gsurf_chrome_edge_get_type(void) G_GNUC_CONST;
 GType gsurf_layout_drop_zone_get_type(void) G_GNUC_CONST;
+GType gsurf_tab_tree_position_get_type(void) G_GNUC_CONST;
 GType gsurf_policy_decision_get_type(void) G_GNUC_CONST;
 GType gsurf_filter_verdict_get_type(void) G_GNUC_CONST;
 GType gsurf_tls_decision_get_type(void) G_GNUC_CONST;
@@ -409,6 +430,7 @@ GType gsurf_action_get_type(void) G_GNUC_CONST;
 #define GSURF_TYPE_LOAD_EVENT         (gsurf_load_event_get_type())
 #define GSURF_TYPE_CHROME_EDGE        (gsurf_chrome_edge_get_type())
 #define GSURF_TYPE_LAYOUT_DROP_ZONE   (gsurf_layout_drop_zone_get_type())
+#define GSURF_TYPE_TAB_TREE_POSITION  (gsurf_tab_tree_position_get_type())
 #define GSURF_TYPE_POLICY_DECISION    (gsurf_policy_decision_get_type())
 #define GSURF_TYPE_FILTER_VERDICT     (gsurf_filter_verdict_get_type())
 #define GSURF_TYPE_TLS_DECISION       (gsurf_tls_decision_get_type())

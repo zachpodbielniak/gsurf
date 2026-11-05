@@ -58,6 +58,7 @@ from the directory). Add an =enabled:= block under =modules:= in
 | =GsurfKeybindProvider= | =list_keybinds=                           | =?= help overlay; queried at display time     | additive          |
 | =GsurfActionHandler=   | =handle_action=                           | a core keybind action with no built-in implementation (open-prompt → chromebar, find → find_bar, tab-* → tabs, follow-hints → modal) | first TRUE wins |
 | =GsurfUriHandler=      | =rewrite_uri=                             | URI about to load (search engines, bookmarks) | first non-NULL    |
+| =GsurfTabTreeProvider= | =get_parent=, =get_collapsed=, =set_collapsed=, =move_view= | not dispatched: code that needs the tab tree (the =mcp= module) looks for an active module implementing it (=tabs=, since 0.4.4) | — |
 | =GsurfNavigationHook=  | =before_navigate=, =after_navigate=, =load_changed=, =decide_main_response= | navigation lifecycle (history, homepage, containers); =before_navigate= also fires for iframe navigations and popup requests, =decide_main_response= only for the main frame's displayable response | =before=, =decide_main_response=: veto |
 
 More interfaces (request-filter, download-handler, status-provider,
@@ -98,6 +99,8 @@ JS (and any =WebKitUserContentManager= script-message handler registered from
 =configure(config)= → (manager reads =enabled=) → =activate()= if enabled →
 hooks dispatched while =is_active= → =deactivate()= on shutdown. Set hook
 priority with =gsurf_module_set_priority()= (lower runs first).
+
+*Performing actions (since 0.4.4).* =gsurf_module_manager_execute_action(mgr, window, view, action, &error)= performs any =GsurfAction= the way its key binding would: through the host's executor when one is registered (=gsurf_module_manager_set_action_executor()=; the =gsurf= binary registers its keybind dispatcher, so built-in actions such as =zoom-in= work), else through =dispatch_action= to the =GsurfActionHandler= modules. In kiosk mode it refuses what =gsurf_kiosk_allows_action()= refuses (=G_IO_ERROR_PERMISSION_DENIED=) before anything runs; an action nothing performed fails with =G_IO_ERROR_NOT_SUPPORTED=. The =mcp= module's =run_action=, =set_mode= and =follow_hints= use it.
 
 *Input mode (since 0.4.2).* The module that owns the keyboard modes (=modal=) publishes the current one with =gsurf_module_manager_set_mode()=; chrome follows =GsurfModuleManager:mode= / =mode-changed= (the chromebar's and wmux's mode indicators). =gsurf_mode_policy_get_label()= gives the indicator text (=NORMAL=, =INSERT=, =FOLLOW=, ...). It is separate from the input passthrough flag (=gsurf_module_manager_set_input_passthrough()=), which still decides whether bare keys bypass the modules.
 
