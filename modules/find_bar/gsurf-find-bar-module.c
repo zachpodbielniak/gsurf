@@ -22,7 +22,7 @@
 #include <gmodule.h>
 #include <yaml-glib.h>
 #include <gtk/gtk.h>
-#include <gdk/gdkkeysyms.h>
+#include <gdk/gdk.h>
 #include "modules/include/gsurf-chrome-compat.h"
 
 #define GSURF_TYPE_FIND_BAR_MODULE (gsurf_find_bar_module_get_type())
