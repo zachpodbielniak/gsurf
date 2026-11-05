@@ -976,6 +976,8 @@ With both modules on, the sidebar lists each wmux window as a heading (=0:name*=
 
 #+begin_src yaml
 modules:
+  wmux:
+    enabled: true
   tabs:
     wmux_groups: true        # false: the opener tree, as without wmux
     background_label: "Off screen"
