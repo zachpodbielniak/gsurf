@@ -64,6 +64,15 @@ network:
     uri: ""                        # e.g. socks5://127.0.0.1:9050
   do_not_track: false              # DNT: 1 header; sent only while the hardening module is enabled
 
+# ===== Control socket (core) =====
+# gsurfctl and other programs drive a running gsurf through a JSON-RPC
+# socket in this process's private runtime directory
+# ($XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/control.sock, owner-only). See
+# docs/control.org and docs/gsurfctl.org.
+control:
+  enabled: true                    # false: no socket (gsurfctl cannot see this instance)
+  # name: work                     # gsurfctl -i work; a <name>.sock link next to the dirs
+
 # ===== Window (core) =====
 window:
   title: gsurf

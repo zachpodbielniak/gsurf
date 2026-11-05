@@ -62,6 +62,11 @@ network:
     uri: ""
   do_not_track: false          # DNT: 1 header; sent only while the hardening module is enabled
 
+# ===== Control socket (gsurfctl) =====
+control:
+  enabled: true
+  # name: main                 # pick this instance with gsurfctl -i main
+
 # ===== Window =====
 window:
   title: gsurf

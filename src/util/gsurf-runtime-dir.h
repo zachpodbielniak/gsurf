@@ -84,6 +84,32 @@ gboolean gsurf_runtime_dir_remove_tree(const gchar *path, GError **error);
 guint gsurf_runtime_dir_sweep(const gchar *base);
 
 /**
+ * gsurf_runtime_dir_is_live:
+ * @path: (type filename): a process directory
+ *
+ * Whether the owner of the process directory @path is alive: its `lock`
+ * file exists and is flock()ed by someone (the same non-blocking probe
+ * gsurf_runtime_dir_sweep() uses, read the other way round). A directory
+ * without a lock file counts as not live. The control client uses this to
+ * find running instances.
+ *
+ * Returns: %TRUE when the lock is held
+ *
+ * Since: 0.5
+ */
+gboolean gsurf_runtime_dir_is_live(const gchar *path);
+
+/**
+ * gsurf_runtime_dir_is_process_dir_name:
+ * @name: a file name
+ *
+ * Returns: whether @name looks like a process directory, `<pid>-XXXXXX`
+ *
+ * Since: 0.5
+ */
+gboolean gsurf_runtime_dir_is_process_dir_name(const gchar *name);
+
+/**
  * gsurf_runtime_dir_cleanup:
  *
  * Removes this process's runtime directory and everything in it (the
