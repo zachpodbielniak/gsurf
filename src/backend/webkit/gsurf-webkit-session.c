@@ -42,8 +42,50 @@ set_cookie_storage(WebKitCookieManager *cm, const gchar *path)
 		WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
 }
 
+/* The proxy for a session: @proxy is a container's (a URL, or
+ * GSURF_CONTAINER_PROXY_NONE for direct), or NULL for the global
+ * network.proxy (mode none / custom / default = the system's).  Returns the
+ * mode; *out_settings receives the custom settings (transfer full) or NULL.
+ * GIO carries every scheme: http, https (TLS to the proxy), socks4,
+ * socks4a, socks5 and socks. */
+static WebKitNetworkProxyMode
+proxy_settings_for(const gchar *proxy, const gchar * const *ignore_hosts,
+                   WebKitNetworkProxySettings **out_settings)
+{
+	GsurfConfig *cfg = gsurf_config_get_default();
+
+	*out_settings = NULL;
+	if (proxy != NULL) {
+		if (g_strcmp0(proxy, GSURF_CONTAINER_PROXY_NONE) == 0)
+			return WEBKIT_NETWORK_PROXY_MODE_NO_PROXY;
+		*out_settings = webkit_network_proxy_settings_new(proxy, ignore_hosts);
+		return WEBKIT_NETWORK_PROXY_MODE_CUSTOM;
+	}
+	if (cfg != NULL && g_strcmp0(cfg->proxy_mode, "none") == 0)
+		return WEBKIT_NETWORK_PROXY_MODE_NO_PROXY;
+	if (cfg != NULL && g_strcmp0(cfg->proxy_mode, "custom") == 0 &&
+	    cfg->proxy_uri != NULL && *cfg->proxy_uri != '\0') {
+		*out_settings = webkit_network_proxy_settings_new(cfg->proxy_uri, NULL);
+		return WEBKIT_NETWORK_PROXY_MODE_CUSTOM;
+	}
+	return WEBKIT_NETWORK_PROXY_MODE_DEFAULT;
+}
+
 #ifdef GSURF_BACKEND_GTK4
 /* ---------------- WebKitGTK 6.0: WebKitNetworkSession ---------------- */
+
+/* Set @ns's proxy (see proxy_settings_for()). */
+static void
+session_set_proxy(WebKitNetworkSession *ns, const gchar *proxy,
+                  const gchar * const *ignore_hosts)
+{
+	WebKitNetworkProxySettings *ps = NULL;
+	WebKitNetworkProxyMode mode = proxy_settings_for(proxy, ignore_hosts, &ps);
+
+	webkit_network_session_set_proxy_settings(ns, mode, ps);
+	if (ps != NULL)
+		webkit_network_proxy_settings_free(ps);
+}
 
 /* Configure TLS, cookies and proxy on one network session. The cache
  * model lives on the (shared) web context in 6.0. */
@@ -57,16 +99,15 @@ prepare_session(WebKitNetworkSession *ns, const gchar *cookie_path)
 	webkit_network_session_set_tls_errors_policy(ns,
 		cfg->tls_strict ? WEBKIT_TLS_ERRORS_POLICY_FAIL : WEBKIT_TLS_ERRORS_POLICY_IGNORE);
 	set_cookie_storage(webkit_network_session_get_cookie_manager(ns), cookie_path);
+	/* The global proxy; a container with its own gets apply_proxy next. */
+	session_set_proxy(ns, NULL, NULL);
+}
 
-	if (g_strcmp0(cfg->proxy_mode, "none") == 0) {
-		webkit_network_session_set_proxy_settings(ns, WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, NULL);
-	} else if (g_strcmp0(cfg->proxy_mode, "custom") == 0 &&
-	           cfg->proxy_uri != NULL && *cfg->proxy_uri != '\0') {
-		WebKitNetworkProxySettings *ps = webkit_network_proxy_settings_new(cfg->proxy_uri, NULL);
-
-		webkit_network_session_set_proxy_settings(ns, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, ps);
-		webkit_network_proxy_settings_free(ps);
-	}
+static void
+session_apply_proxy(gpointer native, const gchar *proxy, const gchar * const *ignore_hosts)
+{
+	if (native != NULL)
+		session_set_proxy(WEBKIT_NETWORK_SESSION(native), proxy, ignore_hosts);
 }
 
 static gpointer
@@ -122,6 +163,22 @@ gsurf_webkit_session_get_context(gpointer native)
 #else
 /* ---------------- WebKitGTK 4.1: WebKitWebContext ---------------- */
 
+/* Set @ctx's proxy (see proxy_settings_for()).  The context-level setter is
+ * what WebKitGTK 4.1 exposes (deprecated in favour of the data manager's). */
+static void
+context_set_proxy(WebKitWebContext *ctx, const gchar *proxy,
+                  const gchar * const *ignore_hosts)
+{
+	WebKitNetworkProxySettings *ps = NULL;
+	WebKitNetworkProxyMode mode = proxy_settings_for(proxy, ignore_hosts, &ps);
+
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	webkit_web_context_set_network_proxy_settings(ctx, mode, ps);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+	if (ps != NULL)
+		webkit_network_proxy_settings_free(ps);
+}
+
 /* Configure TLS, cache, cookies and proxy on one web context. These
  * context-level setters are deprecated in favour of the website data
  * manager API in newer WebKitGTK, but they are what 4.1 exposes. */
@@ -140,18 +197,16 @@ prepare_context(WebKitWebContext *ctx, const gchar *cookie_path)
 		cfg->enable_disk_cache ? WEBKIT_CACHE_MODEL_WEB_BROWSER
 		                       : WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
 	set_cookie_storage(webkit_web_context_get_cookie_manager(ctx), cookie_path);
-
-	if (g_strcmp0(cfg->proxy_mode, "none") == 0) {
-		webkit_web_context_set_network_proxy_settings(ctx,
-			WEBKIT_NETWORK_PROXY_MODE_NO_PROXY, NULL);
-	} else if (g_strcmp0(cfg->proxy_mode, "custom") == 0 &&
-	           cfg->proxy_uri != NULL && *cfg->proxy_uri != '\0') {
-		WebKitNetworkProxySettings *ps = webkit_network_proxy_settings_new(cfg->proxy_uri, NULL);
-
-		webkit_web_context_set_network_proxy_settings(ctx, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, ps);
-		webkit_network_proxy_settings_free(ps);
-	}
 	G_GNUC_END_IGNORE_DEPRECATIONS
+	/* The global proxy; a container with its own gets apply_proxy next. */
+	context_set_proxy(ctx, NULL, NULL);
+}
+
+static void
+session_apply_proxy(gpointer native, const gchar *proxy, const gchar * const *ignore_hosts)
+{
+	if (native != NULL)
+		context_set_proxy(WEBKIT_WEB_CONTEXT(native), proxy, ignore_hosts);
 }
 
 static gpointer
@@ -242,6 +297,7 @@ static const GsurfSessionBackend webkit_session_backend = {
 	session_create,
 	session_destroy,
 	session_apply_policy,
+	session_apply_proxy,
 };
 
 void

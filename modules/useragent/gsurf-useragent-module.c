@@ -47,6 +47,12 @@ gsurf_useragent_apply(GsurfSettingProvider *provider, GsurfView *view,
 			return;
 		}
 	}
+	/* No rule for this site: the module's default, unless the view's
+	 * container has its own user agent (gsurf_view_apply_settings() puts
+	 * that in place of the global one).  Precedence: site rule, container,
+	 * this default, the global setting. */
+	if (view != NULL && gsurf_view_get_container_user_agent(view) != NULL)
+		return;
 	if (self->default_ua != NULL && *self->default_ua != '\0')
 		gsurf_settings_set_user_agent(settings, self->default_ua);
 }

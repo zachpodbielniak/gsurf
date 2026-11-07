@@ -59,6 +59,14 @@ struct _GsurfContainersModule
 	GPtrArray      *configured;         /* gchar*: ids of the config's containers */
 	GPtrArray      *names;              /* gchar*: display name of configured[i] */
 	GPtrArray      *colors;             /* gchar*: colour of configured[i] (or NULL) */
+	/* Network identity of configured[i] (each element may be NULL): */
+	GPtrArray      *proxies;            /* gchar*: `proxy` */
+	GPtrArray      *proxy_ignores;      /* gchar**: `proxy_ignore` */
+	GPtrArray      *user_agents;        /* gchar*: `user_agent` */
+	/* ...and of every temporary container: */
+	gchar          *temp_proxy;
+	gchar         **temp_proxy_ignore;
+	gchar          *temp_user_agent;
 
 	/* --- registry state owned by this module --- */
 	GPtrArray      *defined;            /* gchar*: ids this module defined */
@@ -66,6 +74,7 @@ struct _GsurfContainersModule
 	                                     * still in use; undefined once empty */
 	gboolean        installed;          /* install() ran since the last uninstall() */
 	gboolean        resolver_installed;
+	gulong          added_handler;      /* registry::container-added, while installed */
 };
 
 /* What the module remembers about a view it has seen navigate. */
@@ -408,6 +417,26 @@ on_resolver_removed(gpointer data)
 	GSURF_CONTAINERS_MODULE(data)->resolver_installed = FALSE;
 }
 
+/* Every temporary container, whoever made it (this module's actions and
+ * resolver, or a `temporary` request handled by the registry), gets the
+ * temp_proxy / temp_user_agent identity. */
+static void
+on_container_added(GsurfContainerRegistry *registry, GsurfContainer *container,
+                   gpointer data)
+{
+	GsurfContainersModule *self = data;
+	g_autoptr(GError) error = NULL;
+
+	if (!gsurf_container_get_temporary(container))
+		return;
+	if (self->temp_proxy == NULL && self->temp_user_agent == NULL)
+		return;
+	if (!gsurf_container_registry_set_network(registry, gsurf_container_get_id(container),
+			self->temp_proxy, (const gchar * const *)self->temp_proxy_ignore,
+			self->temp_user_agent, &error))
+		g_warning("gsurf: containers: temporary container: %s", error->message);
+}
+
 /* Define the configured containers and install the resolver. */
 static void
 install(GsurfContainersModule *self)
@@ -436,7 +465,18 @@ install(GsurfContainersModule *self)
 		}
 		if (str_array_find(self->defined, id) < 0)
 			g_ptr_array_add(self->defined, g_strdup(id));
+
+		/* Its own proxy and user agent (NULL: the global ones).  Set on
+		 * every configure, so removing the keys reverts a live session. */
+		if (!gsurf_container_registry_set_network(registry, id,
+				g_ptr_array_index(self->proxies, i),
+				(const gchar * const *)g_ptr_array_index(self->proxy_ignores, i),
+				g_ptr_array_index(self->user_agents, i), &error))
+			g_warning("gsurf: containers: '%s': %s", id, error->message);
 	}
+	if (self->added_handler == 0)
+		self->added_handler = g_signal_connect(registry, "container-added",
+			G_CALLBACK(on_container_added), self);
 
 	gsurf_container_registry_set_temp_cleanup_delay(registry, self->temp_cleanup_delay);
 	self->installed = TRUE;
@@ -462,6 +502,7 @@ uninstall(GsurfContainersModule *self)
 	 * was always disabled) leaves another host's settings alone. */
 	if (self->installed)
 		gsurf_container_registry_set_temp_cleanup_delay(registry, DEFAULT_TEMP_DELAY);
+	g_clear_signal_handler(&self->added_handler, registry);
 	self->installed = FALSE;
 	drop_containers(self, NULL);
 }
@@ -485,6 +526,72 @@ config_reset(GsurfContainersModule *self)
 	g_ptr_array_set_size(self->configured, 0);
 	g_ptr_array_set_size(self->names, 0);
 	g_ptr_array_set_size(self->colors, 0);
+	g_ptr_array_set_size(self->proxies, 0);
+	g_ptr_array_set_size(self->proxy_ignores, 0);
+	g_ptr_array_set_size(self->user_agents, 0);
+	g_clear_pointer(&self->temp_proxy, g_free);
+	g_clear_pointer(&self->temp_proxy_ignore, g_strfreev);
+	g_clear_pointer(&self->temp_user_agent, g_free);
+}
+
+/* An optional proxy: NULL when absent or empty; an invalid one is reported
+ * (naming @what) and ignored, so the container keeps the global proxy. */
+static gchar *
+parse_proxy(YamlMapping *m, const gchar *key, const gchar *what)
+{
+	const gchar *proxy = mapping_string(m, key);
+	g_autoptr(GError) error = NULL;
+
+	if (proxy == NULL || *proxy == '\0')
+		return NULL;
+	if (!gsurf_container_validate_proxy(proxy, &error)) {
+		g_warning("gsurf: containers: %s: %s; using the global proxy", what,
+			error->message);
+		return NULL;
+	}
+	return g_strdup(proxy);
+}
+
+/* An optional list of host names, NULL when absent or empty. */
+static gchar **
+parse_host_list(YamlMapping *m, const gchar *key, const gchar *what)
+{
+	YamlNode *node = yaml_mapping_has_member(m, key)
+		? yaml_mapping_get_member(m, key) : NULL;
+	g_autoptr(GPtrArray) hosts = NULL;
+	YamlSequence *seq;
+	guint i, n;
+
+	if (node == NULL || yaml_node_get_node_type(node) == YAML_NODE_NULL)
+		return NULL;
+	if (yaml_node_get_node_type(node) != YAML_NODE_SEQUENCE) {
+		g_warning("gsurf: containers: %s: `%s` must be a list; ignored", what, key);
+		return NULL;
+	}
+	hosts = g_ptr_array_new();
+	seq = yaml_node_get_sequence(node);
+	n = yaml_sequence_get_length(seq);
+	for (i = 0; i < n; i++) {
+		YamlNode *e = yaml_sequence_get_element(seq, i);
+		const gchar *host = (e != NULL && yaml_node_get_node_type(e) == YAML_NODE_SCALAR)
+			? yaml_node_get_string(e) : NULL;
+
+		if (host != NULL && *host != '\0')
+			g_ptr_array_add(hosts, g_strdup(host));
+	}
+	if (hosts->len == 0)
+		return NULL;
+	g_ptr_array_add(hosts, NULL);
+	return (gchar **)g_ptr_array_free(g_steal_pointer(&hosts), FALSE);
+}
+
+/* An optional string, NULL when absent or empty. */
+static gchar *
+parse_optional(YamlMapping *m, const gchar *key)
+{
+	const gchar *value = mapping_string(m, key);
+
+	return (value != NULL && *value != '\0') ? g_strdup(value) : NULL;
 }
 
 /**
@@ -548,6 +655,13 @@ parse_containers(GsurfContainersModule *self, YamlNode *node)
 		g_ptr_array_add(self->configured, g_strdup(id));
 		g_ptr_array_add(self->names, g_strdup((name != NULL && *name != '\0') ? name : id));
 		g_ptr_array_add(self->colors, g_strdup(mapping_string(m, "color")));
+		{
+			g_autofree gchar *what = g_strdup_printf("'%s'", id);
+
+			g_ptr_array_add(self->proxies, parse_proxy(m, "proxy", what));
+			g_ptr_array_add(self->proxy_ignores, parse_host_list(m, "proxy_ignore", what));
+			g_ptr_array_add(self->user_agents, parse_optional(m, "user_agent"));
+		}
 
 		/* 3. Host patterns: a bad regex loses only itself. */
 		hosts = yaml_mapping_has_member(m, "hosts")
@@ -628,6 +742,9 @@ gsurf_containers_configure(GsurfModule *module, gpointer config_ptr)
 			g_free(self->temp_color);
 			self->temp_color = (color != NULL && *color != '\0') ? g_strdup(color) : NULL;
 		}
+		self->temp_proxy = parse_proxy(m, "temp_proxy", "temp_proxy");
+		self->temp_proxy_ignore = parse_host_list(m, "temp_proxy_ignore", "temp_proxy_ignore");
+		self->temp_user_agent = parse_optional(m, "temp_user_agent");
 		g_free(self->key_new_temp);
 		self->key_new_temp = mapping_key(m, "key_new_temp", DEFAULT_KEY_NEW_TEMP);
 		g_free(self->key_reopen_next);
@@ -1105,6 +1222,12 @@ gsurf_containers_module_finalize(GObject *object)
 	g_clear_pointer(&self->configured, g_ptr_array_unref);
 	g_clear_pointer(&self->names, g_ptr_array_unref);
 	g_clear_pointer(&self->colors, g_ptr_array_unref);
+	g_clear_pointer(&self->proxies, g_ptr_array_unref);
+	g_clear_pointer(&self->proxy_ignores, g_ptr_array_unref);
+	g_clear_pointer(&self->user_agents, g_ptr_array_unref);
+	g_free(self->temp_proxy);
+	g_strfreev(self->temp_proxy_ignore);
+	g_free(self->temp_user_agent);
 	g_clear_pointer(&self->defined, g_ptr_array_unref);
 	g_clear_pointer(&self->stale, g_ptr_array_unref);
 	G_OBJECT_CLASS(gsurf_containers_module_parent_class)->finalize(object);
@@ -1133,6 +1256,9 @@ gsurf_containers_module_init(GsurfContainersModule *self)
 	self->configured = g_ptr_array_new_with_free_func(g_free);
 	self->names = g_ptr_array_new_with_free_func(g_free);
 	self->colors = g_ptr_array_new_with_free_func(g_free);
+	self->proxies = g_ptr_array_new_with_free_func(g_free);
+	self->proxy_ignores = g_ptr_array_new_with_free_func((GDestroyNotify)g_strfreev);
+	self->user_agents = g_ptr_array_new_with_free_func(g_free);
 	self->defined = g_ptr_array_new_with_free_func(g_free);
 	self->stale = g_ptr_array_new_with_free_func(g_free);
 	config_reset(self);

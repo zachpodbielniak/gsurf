@@ -466,7 +466,7 @@ fake_apply_policy(gpointer native, gboolean itp, gint cookie_policy)
 }
 
 static const GsurfSessionBackend fake_backend = {
-	fake_create, fake_destroy, fake_apply_policy
+	fake_create, fake_destroy, fake_apply_policy, NULL
 };
 
 static gchar *
