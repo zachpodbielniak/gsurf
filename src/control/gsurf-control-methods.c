@@ -2655,13 +2655,14 @@ m_lrg_focus(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 		fail(inv, error);
 		return;
 	}
-	/* Focusing a tab also makes it the active one, as Ctrl+click does. */
-	gsurf_window_set_active_view(window, view);
+	/* Fly first, so a view without a panel changes nothing; focusing a tab
+	 * also makes it the active one, as Ctrl+click does. */
 	if (!gsurf_lrg_scene_focus_view(scene, view)) {
 		gsurf_control_invocation_return_error_literal(inv, GSURF_CONTROL_ERROR_NOT_FOUND,
 			"that view has no panel yet (its first frame is still rendering)");
 		return;
 	}
+	gsurf_window_set_active_view(window, view);
 	lrg_reply(inv, window, scene, "focus");
 }
 

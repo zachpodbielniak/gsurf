@@ -44,6 +44,22 @@ Start with evidence: gsurf logs to stderr. `G_MESSAGES_DEBUG=all gsurf … 2>&1 
 - **A warning appears in only one backend**: build both (`BUILDDIR=build-gtk4` for GTK4); zero warnings is required on each.
 - **Stale objects after switching flags**: should not happen (`.build-flags` stamp); `make clean-all` if a tree was copied by hand.
 
+## The 3D tab space (`--lrg=3d`)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `--lrg=3d needs a build with the libregnum scene` | `LRG_3D=0` build | `make LRG_BACKEND=1` (`LRG_3D=1` is the default) |
+| `--lrg requested but this build has no libregnum backend` | no `LRG_BACKEND=1` | rebuild with it (GTK3 only: the LRG engine has no GTK4 path) |
+| `gsurf --lrg 3d URL` opens flat and loads `3d` | the optional value needs `=` | `--lrg=3d` |
+| Opens flat with `reading` in the bottom-right status line | a lone tab starts in reading mode | open a second tab or `Alt+Shift+r`; `lrg.reading-single-tab: false` |
+| `unknown 3D arrangement '...'` warning | a token that is not an environment counts as an arrangement | fix the spelling; the scene uses `carousel` |
+| `Alt+Shift+...` keys type into the page | not a 3D window: the `lrg-*` actions report "not handled" there | `gsurfctl 3d` says `this window is not a 3D scene` |
+| `Ctrl+click` on a link flies instead of opening a tab | `Ctrl+left` is the 3D fly gesture | middle-click links in 3D |
+| `lrg.focus` / `lrg.pin` answer -32001 for a new tab | no first frame yet, so no panel | retry after the page paints |
+| The camera no longer re-aims as tabs open | you moved it | `Alt+Shift+c` or pick an arrangement |
+| Pins, bookmarks gone after restart | not persisted (by design for now) | save `gsurfctl -j 3d` `.pinned` and replay with `3d-pin --placement` in the same run |
+| Compile errors about `lrg_3d_surface_*` | `LIBREGNUM_DIR` older than libregnum 0.8.2 | update it or use `deps/libregnum` |
+
 ## Tests
 
 - **`test-gui: xvfb-run not found; skipping`**: provide an `xvfb-run` (package `xorg-x11-server-Xvfb`) or a wrapper of that name (headless mutter; see [building.md](building.md)). A skip is not a pass.

@@ -893,6 +893,7 @@ lrg_window_tick(gpointer user_data)
 				    && gsurf_window_get_n_views(GSURF_WINDOW(self)) == 1) {
 					gsurf_lrg_scene_set_reading(self->scene, TRUE);
 					self->scene_auto_reading = TRUE;
+					gsurf_lrg_window_notify_scene(self, "reading");
 				}
 			}
 			/* That automatic reading mode lasts while the tab is alone: a
@@ -913,7 +914,10 @@ lrg_window_tick(gpointer user_data)
 				self->scene_auto_reading = FALSE;
 
 			/* The spatial frame, unless reading mode has settled on the
-			 * active tab: then the flat path below draws it pixel-exact. */
+			 * active tab: then the flat path below draws it pixel-exact.
+			 * (A tab switch while flat flies to the new tab first.) */
+			gsurf_lrg_scene_note_active(self->scene,
+				gsurf_window_get_active_view(GSURF_WINDOW(self)));
 			if (!gsurf_lrg_scene_wants_flat(self->scene)) {
 				if (view != NULL)
 					lrg_window_forward_input(self, view, TRUE);

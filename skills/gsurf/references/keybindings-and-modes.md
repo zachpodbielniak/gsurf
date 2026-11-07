@@ -33,6 +33,21 @@ keybinds:
   "Ctrl+l": open-prompt
   "Ctrl+e": scroll-down
   "Ctrl+y": scroll-up
+  "Alt+Shift+a": lrg-cycle-arrangement   # the lrg-* keys act only in --lrg=3d; elsewhere they reach the page
+  "Alt+Shift+e": lrg-cycle-environment
+  "Alt+Shift+r": lrg-reading
+  "Alt+Shift+h": lrg-history
+  "Alt+Shift+f": lrg-focus
+  "Alt+Shift+p": lrg-pin
+  "Alt+Shift+u": lrg-unpin-all
+  "Alt+Shift+c": lrg-camera-reset
+  "Alt+Shift+o": lrg-overview
+  "Alt+Shift+Left": lrg-orbit-left
+  "Alt+Shift+Right": lrg-orbit-right
+  "Alt+Shift+Up": lrg-orbit-up
+  "Alt+Shift+Down": lrg-orbit-down
+  "Alt+Shift+z": lrg-zoom-in
+  "Alt+Shift+x": lrg-zoom-out
 mousebinds:
   "Button8": back
   "Button9": forward
@@ -55,6 +70,7 @@ Action names accept `-` or `_` (`reload-nocache` = `reload_nocache`). The C enum
 | Modes (modal) | `enter-normal-mode`, `enter-insert-mode`, `follow-hints`, `follow-hints-new-view` |
 | Modules | `container-new-temp`, `container-reopen-next` (containers), `dark-mode-toggle`, `dark-mode-toggle-site` (dark_mode), `form-autofill` (form_autofill), `pane-split-right`, `pane-split-down` (wmux; no default key) |
 | Misc | `toggle-fullscreen`, `copy-url`, `paste-url`, `quit`, `show-keybinds` |
+| 3D (`--lrg=3d`) | `lrg-cycle-arrangement`, `lrg-cycle-environment`, `lrg-reading`, `lrg-history`, `lrg-focus`, `lrg-pin`, `lrg-unpin-all`, `lrg-camera-reset`, `lrg-overview`, `lrg-orbit-left`, `lrg-orbit-right`, `lrg-orbit-up`, `lrg-orbit-down`, `lrg-zoom-in`, `lrg-zoom-out` |
 
 Actions with no built-in implementation (`open-prompt`, `find`, `tab-*`, `follow-hints`, the module rows) go to the module that owns the UI through `GsurfActionHandler`. With that module disabled the key does nothing and reaches the page. `gsurfctl actions` lists every name; `gsurfctl action NAME` runs one on the active view.
 
@@ -76,6 +92,42 @@ NORMAL keys: `h j k l` scroll, `d` / `u` half page, `gg` / `G` top / bottom, `H`
 Link hints: labels from `hint_chars` grow to 2-4 characters as targets increase; typing narrows, a unique match is clicked, `Escape` cancels. Mode indicators (`-- INSERT --`) show in the chromebar and the wmux status line; tune them with `mode_indicator`, `mode_hide_normal` and the three `mode_*_color` keys in each module.
 
 The mode is published on the module manager (`GsurfModuleManager:mode`, `mode-changed`); read it with `gsurfctl mode`, set it with `gsurfctl mode insert`, follow it with `gsurfctl watch mode`.
+
+## The 3D tab space (`--lrg=3d`)
+
+Source: `docs/lrg-3d.org`. `gsurf --lrg=3d[:ARRANGEMENT][:ENVIRONMENT] URL` (a `LRG_BACKEND=1` build; `=` is required) puts every tab of the window on a live panel in a libregnum 3D scene. Spec tokens are order-free, `:` or `,` separated; an environment id is the environment, anything else the arrangement.
+
+- **Arrangements**: `carousel` (default; a ring, active tab in front, spins on tab switch), `grid` (a wall, one row band per named container), `free` (a loose row to drag panels about), `single-panel` (the first tab full-frame, not the active one), `stack` (a deck; history depth uses it). `per-window` is accepted but piles every tab on one plane. The cycle key steps carousel, grid, stack, free.
+- **Environments**: `studio` (default), `sky`, `workshop`, `cockpit`, `void`. No post effects (libregnum's post processor is a stub).
+- **Reading mode** (`Alt+Shift+r`): flies head-on to the active tab, then draws it with the flat, pixel-exact 2D path. A window that opens with one tab starts in it, and leaves it when a second tab opens.
+- **History depth** (`Alt+Shift+h`): the active tab with its back list receding left and forward list right, as thumbnails (taken from the active page every 2 s; title cards until seen); click one to go there.
+- **Refresh**: active tab every frame, visible background tabs at `lrg.background-fps` (half that when under 120 px tall), hidden tabs every 3 s.
+- **Camera**: re-aims itself after an arrangement switch and when tabs come or go, until you move it; `Alt+Shift+c` resets, `Alt+Shift+o` shows every tab.
+
+| Pointer | Effect |
+|---|---|
+| move, left/right click, wheel | go to the tab under the pointer at the page pixel hit; a left click on a background tab only makes it active |
+| middle drag | orbit the room |
+| middle click (no drag) | `Button2` mousebind (open link in background tab), else the page |
+| `Ctrl+left` drag | look around in place |
+| `Ctrl+click` / `Ctrl+double-click` | fly to that tab / read it |
+| `Ctrl+middle` (or `Super+middle`) drag on a panel | move it; the drop pins it |
+| `Ctrl+wheel` | dolly the camera |
+
+`Ctrl+left` is a 3D gesture, so the default `Ctrl+Button1` mousebind does not fire in 3D (it does while reading flat). Pins and camera bookmarks last for the run only; nothing is saved in the session.
+
+Config (a core section, merged key by key; shown in a text fence because it only matters under `--lrg=3d`):
+
+```text
+lrg:
+  arrangement: carousel      # overridden by --lrg=3d:ID
+  environment: studio        # overridden by --lrg=3d:ID
+  background-fps: 4          # 0.2-60
+  history-depth: 8           # entries per direction, 1-32
+  reading-single-tab: true
+```
+
+C config: `config->lrg_arrangement`, `lrg_environment` (g_free before replacing), `lrg_background_fps`, `lrg_history_depth`, `lrg_reading_single_tab`. Scripting: `gsurfctl 3d*` ([gsurfctl.md](gsurfctl.md)), `lrg.*` methods and the `lrg` event topic ([control-protocol.md](control-protocol.md)).
 
 ## Kiosk mode
 

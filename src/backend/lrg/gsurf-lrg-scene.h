@@ -197,6 +197,17 @@ void gsurf_lrg_scene_frame(GsurfLrgScene *self, GPtrArray *views, GsurfView *act
 gboolean gsurf_lrg_scene_wants_flat(GsurfLrgScene *self);
 
 /**
+ * gsurf_lrg_scene_note_active:
+ * @self: a #GsurfLrgScene
+ * @active: (nullable): the window's active tab right now
+ *
+ * Tells the scene which tab is active before gsurf_lrg_scene_wants_flat() is
+ * asked: while reading flat no 3D frame runs, so without this a tab switch
+ * would not fly the camera to the new tab.
+ */
+void gsurf_lrg_scene_note_active(GsurfLrgScene *self, GsurfView *active);
+
+/**
  * gsurf_lrg_scene_note_flat_frame:
  * @self: a #GsurfLrgScene
  * @active: (nullable): the active tab
@@ -247,7 +258,7 @@ const gchar *gsurf_lrg_scene_get_arrangement(GsurfLrgScene *self);
  * gsurf_lrg_scene_cycle_arrangement:
  * @self: a #GsurfLrgScene
  *
- * Steps to the next tab arrangement (carousel, grid, free, single-panel).
+ * Steps to the next tab arrangement (carousel, grid, stack, free).
  *
  * Returns: (transfer none): the new arrangement id
  */

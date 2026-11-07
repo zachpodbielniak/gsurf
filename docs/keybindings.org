@@ -54,6 +54,24 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =o= / =Ctrl+l= | open-prompt       |
 | =Ctrl+e= / =Ctrl+y= | scroll down/up |
 
+The 3D tab space (=gsurf --lrg=3d=, since 0.6) adds =Alt+Shift= bindings to the core table. Outside a 3D window the actions do nothing and report "not handled", so these keys reach the page there:
+
+| Key            | Action                  | In the 3D scene |
+|----------------+-------------------------+-----------------|
+| =Alt+Shift+a=  | lrg-cycle-arrangement   | next arrangement: carousel, grid, stack, free |
+| =Alt+Shift+e=  | lrg-cycle-environment   | next environment: studio, sky, workshop, cockpit, void |
+| =Alt+Shift+r=  | lrg-reading             | reading mode on/off: fly head-on, then pixel-exact 2D |
+| =Alt+Shift+h=  | lrg-history             | history depth on/off: the tab's back/forward pages as a stack |
+| =Alt+Shift+f=  | lrg-focus               | fly the camera to the active tab |
+| =Alt+Shift+p=  | lrg-pin                 | pin or unpin the active tab's panel |
+| =Alt+Shift+u=  | lrg-unpin-all           | unpin every panel |
+| =Alt+Shift+c=  | lrg-camera-reset        | the default camera; ends reading mode |
+| =Alt+Shift+o=  | lrg-overview            | pull back until every tab is in view |
+| =Alt+Shift+Left/Right/Up/Down= | lrg-orbit-{left,right,up,down} | orbit the camera 15 degrees |
+| =Alt+Shift+z= / =Alt+Shift+x= | lrg-zoom-in / lrg-zoom-out | camera closer / away |
+
+The pointer has its own 3D gestures (middle-drag orbits, =Ctrl+click= flies to a tab, =Ctrl+double-click= reads it, =Ctrl+middle-drag= moves and pins a panel); =Ctrl+left= is taken by them in 3D, so the default =Ctrl+Button1= mousebind does not fire there. See [[file:lrg-3d.org][lrg-3d.org]].
+
 Module default keys outside the core table include =Ctrl+Alt+f= (=form_autofill=, off by default): fill the focused form from the one autofill profile, or open the profile picker when there are several. It must carry =Ctrl=, =Alt= or =Super= because bare keys reach the page while a field is focused; see [[file:form-autofill.org][form-autofill.org]].
 
 Some actions are performed by the module that owns their UI, through =GsurfActionHandler=: =open-prompt= by =chromebar= (the =--lrg= window draws its own address bar), =find= by =find_bar=, =tab-*= by =tabs=, and =follow-hints= / =enter-*-mode= by =modal=. With that module disabled the key does nothing and goes to the page.
@@ -155,6 +173,7 @@ Navigation: =back=, =forward=, =reload=, =reload-nocache=, =stop=, =home=,
 =find=, =find-next=, =find-prev=. Tabs: =tab-{new,close,next,prev,reopen}=.
 Modal: =enter-{normal,insert}-mode=, =follow-hints=. Misc:
 =toggle-fullscreen=, =copy-url=, =paste-url=, =quit=, =show-keybinds=.
+3D tab space (=--lrg=3d=, no-ops elsewhere): =lrg-cycle-arrangement=, =lrg-cycle-environment=, =lrg-reading=, =lrg-history=, =lrg-focus=, =lrg-pin=, =lrg-unpin-all=, =lrg-camera-reset=, =lrg-overview=, =lrg-orbit-{left,right,up,down}=, =lrg-zoom-{in,out}=. In a C config: =GSURF_ACTION_LRG_CYCLE_ARRANGEMENT= and so on.
 
 =open-new-view= opens the hovered link in a new foreground tab, =open-new-view-background= in a new tab behind the current one (since 0.4.2); both make the new tab a child of the current one in the =tabs= tree, and both do nothing off a link when bound to a mouse button (the engine keeps its own middle-click behaviour). The default mousebinds map middle click and =Ctrl+Button1= to =open-new-view-background=, like Firefox and Sidebery; bind them to =open-new-view= to follow the link into the new tab.
 

@@ -122,7 +122,7 @@ keybinds:
   "Ctrl+e": scroll-down
   "Ctrl+y": scroll-up
   # --lrg=3d (docs/lrg-3d.org); elsewhere these keys pass through to the page.
-  "Alt+Shift+a": lrg-cycle-arrangement       # next arrangement (carousel, grid, free, single-panel)
+  "Alt+Shift+a": lrg-cycle-arrangement       # next arrangement (carousel, grid, stack, free)
   "Alt+Shift+e": lrg-cycle-environment       # next environment (studio, sky, workshop, cockpit, void)
   "Alt+Shift+r": lrg-reading                 # read the tab head-on, pixel-exact
   "Alt+Shift+h": lrg-history                 # the tab's back/forward pages in depth

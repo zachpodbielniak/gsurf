@@ -48,6 +48,14 @@ gsurfctl [OPTION...] COMMAND [ARGUMENTS...]
 | `title`, `uri`, `text` | `page.*` | the page's title, URI, rendered text |
 | `eval JS` | `page.eval` | run JavaScript; strings print as they are, other values as JSON (refused in kiosk) |
 | `screenshot FILE` | `page.screenshot` | PNG of the visible page (0600), relative to your shell |
+| `3d` | `lrg.state` | the `--lrg=3d` scene: `3d  ARRANGEMENT  ENVIRONMENT  [reading]  [moving]  (N panels)`; `-j` adds `pinned` (`{view, placement}`) and camera `bookmarks` |
+| `3d-arrange [ID]` | `lrg.arrange` | `carousel`, `grid`, `free`, `single-panel`, `stack`; no ID: the next one |
+| `3d-env [ID]` | `lrg.environment` | `studio`, `sky`, `workshop`, `cockpit`, `void`; no ID: the next one |
+| `3d-reading [on\|off]`, `3d-history [on\|off]` | `lrg.reading`, `lrg.history` | reading mode (active tab head-on, then pixel-exact) / history depth (back/forward pages as a stack); no word: toggle |
+| `3d-focus [VIEW]` | `lrg.focus` | make VIEW active and fly the camera to it |
+| `3d-pin [on\|off] [--placement "X Y Z YAW W H"] [--view VIEW]`, `3d-unpin-all` | `lrg.pin`, `lrg.unpin_all` | pin a tab's panel where it is or at a placement; unpin one or all |
+| `3d-camera orbit YAW [PITCH]\|zoom FACTOR\|reset\|overview\|save NAME\|restore NAME` | `lrg.camera` | move the camera (degrees; FACTOR <1 closer) or use a camera bookmark |
+| `3d-shot FILE` | `lrg.screenshot` | PNG of the next 3D frame, scene and chrome as shown (relative to your shell) |
 | `actions [--names]` | `actions.list` | every action name |
 | `action NAME` | `action.run` | run an action as its key would (`zoom-in`, `tab-next`, `pane-split-right`, `quit`) |
 | `mode [normal\|insert]` | `mode.get` / `mode.set` | print or set the vim mode (needs `modal`) |
@@ -60,7 +68,7 @@ gsurfctl [OPTION...] COMMAND [ARGUMENTS...]
 | `modules [--names]` | `modules.list` | loaded modules: name, state (`active`/`off`), description |
 | `module NAME [on\|off]` | `modules.toggle` | switch a module for this run (no on/off: flip; not saved) |
 | `methods [--names]` | `methods.list` | every socket method |
-| `watch [TOPIC...]` | `events.subscribe` | print events until interrupted: `view`, `uri`, `title`, `load`, `mode`, `layout`, `download` (default all) |
+| `watch [TOPIC...]` | `events.subscribe` | print events until interrupted: `view`, `uri`, `title`, `load`, `mode`, `layout`, `download`, `lrg` (default all) |
 | `call METHOD [JSON\|K=V...]` | any | raw call; `K=V` values are JSON when they parse (`n=3`, `b=true`), else strings; a `{...}` argument merges in |
 | `help [COMMAND\|--names]` | (local) | help, one command's usage, or the command names one per line (no instance needed) |
 
@@ -91,6 +99,18 @@ Wait until a page has loaded (start the watch before navigating):
 coproc WATCH { timeout 30 gsurfctl -j watch load; }
 gsurfctl nav https://example.org
 grep -m 1 '"state":"finished"' <&"${WATCH[0]}" > /dev/null && gsurfctl title
+```
+
+The 3D tab space (only in a gsurf started with `--lrg=3d`; elsewhere the `3d*` commands exit 1 with `this window is not a 3D scene`):
+
+```bash
+gsurfctl 3d                                             # 3d  carousel  studio  (4 panels)
+gsurfctl 3d-arrange grid && gsurfctl 3d-env sky
+gsurfctl 3d-focus 7 && gsurfctl 3d-reading on           # read tab 7 flat
+gsurfctl 3d-camera orbit 30 -10                         # degrees right, down
+gsurfctl -j 3d | yq -p json '.pinned[] | (.view | tostring) + " " + .placement'
+gsurfctl 3d-pin --view 7 --placement "1.5 0 -0.4 -20 4.2 3.1"
+gsurfctl 3d-shot /tmp/space.png
 ```
 
 A full session script: [../templates/gsurfctl-session.sh.template](../templates/gsurfctl-session.sh.template).

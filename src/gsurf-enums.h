@@ -39,10 +39,9 @@ typedef enum {
 
 /**
  * GsurfLrgRenderMode:
- * @GSURF_LRG_RENDER_MODE_2D: flat 2D page (a textured quad). The only mode
- *   implemented today; the default.
- * @GSURF_LRG_RENDER_MODE_3D: page as a panel in a 3D scene. Reserved (not yet
- *   implemented).
+ * @GSURF_LRG_RENDER_MODE_2D: flat 2D page (a textured quad); the default.
+ * @GSURF_LRG_RENDER_MODE_3D: every tab as a panel in a 3D scene (builds with
+ *   LRG_3D=1; docs/lrg-3d.org).
  * @GSURF_LRG_RENDER_MODE_3DVR: stereo 3D for VR headsets. Reserved.
  *
  * The render mode of the libregnum (%GSURF_BACKEND_LRG) backend, mirroring

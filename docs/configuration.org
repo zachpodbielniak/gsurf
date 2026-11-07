@@ -83,6 +83,19 @@ control:
 
 The gsurf binary opens a JSON-RPC control socket at =$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX/control.sock= (owner-only, removed at exit), which =gsurfctl= and scripts use to drive the running browser. =name= (letters, digits, =-=, =_=, =.=) adds a =$XDG_RUNTIME_DIR/gsurf/<name>.sock= link so the instance can be picked by name; a name a running instance already holds is not taken (a warning says so), and an invalid one is ignored with a warning. In a C config the fields are =config->control_enabled= and =config->control_name=. See [[file:control.org][control.org]] and [[file:gsurfctl.org][gsurfctl.org]].
 
+* The 3D tab space (=lrg=)
+
+#+begin_src yaml
+lrg:
+  arrangement: carousel            # carousel | grid | free | single-panel | stack
+  environment: studio              # studio | sky | workshop | cockpit | void
+  background-fps: 4                # refresh rate of visible background tabs (0.2-60)
+  history-depth: 8                 # back/forward pages shown per direction in history depth (1-32)
+  reading-single-tab: true         # a window that opens with one tab starts in reading mode
+#+end_src
+
+Read only by =gsurf --lrg=3d= (since 0.6), when the window opens. The tokens of =--lrg=3d:ARRANGEMENT:ENVIRONMENT= override =arrangement= and =environment=; an empty value means unset (the defaults =carousel= and =studio=), an unknown one logs a warning when the window opens and falls back to the default. =background-fps= and =history-depth= are clamped to their ranges. Like the other core sections, =lrg:= merges key by key across config files. In a C config the fields are =config->lrg_arrangement=, =lrg_environment= (strings; free before replacing), =lrg_background_fps=, =lrg_history_depth= and =lrg_reading_single_tab=. =gsurfctl config lrg.background-fps= reads them back. The =lrg-*= key-binding actions (=Alt+Shift+...= by default) are in [[file:keybindings.org][keybindings.org]]; the full reference is [[file:lrg-3d.org][lrg-3d.org]].
+
 * wmux
 
 =modules.wmux= (off by default) splits the window into tmux-style panes: =prefix= (=C-b=), =prefix_timeout=, =repeat_time=, =display_panes_time=, the =bindings= / =root_bindings= overrides (key: command in the wmux command language, =""= unbinds) and =repeatable= keys, =split_ratio=, =on_pane_kill= (=close_tab= | =keep_tab=), =on_tab_close= (=close_pane= | =keep_pane=), =confirm_kill=, =mouse=, =remember_layout=, =min_pane_pct=, =gap=, the border options (=border_width=, =active_border_width=, =border_color=, =active_border_color=, =container_colors=, =inactive_opacity=, =active_brighten=) and the status line (=status=, =status_position=, =status_bg=, =status_fg=, =status_current_fg=, =window_name_max=). Bad values warn and keep their default; a bad binding warns and is skipped. [[file:wmux.org][wmux.org]] has the full reference, the tmux key mapping and a cookbook.

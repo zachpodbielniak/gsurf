@@ -375,7 +375,7 @@ test_scene_live(void)
 	g_assert_true(gsurf_lrg_scene_set_arrangement(scene, "grid"));
 	g_assert_false(gsurf_lrg_scene_set_arrangement(scene, "nope"));
 	g_assert_cmpstr(gsurf_lrg_scene_get_arrangement(scene), ==, "grid");
-	g_assert_cmpstr(gsurf_lrg_scene_cycle_arrangement(scene), ==, "free");
+	g_assert_cmpstr(gsurf_lrg_scene_cycle_arrangement(scene), ==, "stack");
 	g_assert_true(gsurf_lrg_scene_set_environment(scene, "sky"));
 	g_assert_cmpstr(gsurf_lrg_scene_cycle_environment(scene), ==, "workshop");
 
@@ -403,7 +403,7 @@ test_scene_live(void)
 	g_assert_false(gsurf_lrg_scene_get_reading(scene));
 	g_assert_true(gsurf_lrg_scene_get_history(scene));
 	gsurf_lrg_scene_set_history(scene, FALSE);
-	g_assert_cmpstr(gsurf_lrg_scene_get_arrangement(scene), ==, "free");
+	g_assert_cmpstr(gsurf_lrg_scene_get_arrangement(scene), ==, "stack");
 
 	/* Camera bookmarks. */
 	gsurf_lrg_scene_save_view(scene, "home");

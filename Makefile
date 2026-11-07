@@ -347,10 +347,14 @@ tests: test
 # Forces GTK onto Xvfb's X display, so running it from a Wayland session
 # never opens test windows on the user's desktop.
 .PHONY: test-gui
-test-gui: gsurf gsurfctl modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit $(OUTDIR)/test-temp-storage-webkit $(OUTDIR)/test-modal-webkit $(OUTDIR)/test-mcp-webkit $(OUTDIR)/test-control-webkit $(OUTDIR)/test-gsurfctl
+test-gui: gsurf gsurfctl modules $(OUTDIR)/test-backend-settings $(OUTDIR)/test-protocol-webkit $(OUTDIR)/test-adblock-webkit $(OUTDIR)/test-keynav-webkit $(OUTDIR)/test-chrome-lifecycle $(OUTDIR)/test-containers-webkit $(OUTDIR)/test-dark-mode-webkit $(OUTDIR)/test-form-autofill-webkit $(OUTDIR)/test-containers-module-webkit $(OUTDIR)/test-session $(OUTDIR)/test-hardening-webkit $(OUTDIR)/test-tabs-webkit $(OUTDIR)/test-window-layout-webkit $(OUTDIR)/test-wmux-webkit $(OUTDIR)/test-temp-storage-webkit $(OUTDIR)/test-modal-webkit $(OUTDIR)/test-mcp-webkit $(OUTDIR)/test-control-webkit $(OUTDIR)/test-gsurfctl \
+	$(OUTDIR)/test-backend-lrg
 	@if ! command -v xvfb-run >/dev/null 2>&1; then \
 		echo "test-gui: xvfb-run not found; skipping"; exit 0; fi; \
 	unset WAYLAND_DISPLAY; export GDK_BACKEND=x11; \
+	echo "Running the libregnum backend tests (the live --lrg=3d scene)..."; \
+	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
+	 xvfb-run -a $(OUTDIR)/test-backend-lrg || exit $$?; \
 	echo "Running native settings regression tests..."; \
 	GSURF_TEST_GUI=1 LD_LIBRARY_PATH="$(abspath $(OUTDIR))" \
 	 xvfb-run -a $(OUTDIR)/test-backend-settings || exit $$?; \

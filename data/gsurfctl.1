@@ -17,8 +17,9 @@ owner-only; see
 under
 .IR @DATADIR@/doc/gsurf ).
 It opens and lists tabs, reads pages, runs JavaScript and key-binding
-actions, switches the input mode, drives wmux panes and windows, reads the
-configuration, toggles modules and follows events.
+actions, switches the input mode, drives wmux panes and windows and the
+.B \-\-lrg=3d
+tab space, reads the configuration, toggles modules and follows events.
 .PP
 The instance is the one given with
 .B \-S
@@ -101,11 +102,39 @@ Key-binding actions and the input mode.
 .BR panes ", " windows ", " wmux " \fI'COMMAND'\fR, " select\-window " \fIN\fR, " rename\-window " \fIN\fR [\fINAME\fR]"
 wmux panes and windows.
 .TP
+.B 3d
+The
+.B gsurf \-\-lrg=3d
+scene: arrangement, environment, reading, history, panels (with
+.BR \-j :
+pinned tabs and camera bookmarks).
+.TP
+.BR 3d\-arrange " [\fIID\fR], " 3d\-env " [\fIID\fR]"
+Set the tab arrangement (carousel, grid, free, single\-panel, stack) or the
+environment (studio, sky, workshop, cockpit, void); without an ID, step to
+the next one.
+.TP
+.BR 3d\-reading " [on|off], " 3d\-history " [on|off]"
+Reading mode (the active tab head\-on, then pixel\-exact) and history depth
+(the tab's back/forward pages as a stack); without on/off, toggle.
+.TP
+.BR 3d\-focus " [\fIVIEW\fR]"
+Make the view active and fly the camera to it.
+.TP
+.BR 3d\-pin " [on|off] [\fB\-\-placement\fR \fI\(dqX Y Z YAW W H\(dq\fR] [\fB\-\-view\fR \fIVIEW\fR], " 3d\-unpin\-all
+Pin a tab's panel where it is or at a placement; unpin it or every panel.
+.TP
+.BR 3d\-camera " orbit \fIYAW\fR [\fIPITCH\fR] | zoom \fIFACTOR\fR | reset | overview | save \fINAME\fR | restore \fINAME\fR"
+Move the camera, or save and restore a camera bookmark.
+.TP
+.BR 3d\-shot " \fIFILE\fR"
+Write a PNG of the next 3D frame (scene and chrome, as shown).
+.TP
 .BR config " [\fIKEY\fR], " modules ", " module " \fINAME\fR [on|off], " methods
 Configuration, modules, the socket's methods.
 .TP
 .BR watch " [\fITOPIC\fR...]"
-Print events (view, uri, title, load, mode, layout, download) until
+Print events (view, uri, title, load, mode, layout, download, lrg) until
 interrupted.
 .TP
 .BR call " \fIMETHOD\fR [\fIJSON\fR|\fIKEY=VALUE\fR...]"
@@ -130,6 +159,8 @@ gsurfctl \-j tabs
 gsurfctl wmux 'split\-window \-h https://github.com'
 gsurfctl mode insert
 gsurfctl watch view uri
+gsurfctl 3d\-arrange grid
+gsurfctl 3d\-reading on
 gsurfctl \-i work open https://mail.example.org
 gsurfctl call open uri=https://example.org background=true
 .fi

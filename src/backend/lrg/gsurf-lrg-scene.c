@@ -26,6 +26,8 @@
 #include <math.h>
 #include <string.h>
 
+#include <glib/gstdio.h>
+
 /* The top bit marks history-entry keys; the low bits carry offset + bias. */
 #define SCENE_HISTORY_BIT   G_GUINT64_CONSTANT(0x8000000000000000)
 #define SCENE_HISTORY_BIAS  1024
@@ -41,9 +43,10 @@
 #define SCENE_HIDDEN_REFRESH_US (3 * G_USEC_PER_SEC)
 #define SCENE_SMALL_COVERAGE    120.0f
 
-/* Arrangements the cycle steps through (stack is history depth's own). */
+/* Arrangements the cycle steps through.  single-panel and per-window are
+ * left out: with one texture per tab they stack every panel on one plane. */
 static const gchar *const scene_tab_arrangements[] = {
-	"carousel", "grid", "free", "single-panel", NULL
+	"carousel", "grid", "stack", "free", NULL
 };
 
 static const gchar *const scene_environments[] = {
@@ -538,6 +541,16 @@ gsurf_lrg_scene_frame(GsurfLrgScene *self, GPtrArray *views, GsurfView *active,
 	lrg_frame_surface_end_frame(fs);
 
 	scene_prune_view_state(self);
+}
+
+void
+gsurf_lrg_scene_note_active(GsurfLrgScene *self, GsurfView *active)
+{
+	g_return_if_fail(GSURF_IS_LRG_SCENE(self));
+
+	/* Only compared (wants_flat) until the next frame re-borrows it from
+	 * frame_views; the window owns the view for the whole tick. */
+	self->active = (active != NULL && GSURF_IS_LRG_VIEW(active)) ? active : NULL;
 }
 
 gboolean
@@ -1135,6 +1148,10 @@ gsurf_lrg_scene_flush_screenshots(GsurfLrgScene *self)
 	for (l = pending; l != NULL; l = l->next) {
 		SceneShot *shot = l->data;
 		gboolean ok = frame != NULL && grl_image_export(frame, shot->path);
+
+		/* Owner-only, like page.screenshot: a frame can show private pages. */
+		if (ok)
+			g_chmod(shot->path, 0600);
 
 		shot->func(self, shot->path, ok, shot->user_data);
 		g_free(shot->path);

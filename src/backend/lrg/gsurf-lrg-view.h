@@ -13,7 +13,8 @@
  *
  * The page is always rendered as a flat 2D texture; the render *mode*
  * (2D / 3D / 3D-VR, see #GsurfLrgRenderMode) is a property of the host window,
- * not the view — only 2D is implemented today.
+ * not the view: the 3D scene (#GsurfLrgScene) shows this same texture on a
+ * panel.
  */
 
 #ifndef GSURF_LRG_VIEW_H

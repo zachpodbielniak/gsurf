@@ -17,7 +17,7 @@ Optional builds:
 #+begin_src sh
 make MCP=1                 # build the MCP server module
 make GTK_BACKEND=gtk4      # WebKitGTK 6.0 / GTK4 (needs webkitgtk-6.0)
-make LRG_BACKEND=1         # add the libregnum/raylib backend (gsurf --lrg)
+make LRG_BACKEND=1         # add the libregnum/raylib backend (gsurf --lrg, gsurf --lrg=3d)
 make DEBUG=1               # debug symbols, -O0
 make test                  # run the test suite
 sudo make install          # install to /usr/local
@@ -34,19 +34,22 @@ When =clean= or =clean-all= is combined with other goals, cleaning finishes firs
 
 ** The libregnum (LRG) backend
 
-=LRG_BACKEND=1= adds the libregnum/raylib backend (=gsurf --lrg=) next to the GTK one. It needs graylib, which comes from the bundled =deps/libregnum= submodule (so check out submodules recursively), from a sibling =../libregnum=, or from an explicit =LIBREGNUM_DIR=<path>=:
+=LRG_BACKEND=1= adds the libregnum/raylib backend (=gsurf --lrg=) next to the GTK one: the page in a raylib window, flat (=--lrg=, =--lrg=2d=) or as the 3D tab space (=--lrg=3d=, every tab a live panel in a 3D scene; see [[file:lrg-3d.org][lrg-3d.org]]). It needs libregnum, which comes from the bundled =deps/libregnum= submodule (so check out submodules recursively), from a sibling =../libregnum=, or from an explicit =LIBREGNUM_DIR=<path>=:
 
 #+begin_src sh
 git submodule update --init --recursive
-make LRG_BACKEND=1                                  # bundled deps/libregnum
+make LRG_BACKEND=1                                  # bundled deps/libregnum, 2D and 3D
+make LRG_BACKEND=1 LRG_3D=0                         # graylib only: --lrg=3d refused
 make LRG_BACKEND=1 LIBREGNUM_DIR=../libregnum       # a libregnum you already built
+./build/release/gsurf --lrg=3d:grid:sky https://suckless.org
 #+end_src
 
-- *Only graylib is built.* When graylib's archives are missing, make builds graylib (not all of libregnum) before compiling the LRG sources, since =graylib.h= includes the generated =grl-version.h=. An existing build at =LIBREGNUM_DIR= is used as is and never rebuilt.
+- *3D links libregnum.* =LRG_3D=1= (the default with =LRG_BACKEND=1=) links =liblibregnum.a= (=LRG_LIBREGNUM_LIB=, default =$(LIBREGNUM_DIR)/build/release/lib/liblibregnum.a=), which already contains graylib and raylib. When it is missing, make builds the vendored libregnum once, lean (no editor, GIR, tests, examples, OpenXR, ...); the 3D tab space needs libregnum 0.8.2 or newer. An embedder that builds libregnum itself points =LRG_LIBREGNUM_LIB= at its archive.
+- *=LRG_3D=0= builds only graylib.* When graylib's archives are missing, make builds graylib (not all of libregnum) before compiling the LRG sources, since =graylib.h= includes the generated =grl-version.h=. An existing build at =LIBREGNUM_DIR= is used as is and never rebuilt, in either mode.
 - *Missing graylib is an error.* =LRG_BACKEND=1= with no =graylib.h= at the resolved location stops with a message naming the path, rather than quietly building without the backend.
 - *Switching needs no clean.* The build configuration (backends, =LIBREGNUM_DIR=, compiler flags) is recorded in =build/<mode>/obj/.build-flags=; changing it rebuilds everything once, so =make= and =make LRG_BACKEND=1= can alternate in one tree.
-- *Regression test.* =tests/test-build-config.sh= (run by =make test=, or alone with =make test-build=) checks the graylib build order and flags, the missing-graylib error and the configuration stamp against a stub libregnum under =build/build-config-test/=, without compiling anything.
-- *Extra packages.* On top of the GTK build, raylib needs the X11/GL development headers (Fedora: =mesa-libGL-devel=, =libX11-devel=, =libXrandr-devel=, =libXinerama-devel=, =libXcursor-devel=, =libXi-devel=; plus =wayland-devel=, =libxkbcommon-devel= for graylib's optional Wayland support) and =fontconfig-devel=.
+- *Regression test.* =tests/test-build-config.sh= (run by =make test=, or alone with =make test-build=) checks the single lean libregnum sub-make of a 3D build, the =LRG_3D= configuration stamp, the graylib-only build order and flags (=LRG_3D=0=), the missing-graylib error and the configuration stamp against a stub libregnum under =build/build-config-test/=, without compiling anything.
+- *Extra packages.* On top of the GTK build, raylib needs the X11/GL development headers (Fedora: =mesa-libGL-devel=, =libX11-devel=, =libXrandr-devel=, =libXinerama-devel=, =libXcursor-devel=, =libXi-devel=; plus =wayland-devel=, =libxkbcommon-devel= for graylib's optional Wayland support) and =fontconfig-devel=; a 3D build also uses =json-glib-devel= (already a core dependency), and building the vendored libregnum asks pkg-config for =libyaml-devel= and =libsoup3-devel=.
 
 * FreeBSD
 
@@ -60,6 +63,7 @@ gmake LRG_BACKEND=1 src/gsurf-version.h deps/crispy/src/crispy-version.h
 gmake LRG_BACKEND=1 MCP=1 PREFIX=/usr/local BUILD_MODULES=1
 #+end_src
 
+- *3D on FreeBSD is unverified.* The recipe above predates the 3D scene. With =LRG_BACKEND=1= the default is now =LRG_3D=1=, which also builds and links the vendored libregnum; add =LRG_3D=0= to keep the verified graylib-only build.
 - *GNU make.* The Makefiles are GNU make throughout; FreeBSD's =make= is BSD make, so use =gmake=.
 - *=-fPIC= for the vendored raylib.* Fedora's gcc builds position-independent code by default and FreeBSD's does not, and raylib's archive is linked into shared objects. The graylib pinned here (v0.7.1, via libregnum v0.7.1) includes graylib's own fix (=06fa52b=), so no extra flags are needed.
 - *Loader hints.* =make install= runs =ldconfig -m $(LIBDIR)= on FreeBSD (=rules.mk=): a bare =ldconfig= there replaces the run-time linker hints with only the directories given instead of adding to them.

@@ -24,6 +24,7 @@ The user's machines run an immutable Fedora image (Immutablue / Hyacinth Macaw).
 | `BUILD_GIR=1` | `gobject-introspection-devel` |
 | `MCP=1` | `libsoup3-devel`, `libdex-devel`, `libpng-devel` |
 | `LRG_BACKEND=1` | `mesa-libGL-devel`, `libX11-devel`, `libXrandr-devel`, `libXinerama-devel`, `libXcursor-devel`, `libXi-devel`, `fontconfig-devel`, plus `wayland-devel`, `libxkbcommon-devel` for graylib's Wayland support |
+| `LRG_BACKEND=1` with `LRG_3D=1` (the default) | the above plus `json-glib-devel` (already core); the first build of the vendored libregnum also asks pkg-config for `libyaml-devel` and `libsoup3-devel` |
 | `make test-gui` | an `xvfb-run` on `PATH` (`xorg-x11-server-Xvfb` provides it), or any wrapper with that name that runs a command on a private display |
 | `make appimage` | `appimagetool` on `PATH` (or `APPIMAGETOOL=`) |
 
@@ -47,6 +48,8 @@ make install-skill          # this skill into ~/.agents/skills/gsurf (+ ~/.claud
 | `GTK_BACKEND=gtk4` | WebKitGTK 6.0 / GTK4 instead of WebKit2GTK 4.1 / GTK3 (the two are mutually exclusive in one build) |
 | `BUILDDIR=build-gtk4` | separate tree, so GTK3 and GTK4 builds do not clobber each other |
 | `LRG_BACKEND=1` | adds the libregnum/raylib backend (`gsurf --lrg`); needs the recursive `deps/libregnum` checkout or `LIBREGNUM_DIR=<path>`; a missing `graylib.h` is a hard error |
+| `LRG_3D=1` (default) / `LRG_3D=0` | with `LRG_BACKEND=1`: the `--lrg=3d` tab space, linking `liblibregnum.a` (it carries graylib + raylib; libregnum >= 0.8.2), built lean from the vendored copy when missing / graylib only, `--lrg=3d` refused |
+| `LRG_LIBREGNUM_LIB=<archive>` | the `liblibregnum.a` a 3D build links (default `$(LIBREGNUM_DIR)/build/release/lib/liblibregnum.a`); embedders point it at their own build |
 | `MCP=1` | builds `modules/mcp` (vendored mcp-glib, statically linked into the module) |
 | `STATIC=1` | links `libgsurf` into the binary; modules resolve symbols from it |
 | `BUILD_GIR=1` | also generate GIR in `all` |
@@ -63,7 +66,7 @@ make GTK_BACKEND=gtk4 BUILDDIR=build-gtk4 test test-gui
 make BUILD_GIR=1 GTK_BACKEND=gtk4 BUILDDIR=build-gtk4 gir
 ```
 
-Plus `make MCP=1 all test` and `make LRG_BACKEND=1 all test` when those parts changed, and `make DEBUG=1 ASAN=1 test test-gui` after a release. Any compiler warning is a bug: fix the code, never lower the warning flags. `grep -ci warning` over the build log should print 0.
+Plus `make MCP=1 all test` and `make LRG_BACKEND=1 all test` (and `make LRG_BACKEND=1 LRG_3D=0 all test` for the graylib-only build) when those parts changed; `test-backend-lrg`'s live 3D scene needs a display (`make test-gui`), and `make DEBUG=1 ASAN=1 test test-gui` after a release. Any compiler warning is a bug: fix the code, never lower the warning flags. `grep -ci warning` over the build log should print 0.
 
 ## Tests
 
