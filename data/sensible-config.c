@@ -184,6 +184,15 @@ gsurf_config_init(void)
 	g_free(config->control_name);
 	config->control_name = NULL;                   /* e.g. g_strdup("main"): gsurfctl -i main */
 
+	/* ===== 3D (--lrg=3d, docs/lrg-3d.org) ===== */
+	g_free(config->lrg_arrangement);
+	config->lrg_arrangement = g_strdup("carousel"); /* grid, free, single-panel, stack */
+	g_free(config->lrg_environment);
+	config->lrg_environment = g_strdup("studio");   /* sky, workshop, cockpit, void */
+	config->lrg_background_fps = 4.0;
+	config->lrg_history_depth = 8;
+	config->lrg_reading_single_tab = TRUE;
+
 	/* ===== Window ===== */
 	g_free(config->window_title);
 	config->window_title = g_strdup("gsurf");
@@ -202,6 +211,23 @@ gsurf_config_init(void)
 	gsurf_config_set_keybind(config, "F11",          GSURF_ACTION_TOGGLE_FULLSCREEN);
 	gsurf_config_set_keybind(config, "Ctrl+q",       GSURF_ACTION_QUIT);
 	gsurf_config_set_keybind(config, "?",            GSURF_ACTION_SHOW_KEYBINDS);
+
+	/* --lrg=3d (docs/lrg-3d.org); elsewhere these keys reach the page */
+	gsurf_config_set_keybind(config, "Alt+Shift+a",         GSURF_ACTION_LRG_CYCLE_ARRANGEMENT);
+	gsurf_config_set_keybind(config, "Alt+Shift+e",         GSURF_ACTION_LRG_CYCLE_ENVIRONMENT);
+	gsurf_config_set_keybind(config, "Alt+Shift+r",         GSURF_ACTION_LRG_READING);
+	gsurf_config_set_keybind(config, "Alt+Shift+h",         GSURF_ACTION_LRG_HISTORY);
+	gsurf_config_set_keybind(config, "Alt+Shift+f",         GSURF_ACTION_LRG_FOCUS);
+	gsurf_config_set_keybind(config, "Alt+Shift+p",         GSURF_ACTION_LRG_PIN);
+	gsurf_config_set_keybind(config, "Alt+Shift+u",         GSURF_ACTION_LRG_UNPIN_ALL);
+	gsurf_config_set_keybind(config, "Alt+Shift+c",         GSURF_ACTION_LRG_CAMERA_RESET);
+	gsurf_config_set_keybind(config, "Alt+Shift+o",         GSURF_ACTION_LRG_OVERVIEW);
+	gsurf_config_set_keybind(config, "Alt+Shift+Left",      GSURF_ACTION_LRG_ORBIT_LEFT);
+	gsurf_config_set_keybind(config, "Alt+Shift+Right",     GSURF_ACTION_LRG_ORBIT_RIGHT);
+	gsurf_config_set_keybind(config, "Alt+Shift+Up",        GSURF_ACTION_LRG_ORBIT_UP);
+	gsurf_config_set_keybind(config, "Alt+Shift+Down",      GSURF_ACTION_LRG_ORBIT_DOWN);
+	gsurf_config_set_keybind(config, "Alt+Shift+z",         GSURF_ACTION_LRG_ZOOM_IN);
+	gsurf_config_set_keybind(config, "Alt+Shift+x",         GSURF_ACTION_LRG_ZOOM_OUT);
 
 	/* ===== Mousebinds ===== */
 	gsurf_config_set_mousebind(config, "Button8",      GSURF_ACTION_BACK);

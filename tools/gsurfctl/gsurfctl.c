@@ -111,7 +111,7 @@ static const gchar help_description[] =
 	"  config [KEY], modules, module NAME [on|off]\n"
 	"  methods                    every method of the control socket\n"
 	"  watch [TOPIC...]           print events until interrupted (view, uri,\n"
-	"                             title, load, mode, layout, download)\n"
+	"                             title, load, mode, layout, download, lrg)\n"
 	"  call METHOD [JSON|K=V...]  a raw JSON-RPC call\n"
 	"  help [COMMAND|--names]     this list, one command, or the names\n"
 	"\n"
@@ -160,13 +160,13 @@ static const gchar bash_completion[] =
 	"\tif [[ \"${cur}\" == -* ]]; then\n"
 	"\t\tmapfile -t COMPREPLY < <(compgen -W \"-i --instance -S --socket -a --all -j --json -p --pretty "
 	"-T --timeout -q --quiet --completion -V --version --license -h --help --bg --container --child-of "
-	"--hard --view --parent --before --after --index --window --names\" -- \"${cur}\"); return\n"
+	"--hard --view --parent --before --after --index --window --placement --names\" -- \"${cur}\"); return\n"
 	"\tfi\n"
 	"\tcmd=\"\"\n"
 	"\tfor (( i = 1; i < cword; i++ )); do\n"
 	"\t\tcase \"${words[i]}\" in\n"
 	"\t\t\t-i|--instance|-S|--socket|-T|--timeout|--completion|--container|--child-of|--view|"
-	"--parent|--before|--after|--index|--window) (( i++ )) ;;\n"
+	"--parent|--before|--after|--index|--window|--placement) (( i++ )) ;;\n"
 	"\t\t\t-*) ;;\n"
 	"\t\t\t*) cmd=\"${words[i]}\"; break ;;\n"
 	"\t\tesac\n"
@@ -177,10 +177,14 @@ static const gchar bash_completion[] =
 	"\t\tmodule) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl modules --names 2>/dev/null) on off\" -- \"${cur}\") ;;\n"
 	"\t\tmode) mapfile -t COMPREPLY < <(compgen -W \"normal insert\" -- \"${cur}\") ;;\n"
 	"\t\tcollapse) mapfile -t COMPREPLY < <(compgen -W \"on off\" -- \"${cur}\") ;;\n"
-	"\t\twatch) mapfile -t COMPREPLY < <(compgen -W \"view uri title load mode layout download\" -- \"${cur}\") ;;\n"
+	"\t\twatch) mapfile -t COMPREPLY < <(compgen -W \"view uri title load mode layout download lrg\" -- \"${cur}\") ;;\n"
+	"\t\t3d-arrange) mapfile -t COMPREPLY < <(compgen -W \"carousel grid free single-panel stack\" -- \"${cur}\") ;;\n"
+	"\t\t3d-env) mapfile -t COMPREPLY < <(compgen -W \"studio sky workshop cockpit void\" -- \"${cur}\") ;;\n"
+	"\t\t3d-reading|3d-history|3d-pin) mapfile -t COMPREPLY < <(compgen -W \"on off\" -- \"${cur}\") ;;\n"
+	"\t\t3d-camera) mapfile -t COMPREPLY < <(compgen -W \"orbit zoom reset overview save restore\" -- \"${cur}\") ;;\n"
 	"\t\thelp) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl help --names 2>/dev/null) --names\" -- \"${cur}\") ;;\n"
 	"\t\tcall) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl methods --names 2>/dev/null)\" -- \"${cur}\") ;;\n"
-	"\t\tscreenshot|open) mapfile -t COMPREPLY < <(compgen -f -- \"${cur}\") ;;\n"
+	"\t\tscreenshot|3d-shot|open) mapfile -t COMPREPLY < <(compgen -f -- \"${cur}\") ;;\n"
 	"\t\t*) COMPREPLY=() ;;\n"
 	"\tesac\n"
 	"}\n"
@@ -1034,7 +1038,7 @@ static const Command commands[] = {
 	{ "methods", "methods.list", "methods [--names]", "every method of the control socket",
 	  0, 0, FALSE, NULL },
 	{ "watch", NULL, "watch [TOPIC...]",
-	  "print events until interrupted (view, uri, title, load, mode, layout, download)",
+	  "print events until interrupted (view, uri, title, load, mode, layout, download, lrg)",
 	  0, -1, FALSE, NULL },
 	{ "call", NULL, "call METHOD [JSON|K=V...]",
 	  "a raw call; K=V values are JSON when they parse (n=3, b=true), else strings",

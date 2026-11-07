@@ -509,6 +509,7 @@ test_core_headless(void)
 	g_assert_true(gsurf_config_load_from_data(config,
 		"browser:\n  homepage: https://home.example\n"
 		"control:\n  enabled: false\n  name: work\n"
+		"lrg:\n  arrangement: grid\n  background-fps: 2.5\n"
 		"modules:\n  wmux:\n    enabled: true\n    prefix: C-a\n    panes: [1, 'two']\n",
 		-1, &error));
 	g_assert_no_error(error);
@@ -559,6 +560,23 @@ test_core_headless(void)
 	line = call(server, "open", "{\"uri\":5}");
 	g_assert_cmpint(error_code(line), ==, -32001);  /* no window comes first */
 	g_free(line);
+	/* The 3D scene methods: no window (3D builds) or no scene at all. */
+#ifdef GSURF_HAVE_LRG_3D
+	line = call(server, "lrg.state", NULL);
+	g_assert_cmpint(error_code(line), ==, -32001);
+	g_free(line);
+	line = call(server, "lrg.camera", "{\"op\":\"orbit\",\"yaw\":\"x\"}");
+	g_assert_cmpint(error_code(line), ==, -32001);  /* no window comes first */
+	g_free(line);
+#else
+	line = call(server, "lrg.state", NULL);
+	g_assert_cmpint(error_code(line), ==, -32002);
+	ASSERT_HAS(line, "LRG_3D=1");
+	g_free(line);
+#endif
+	line = call(server, "methods.list", NULL);
+	ASSERT_HAS(line, "\"lrg.screenshot\"");
+	g_free(line);
 
 	/* 3. config.get: core keys, the whole set, module sections. */
 	line = call(server, "config.get", "{\"key\":\"browser.homepage\"}");
@@ -566,6 +584,12 @@ test_core_headless(void)
 	g_free(line);
 	line = call(server, "config.get", "{\"key\":\"control.name\"}");
 	ASSERT_HAS(line, "\"result\":\"work\"");
+	g_free(line);
+	line = call(server, "config.get", "{\"key\":\"lrg.arrangement\"}");
+	ASSERT_HAS(line, "\"result\":\"grid\"");
+	g_free(line);
+	line = call(server, "config.get", "{\"key\":\"lrg.background-fps\"}");
+	ASSERT_HAS(line, "\"result\":2.5");
 	g_free(line);
 	line = call(server, "config.get", "{\"key\":\"control.enabled\"}");
 	ASSERT_HAS(line, "\"result\":false");

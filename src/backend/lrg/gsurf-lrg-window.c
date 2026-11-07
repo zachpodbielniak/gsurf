@@ -635,8 +635,12 @@ lrg3d_gesture_click(GsurfLrgWindow *self, guint button, GsurfView *view,
 		}
 	} else if (button == GSURF_BUTTON_MIDDLE && !ctrl
 	           && (self->gesture_mods & GSURF_MOD_SUPER) == 0) {
-		/* A plain middle click is the page's (open link in a new tab, paste):
-		 * the drag check held it back, so deliver press and release now. */
+		/* A plain middle click (open link in a new tab, paste) was held back
+		 * by the drag check: deliver it now, to mousebinds/modules first
+		 * (Button2: open-new-view-background) and then to the page. */
+		if (gsurf_window_emit_button_press(win, GSURF_BUTTON_MIDDLE,
+		                                   self->gesture_mods))
+			return;
 		lrg3d_page_button(self, view, px, py, GSURF_BUTTON_MIDDLE, TRUE, 0);
 		lrg3d_page_button(self, view, px, py, GSURF_BUTTON_MIDDLE, FALSE, 0);
 	}
@@ -869,16 +873,18 @@ lrg_window_tick(gpointer user_data)
 		int wh = grl_window_get_height(self->win);
 		int body_h = wh - LRG_CHROME_H;
 
-		gint64 now = g_get_monotonic_time();
-		gfloat dt = self->last_tick_us > 0
-			? (gfloat)(now - self->last_tick_us) / (gfloat)G_USEC_PER_SEC
-			: (1.0f / 60.0f);
-
-		self->last_tick_us = now;
 		view = lrg_window_active_lrg_view(self);
 
 #ifdef GSURF_HAVE_LRG_3D
 		if (self->scene != NULL) {
+			/* Seconds since the previous frame, for the scene's easing. */
+			gint64 now = g_get_monotonic_time();
+			gfloat dt = self->last_tick_us > 0
+				? (gfloat)(now - self->last_tick_us) / (gfloat)G_USEC_PER_SEC
+				: (1.0f / 60.0f);
+
+			self->last_tick_us = now;
+
 			/* First frame with tabs: open a lone tab in reading mode. */
 			if (!self->scene_started
 			    && gsurf_window_get_n_views(GSURF_WINDOW(self)) > 0) {

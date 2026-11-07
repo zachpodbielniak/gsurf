@@ -19,6 +19,12 @@
 #      given BUILDDIR= / BUILD_GIR= on the command line.
 #   4. Toggling LRG_BACKEND rebuilds objects without `make clean' (the
 #      $(OBJDIR)/.build-flags stamp), and an unchanged configuration does not.
+#   5. With LRG_3D=1 (the --lrg=3d scene, the default) ONE libregnum sub-make
+#      builds liblibregnum.a and graylib's archives, lean (no editor, GIR,
+#      tests, OpenXR, ...) and with BUILDDIR/DEBUG pinned, before the LRG
+#      objects compile; and the stamp records LRG_3D.
+#
+# Checks 1-4 cover the graylib-only build, so they pass LRG_3D=0.
 #
 # Usage: tests/test-build-config.sh [make-program] [builddir]
 #   Run from the gsurf source root (`make test' does this).
@@ -83,6 +89,11 @@ make_stub () {
 	printf '$(file >>%s/calls,$(MAKEOVERRIDES))\nall:\n\t@:\n' "${dir}" \
 		> "${dir}/deps/graylib/Makefile"
 	: > "${dir}/calls"
+	# The same for libregnum itself (the LRG_3D=1 build), with the goals.
+	# shellcheck disable=SC2016
+	printf '$(file >>%s/lrg-calls,$(MAKECMDGOALS) $(MAKEOVERRIDES))\nall:\n\t@:\n' \
+		"${dir}" > "${dir}/Makefile"
+	: > "${dir}/lrg-calls"
 }
 
 make_prog="${1:-make}"
@@ -105,7 +116,7 @@ echo '# build-config: LRG_BACKEND plumbing'
 # --- 1. missing graylib is an error -------------------------------------------
 name='missing graylib is a hard error'
 mkdir -p "${work}/empty"
-if out="$(run_make -n LRG_BACKEND=1 LIBREGNUM_DIR="${work}/empty" \
+if out="$(run_make -n LRG_BACKEND=1 LRG_3D=0 LIBREGNUM_DIR="${work}/empty" \
 	BUILDDIR="${work}/b1" lib 2>&1)"
 then
 	fail "${name}" 'make succeeded without graylib'
@@ -125,7 +136,7 @@ name='LRG objects are ordered after the graylib build'
 # -n prints recipes without running them, except $(MAKE) lines, which run (the
 # stub just logs).  The stub creates no archive, so the graylib recipe must
 # appear before the LRG object's compile line.
-if ! out="$(run_make -n LRG_BACKEND=1 LIBREGNUM_DIR="${stub}" \
+if ! out="$(run_make -n LRG_BACKEND=1 LRG_3D=0 LIBREGNUM_DIR="${stub}" \
 	BUILDDIR="${work}/b2" BUILD_GIR=1 "${view_o}" 2>&1)"
 then
 	fail "${name}" "make -n failed: ${out}"
@@ -145,7 +156,7 @@ fi
 
 name='graylib sub-make runs once, BUILDDIR pinned, GIR off'
 : > "${stub}/calls"
-run_make -n LRG_BACKEND=1 LIBREGNUM_DIR="${stub}" BUILDDIR="${work}/b2" \
+run_make -n LRG_BACKEND=1 LRG_3D=0 LIBREGNUM_DIR="${stub}" BUILDDIR="${work}/b2" \
 	BUILD_GIR=1 "${stub}/deps/graylib/build/lib/libgraylib.a" \
 	"${stub}/deps/graylib/deps/raylib/src/libraylib.a" > /dev/null 2>&1 || true
 calls="$(wc -l < "${stub}/calls")"
@@ -179,7 +190,7 @@ else
 	if ! run_make -q BUILDDIR="${b3}" "${backend_o}" > /dev/null 2>&1
 	then
 		fail "${name}" 'object not up to date under an unchanged configuration'
-	elif run_make -q LRG_BACKEND=1 LIBREGNUM_DIR="${stub}" BUILDDIR="${b3}" \
+	elif run_make -q LRG_BACKEND=1 LRG_3D=0 LIBREGNUM_DIR="${stub}" BUILDDIR="${b3}" \
 		"${backend_o}" > /dev/null 2>&1
 	then
 		fail "${name}" 'object still up to date after LRG_BACKEND=0 -> 1'
@@ -189,6 +200,55 @@ else
 	else
 		pass "${name}"
 	fi
+fi
+
+# --- 5. the 3D build: one lean libregnum sub-make, first -----------------------
+name='LRG_3D: one lean libregnum sub-make before the LRG objects'
+# DEBUG=1 puts gsurf's own objects under debug/; the sub-make must still get DEBUG=0.
+scene_o="${work}/b5/debug/obj/backend/lrg/gsurf-lrg-scene.o"
+: > "${stub}/lrg-calls"
+: > "${stub}/calls"
+if ! out="$(run_make -n LRG_BACKEND=1 LRG_3D=1 LIBREGNUM_DIR="${stub}" \
+	BUILDDIR="${work}/b5" DEBUG=1 BUILD_GIR=1 "${scene_o}" \
+	"${stub}/build/release/lib/liblibregnum.a" \
+	"${stub}/deps/graylib/build/lib/libgraylib.a" 2>&1)"
+then
+	fail "${name}" "make -n failed: ${out}"
+else
+	lrg_line="$(grep -n -- "-C ${stub} all" <<< "${out}" | head -n 1 | cut -d: -f1 || true)"
+	cc_line="$(grep -n -- "-o ${scene_o}" <<< "${out}" | head -n 1 | cut -d: -f1 || true)"
+	calls="$(wc -l < "${stub}/lrg-calls")"
+	if [[ "${calls}" -ne 1 ]]
+	then
+		fail "${name}" "libregnum sub-make ran ${calls} times"
+	elif [[ -s "${stub}/calls" ]]
+	then
+		fail "${name}" "the graylib-only sub-make ran too: $(cat "${stub}/calls")"
+	elif [[ -z "${lrg_line}" || -z "${cc_line}" ]] || (( lrg_line >= cc_line ))
+	then
+		fail "${name}" "libregnum build (${lrg_line:-none}) not before the compile (${cc_line:-none})"
+	else
+		missing=''
+		for want in BUILDDIR=build/release DEBUG=0 BUILD_GIR=0 BUILD_SHARED=0 \
+			BUILD_TESTS=0 BUILD_EDITOR=0 BUILD_EDITOR_UI=0 OPENXR=0
+		do
+			grep -q -- "${want}" "${stub}/lrg-calls" || missing="${missing} ${want}"
+		done
+		if [[ -n "${missing}" ]]
+		then
+			fail "${name}" "missing${missing}: $(cat "${stub}/lrg-calls")"
+		else
+			pass "${name}"
+		fi
+	fi
+fi
+
+name='LRG_3D is part of the configuration stamp'
+if ! grep -q 'LRG_3D=1' "${work}/b5/debug/obj/.build-flags" 2>/dev/null
+then
+	fail "${name}" 'stamp does not record LRG_3D=1'
+else
+	pass "${name}"
 fi
 
 if [[ "${failures}" -gt 0 ]]

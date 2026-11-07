@@ -25,6 +25,40 @@ test_defaults(void)
 }
 
 /* network.do_not_track parses both ways. */
+/* The lrg: block (the --lrg=3d scene): defaults, values, clamps, and an
+ * empty id meaning "the default". */
+static void
+test_lrg_block(void)
+{
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_null(c->lrg_arrangement);
+	g_assert_null(c->lrg_environment);
+	g_assert_cmpfloat(c->lrg_background_fps, ==, 4.0);
+	g_assert_cmpint(c->lrg_history_depth, ==, 8);
+	g_assert_true(c->lrg_reading_single_tab);
+
+	g_assert_true(gsurf_config_load_from_data(c,
+		"lrg:\n  arrangement: grid\n  environment: sky\n  background-fps: 10\n"
+		"  history-depth: 12\n  reading-single-tab: false\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_cmpstr(c->lrg_arrangement, ==, "grid");
+	g_assert_cmpstr(c->lrg_environment, ==, "sky");
+	g_assert_cmpfloat(c->lrg_background_fps, ==, 10.0);
+	g_assert_cmpint(c->lrg_history_depth, ==, 12);
+	g_assert_false(c->lrg_reading_single_tab);
+
+	g_assert_true(gsurf_config_load_from_data(c,
+		"lrg:\n  arrangement: ''\n  background-fps: 500\n  history-depth: 0\n",
+		-1, &error));
+	g_assert_no_error(error);
+	g_assert_null(c->lrg_arrangement);
+	g_assert_cmpstr(c->lrg_environment, ==, "sky");
+	g_assert_cmpfloat(c->lrg_background_fps, ==, 60.0);
+	g_assert_cmpint(c->lrg_history_depth, ==, 1);
+}
+
 static void
 test_do_not_track(void)
 {
@@ -238,6 +272,7 @@ main(int argc, char *argv[])
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/gsurf/config/defaults", test_defaults);
 	g_test_add_func("/gsurf/config/do-not-track", test_do_not_track);
+	g_test_add_func("/gsurf/config/lrg", test_lrg_block);
 	g_test_add_func("/gsurf/config/load-core", test_load_core);
 	g_test_add_func("/gsurf/config/keybinds", test_keybinds);
 	g_test_add_func("/gsurf/config/modules-node", test_modules_node);

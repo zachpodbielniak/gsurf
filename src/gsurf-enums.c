@@ -459,12 +459,18 @@ gsurf_lrg_spec_parse(const gchar *spec, GsurfLrgRenderMode *out_mode,
 	gboolean known;
 	guint i;
 
-	known = gsurf_lrg_render_mode_from_string(spec, out_mode);
+	/* MODE is the first token; ',' separates like ':' (the mode parser on its
+	 * own only knows ':'). */
+	if (spec != NULL && *spec != '\0') {
+		parts = g_strsplit_set(spec, ":,", -1);
+		known = gsurf_lrg_render_mode_from_string(parts[0], out_mode);
+	} else {
+		known = gsurf_lrg_render_mode_from_string(spec, out_mode);
+	}
 
 	/* Tokens after MODE: environment if it is a known environment id,
 	 * arrangement otherwise; the last of each kind wins. */
-	if (spec != NULL && *spec != '\0') {
-		parts = g_strsplit_set(spec, ":,", -1);
+	if (parts != NULL) {
 		for (i = 1; parts[i] != NULL; i++) {
 			gchar *tok = g_ascii_strdown(g_strstrip(parts[i]), -1);
 

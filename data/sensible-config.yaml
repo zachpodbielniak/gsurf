@@ -67,6 +67,16 @@ control:
   enabled: true
   # name: main                 # pick this instance with gsurfctl -i main
 
+# ===== 3D (--lrg=3d, docs/lrg-3d.org) =====
+# Every tab becomes a panel in a 3D scene.  --lrg=3d:ARRANGEMENT:ENVIRONMENT
+# on the command line overrides the two ids here.
+lrg:
+  arrangement: carousel            # carousel | grid | free | single-panel | stack
+  environment: studio              # studio | sky | workshop | cockpit | void
+  background-fps: 4                # refresh rate of visible background tabs (0.2-60)
+  history-depth: 8                 # back/forward pages shown in history depth (1-32)
+  reading-single-tab: true         # a lone tab opens in reading mode (flat, pixel-exact)
+
 # ===== Window =====
 window:
   title: gsurf
@@ -86,6 +96,22 @@ keybinds:
   "F11": toggle-fullscreen
   "Ctrl+q": quit
   "question": show-keybinds   # ? — live keybinding overlay
+  # --lrg=3d (docs/lrg-3d.org); elsewhere these keys pass through to the page.
+  "Alt+Shift+a": lrg-cycle-arrangement       # next arrangement (carousel, grid, free, single-panel)
+  "Alt+Shift+e": lrg-cycle-environment       # next environment (studio, sky, workshop, cockpit, void)
+  "Alt+Shift+r": lrg-reading                 # read the tab head-on, pixel-exact
+  "Alt+Shift+h": lrg-history                 # the tab's back/forward pages in depth
+  "Alt+Shift+f": lrg-focus                   # fly to the current tab
+  "Alt+Shift+p": lrg-pin                     # pin/unpin the current tab's panel
+  "Alt+Shift+u": lrg-unpin-all               # unpin every panel
+  "Alt+Shift+c": lrg-camera-reset            # default camera
+  "Alt+Shift+o": lrg-overview                # pull back until every tab shows
+  "Alt+Shift+Left": lrg-orbit-left
+  "Alt+Shift+Right": lrg-orbit-right
+  "Alt+Shift+Up": lrg-orbit-up
+  "Alt+Shift+Down": lrg-orbit-down
+  "Alt+Shift+z": lrg-zoom-in                 # camera closer
+  "Alt+Shift+x": lrg-zoom-out                # camera away
 
 mousebinds:
   "Button8": back
