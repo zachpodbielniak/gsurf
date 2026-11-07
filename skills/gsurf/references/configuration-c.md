@@ -20,6 +20,7 @@ Sources: `docs/c-config.org`, `data/default-config.c`, `data/sensible-config.c`,
 | `user_agent` | `gchar *` | `user_agent` (also call `gsurf_settings_set_user_agent(config->settings, ua)`) |
 | `window_title`, `window_width`, `window_height` | `gchar *`, `gint` | `window.title`, `window.geometry` |
 | `default_zoom`, `smooth_scroll`, `fullscreen_on_start` | `gdouble`, `gboolean` | `browser.*` |
+| `languages` | `gchar **` (NULL = the locale's) | `browser.languages` |
 | `cookie_jar`, `data_dir`, `cache_dir`, `enable_disk_cache` | `gchar *`, `gboolean` | `storage.*` |
 | `proxy_mode` (`default`/`none`/`custom`), `proxy_uri`, `do_not_track`, `tls_strict` | | `network.*`, `tls.strict` |
 | `settings->javascript`, `images`, `webgl`, `webaudio`, `media`, `media_stream`, `webrtc`, `plugins`, `smooth_scrolling`, `caret_browsing`, `dns_prefetch`, `hyperlink_auditing`, `site_quirks`, `developer_extras`, `js_can_open_windows`, `js_can_access_clipboard` | `gboolean` | `webkit.*` (note the `js_` prefix for the two `javascript_can_*` keys) |

@@ -53,6 +53,9 @@ G_DECLARE_FINAL_TYPE(GsurfConfig, gsurf_config, GSURF, CONFIG, GObject)
  *   depth (`lrg.history-depth`, default 8)
  * @lrg_reading_single_tab: open a lone tab in reading mode in 3D
  *   (`lrg.reading-single-tab`, default %TRUE)
+ * @languages: (array zero-terminated=1) (nullable): the languages pages
+ *   see, navigator.language and Accept-Language (`browser.languages`;
+ *   %NULL or empty: the locale's, en-US under the C locale; since 0.5.8)
  * @keybinds: (element-type utf8 gint): normalized "Mods+Key" -> #GsurfAction
  *
  * Public configuration struct. Fields are read directly by the rest of
@@ -108,6 +111,10 @@ struct _GsurfConfig
 	gdouble     lrg_background_fps;
 	gint        lrg_history_depth;
 	gboolean    lrg_reading_single_tab;
+
+	/* The languages pages see (`browser.languages`, since 0.5.8): BCP 47
+	 * tags, most preferred first; NULL or empty = the locale's. */
+	gchar     **languages;
 };
 
 /**

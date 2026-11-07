@@ -19,6 +19,10 @@ browser:
   default_zoom: 1.0                # 1.0 = 100%
   smooth_scroll: true
   fullscreen_on_start: false
+  # Languages pages see (navigator.language, Accept-Language), most
+  # preferred first, as BCP 47 tags: [en-US, de]. Empty = the locale's
+  # (LANGUAGE / LC_ALL / LC_MESSAGES / LANG); en-US under the C locale.
+  languages: []
 
 # Default user agent. Empty string = engine default UA.
 user_agent: ""

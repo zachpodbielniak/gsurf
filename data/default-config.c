@@ -50,6 +50,10 @@ gsurf_config_init(void)
 	/* config->control_enabled = FALSE; */
 	/* g_free(config->control_name); config->control_name = g_strdup("work"); */
 
+	/* --- Languages pages see (navigator.language, Accept-Language);
+	 *     NULL = the locale's, en-US under the C locale --- */
+	/* g_strfreev(config->languages); config->languages = g_strsplit("en-US,de", ",", -1); */
+
 	/* --- 3D (--lrg=3d, docs/lrg-3d.org) --- */
 	/* g_free(config->lrg_arrangement); config->lrg_arrangement = g_strdup("grid"); */
 	/* g_free(config->lrg_environment); config->lrg_environment = g_strdup("sky"); */

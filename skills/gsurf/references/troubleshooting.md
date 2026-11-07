@@ -77,5 +77,6 @@ Start with evidence: gsurf logs to stderr. `G_MESSAGES_DEBUG=all gsurf … 2>&1 
 - **`1.blob` files in the launch directory**: only gsurf older than the runtime-directory change wrote them; current gsurf runs in `$XDG_RUNTIME_DIR/gsurf/<pid>-XXXXXX`. Upgrade.
 - **MCP client cannot connect**: the module needs an `MCP=1` build, `modules.mcp.enabled: true`, the tool enabled under `tools:`, and the socket printed at activation (`$XDG_RUNTIME_DIR/gsurf-mcp-<pid or name>.sock`).
 - **`Transport error: Remote end closed connection`**: mcp-glib noise when an MCP client disconnects; harmless.
+- **`RangeError: invalid language tag: C`** (Intl; Forgejo's `webcomponents.js`): gsurf before 0.5.8 under `LANG=C.UTF-8` let WebKit report navigator.language `C`. 0.5.8+ uses `en-US` there; `browser.languages: [en-US, de]` sets the list (navigator.language + Accept-Language).
 - **Adblock lists missing**: `make adblock-lists` downloads them into `~/.config/gsurf/adblock/` (network access; ask first). Missing list files warn and are skipped.
 - **Card data refused by autofill**: the profile file must be a regular 0600 file owned by the user; the warning never prints the value. Do not open the file.

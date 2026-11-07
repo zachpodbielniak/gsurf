@@ -19,6 +19,7 @@ browser:
   default_zoom: 1.0
   smooth_scroll: true
   fullscreen_on_start: false
+  languages: []                    # [en-US, de]; empty = the locale's
 
 # Empty = engine default UA (the useragent module can override per-site).
 user_agent: ""

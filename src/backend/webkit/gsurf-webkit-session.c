@@ -11,6 +11,7 @@
 #include "config/gsurf-config.h"
 #include "core/gsurf-container-registry.h"
 #include "util/gsurf-private-file.h"
+#include "util/gsurf-languages.h"
 
 /* Map gsurf's cookie policy number onto WebKit's enum. */
 static WebKitCookieAcceptPolicy
@@ -40,6 +41,19 @@ set_cookie_storage(WebKitCookieManager *cm, const gchar *path)
 	}
 	webkit_cookie_manager_set_persistent_storage(cm, path,
 		WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+}
+
+void
+gsurf_webkit_session_apply_languages(WebKitWebContext *ctx)
+{
+	GsurfConfig *cfg = gsurf_config_get_default();
+	g_auto(GStrv) languages = NULL;
+
+	if (ctx == NULL)
+		return;
+	languages = gsurf_languages_resolve(cfg != NULL ?
+		(const gchar * const *)cfg->languages : NULL);
+	webkit_web_context_set_preferred_languages(ctx, (const gchar * const *)languages);
 }
 
 /* The proxy for a session: @proxy is a container's (a URL, or
@@ -149,6 +163,8 @@ gsurf_webkit_session_prepare_default(void)
 	webkit_web_context_set_cache_model(ctx,
 		cfg->enable_disk_cache ? WEBKIT_CACHE_MODEL_WEB_BROWSER
 		                       : WEBKIT_CACHE_MODEL_DOCUMENT_VIEWER);
+	/* One web context in 6.0: containers differ in network sessions. */
+	gsurf_webkit_session_apply_languages(ctx);
 	prepare_session(webkit_network_session_get_default(),
 		cfg->ephemeral ? NULL : cfg->cookie_jar);
 }
@@ -200,6 +216,7 @@ prepare_context(WebKitWebContext *ctx, const gchar *cookie_path)
 	G_GNUC_END_IGNORE_DEPRECATIONS
 	/* The global proxy; a container with its own gets apply_proxy next. */
 	context_set_proxy(ctx, NULL, NULL);
+	gsurf_webkit_session_apply_languages(ctx);
 }
 
 static void

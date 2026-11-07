@@ -143,6 +143,48 @@ parse_mousebinds(GsurfConfig *self, YamlMapping *mb)
 	g_list_free(keys);
 }
 
+/* browser.languages: a list ("[en-US, de]") or one string ("en-US, de");
+ * an empty list goes back to the locale's. The tags are checked when
+ * they are applied (gsurf_languages_resolve()). */
+static void
+parse_languages(GsurfConfig *self, YamlMapping *browser)
+{
+	YamlNode *node = yaml_mapping_get_member(browser, "languages");
+	g_autoptr(GPtrArray) list = g_ptr_array_new_with_free_func(g_free);
+	guint i;
+
+	if (node == NULL)
+		return;
+	if (yaml_node_get_node_type(node) == YAML_NODE_SEQUENCE) {
+		YamlSequence *seq = yaml_mapping_get_sequence_member(browser, "languages");
+
+		for (i = 0; seq != NULL && i < yaml_sequence_get_length(seq); i++) {
+			YamlNode *item = yaml_sequence_get_element(seq, i);
+
+			if (item != NULL && yaml_node_get_node_type(item) == YAML_NODE_SCALAR &&
+			    yaml_node_get_string(item) != NULL)
+				g_ptr_array_add(list, g_strstrip(g_strdup(yaml_node_get_string(item))));
+		}
+	} else if (yaml_node_get_node_type(node) == YAML_NODE_SCALAR &&
+	           yaml_node_get_string(node) != NULL) {
+		g_auto(GStrv) parts = g_strsplit(yaml_node_get_string(node), ",", -1);
+
+		for (i = 0; parts[i] != NULL; i++) {
+			g_strstrip(parts[i]);
+			if (*parts[i] != '\0')
+				g_ptr_array_add(list, g_strdup(parts[i]));
+		}
+	} else {
+		g_warning("gsurf: browser.languages must be a list of language tags");
+		return;
+	}
+	g_clear_pointer(&self->languages, g_strfreev);
+	if (list->len == 0)
+		return;
+	g_ptr_array_add(list, NULL);
+	self->languages = (gchar **)g_ptr_array_free(g_steal_pointer(&list), FALSE);
+}
+
 static void
 parse_root(GsurfConfig *self, YamlMapping *root)
 {
@@ -172,6 +214,8 @@ parse_root(GsurfConfig *self, YamlMapping *root)
 			self->smooth_scroll = yaml_mapping_get_boolean_member(m, "smooth_scroll");
 		if (yaml_mapping_has_member(m, "fullscreen_on_start"))
 			self->fullscreen_on_start = yaml_mapping_get_boolean_member(m, "fullscreen_on_start");
+		if (yaml_mapping_has_member(m, "languages"))
+			parse_languages(self, m);
 	}
 
 	/* user_agent: (top level) */
@@ -506,6 +550,7 @@ gsurf_config_finalize(GObject *object)
 	g_clear_pointer(&self->control_name, g_free);
 	g_clear_pointer(&self->lrg_arrangement, g_free);
 	g_clear_pointer(&self->lrg_environment, g_free);
+	g_clear_pointer(&self->languages, g_strfreev);
 	g_clear_pointer(&self->modules_mapping, yaml_mapping_unref);
 	g_clear_object(&self->settings);
 
