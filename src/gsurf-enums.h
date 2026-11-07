@@ -402,7 +402,7 @@ typedef enum {
 	/* Open the hovered link in a new tab, a child of the current one,
 	 * without leaving the current one (since 0.4.2) */
 	GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND,
-	/* The --lrg=3d tab space (since 0.6); no-ops in other windows */
+	/* The --lrg=3d tab space (since 0.5.1); no-ops in other windows */
 	GSURF_ACTION_LRG_CYCLE_ARRANGEMENT,
 	GSURF_ACTION_LRG_CYCLE_ENVIRONMENT,
 	GSURF_ACTION_LRG_READING,

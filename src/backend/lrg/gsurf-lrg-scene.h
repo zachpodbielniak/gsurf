@@ -568,6 +568,41 @@ gint64 gsurf_lrg_scene_refresh_interval(gboolean is_active, gfloat coverage,
                                         gdouble background_fps);
 
 /**
+ * GSURF_LRG_SCENE_DOUBLE_CLICK_US:
+ *
+ * The longest gap between the two clicks of a double click on a panel.
+ */
+#define GSURF_LRG_SCENE_DOUBLE_CLICK_US (450 * 1000)
+
+/**
+ * GSURF_LRG_SCENE_DOUBLE_CLICK_SLOP:
+ *
+ * How far (window pixels, per axis) the second click may land from the first.
+ */
+#define GSURF_LRG_SCENE_DOUBLE_CLICK_SLOP 8.0f
+
+/**
+ * gsurf_lrg_scene_is_double_click:
+ * @prev_view: (nullable): the tab the previous click hit (compared only)
+ * @prev_us: when it happened (monotonic microseconds)
+ * @prev_x: where (window pixels)
+ * @prev_y: where (window pixels)
+ * @view: (nullable): the tab this click hit (compared only)
+ * @now_us: when it happens
+ * @x: where
+ * @y: where
+ *
+ * The double-click rule that reads a tab: both clicks on the same tab,
+ * within %GSURF_LRG_SCENE_DOUBLE_CLICK_US and %GSURF_LRG_SCENE_DOUBLE_CLICK_SLOP.
+ *
+ * Returns: %TRUE if this click completes a double click
+ */
+gboolean gsurf_lrg_scene_is_double_click(gconstpointer prev_view, gint64 prev_us,
+                                         gfloat prev_x, gfloat prev_y,
+                                         gconstpointer view, gint64 now_us,
+                                         gfloat x, gfloat y);
+
+/**
  * gsurf_lrg_scene_history_key:
  * @offset: steps from the current page (negative = back), non-zero
  *

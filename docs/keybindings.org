@@ -54,7 +54,7 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =o= / =Ctrl+l= | open-prompt       |
 | =Ctrl+e= / =Ctrl+y= | scroll down/up |
 
-The 3D tab space (=gsurf --lrg=3d=, since 0.6) adds =Alt+Shift= bindings to the core table. Outside a 3D window the actions do nothing and report "not handled", so these keys reach the page there:
+The 3D tab space (=gsurf --lrg=3d=, since 0.5.1) adds =Alt+Shift= bindings to the core table. Outside a 3D window the actions do nothing and report "not handled", so these keys reach the page there:
 
 | Key            | Action                  | In the 3D scene |
 |----------------+-------------------------+-----------------|
@@ -70,7 +70,7 @@ The 3D tab space (=gsurf --lrg=3d=, since 0.6) adds =Alt+Shift= bindings to the 
 | =Alt+Shift+Left/Right/Up/Down= | lrg-orbit-{left,right,up,down} | orbit the camera 15 degrees |
 | =Alt+Shift+z= / =Alt+Shift+x= | lrg-zoom-in / lrg-zoom-out | camera closer / away |
 
-The pointer has its own 3D gestures (middle-drag orbits, =Ctrl+click= flies to a tab, =Ctrl+double-click= reads it, =Ctrl+middle-drag= moves and pins a panel); =Ctrl+left= is taken by them in 3D, so the default =Ctrl+Button1= mousebind does not fire there. See [[file:lrg-3d.org][lrg-3d.org]].
+The pointer has its own 3D gestures (middle-drag orbits, =Ctrl+click= flies to a tab, a double click (or =Ctrl+double-click=) reads it, as does =gf= in NORMAL mode, =Ctrl+middle-drag= moves and pins a panel); =Ctrl+left= is taken by them in 3D, so the default =Ctrl+Button1= mousebind does not fire there. See [[file:lrg-3d.org][lrg-3d.org]].
 
 Module default keys outside the core table include =Ctrl+Alt+f= (=form_autofill=, off by default): fill the focused form from the one autofill profile, or open the profile picker when there are several. It must carry =Ctrl=, =Alt= or =Super= because bare keys reach the page while a field is focused; see [[file:form-autofill.org][form-autofill.org]].
 

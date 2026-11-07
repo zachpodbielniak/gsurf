@@ -44,7 +44,7 @@ G_DECLARE_FINAL_TYPE(GsurfConfig, gsurf_config, GSURF, CONFIG, GObject)
  * @control_name: (nullable): the instance name the control socket
  *   registers (`control.name`, since 0.5)
  * @lrg_arrangement: (nullable): `--lrg=3d` tab arrangement (`lrg.arrangement`;
- *   %NULL: carousel; since 0.6)
+ *   %NULL: carousel; since 0.5.1)
  * @lrg_environment: (nullable): `--lrg=3d` environment (`lrg.environment`;
  *   %NULL: studio)
  * @lrg_background_fps: refresh rate of visible background tabs in 3D
@@ -101,7 +101,7 @@ struct _GsurfConfig
 	gboolean    control_enabled;
 	gchar      *control_name;
 
-	/* The --lrg=3d scene (`lrg:`, since 0.6; docs/lrg-3d.org).  The spec
+	/* The --lrg=3d scene (`lrg:`, since 0.5.1; docs/lrg-3d.org).  The spec
 	 * tokens of --lrg=3d:ARRANGEMENT:ENVIRONMENT override the two ids. */
 	gchar      *lrg_arrangement;
 	gchar      *lrg_environment;

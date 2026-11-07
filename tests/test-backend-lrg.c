@@ -248,6 +248,28 @@ test_scene_refresh_interval(void)
 }
 
 static void
+test_scene_double_click(void)
+{
+	gint a = 0, b = 0;
+	const gint64 t = 10 * G_USEC_PER_SEC;
+
+	/* Same tab, quick, close: a double click. */
+	g_assert_true(gsurf_lrg_scene_is_double_click(&a, t, 100, 100, &a,
+		t + 200 * 1000, 104, 97));
+	/* Too slow, too far, another tab, nothing before, time going back. */
+	g_assert_false(gsurf_lrg_scene_is_double_click(&a, t, 100, 100, &a,
+		t + GSURF_LRG_SCENE_DOUBLE_CLICK_US, 100, 100));
+	g_assert_false(gsurf_lrg_scene_is_double_click(&a, t, 100, 100, &a,
+		t + 1000, 120, 100));
+	g_assert_false(gsurf_lrg_scene_is_double_click(&a, t, 100, 100, &b,
+		t + 1000, 100, 100));
+	g_assert_false(gsurf_lrg_scene_is_double_click(NULL, 0, 0, 0, NULL,
+		t, 0, 0));
+	g_assert_false(gsurf_lrg_scene_is_double_click(&a, t, 100, 100, &a,
+		t - 1000, 100, 100));
+}
+
+static void
 test_scene_history_keys(void)
 {
 	gint offsets[] = { -32, -1, 1, 7, 32 };
@@ -472,6 +494,7 @@ main(int argc, char *argv[])
 #ifdef GSURF_HAVE_LRG_3D
 	g_test_add_func("/gsurf/lrg/scene/refresh-interval", test_scene_refresh_interval);
 	g_test_add_func("/gsurf/lrg/scene/history-keys", test_scene_history_keys);
+	g_test_add_func("/gsurf/lrg/scene/double-click", test_scene_double_click);
 	g_test_add_func("/gsurf/lrg/scene/live", test_scene_live);
 #endif
 	return g_test_run();

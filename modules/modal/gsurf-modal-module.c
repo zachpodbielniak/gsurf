@@ -338,7 +338,8 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	}
 
 	/* Chords beginning with 'g': gg -> top, gt -> next tab, gT -> prev
-	 * tab, gi -> first text field + INSERT. */
+	 * tab, gi -> first text field + INSERT, gf -> read the tab full-frame
+	 * in --lrg=3d (toggle). */
 	if (self->pending_g) {
 		self->pending_g = FALSE;
 		if (g_strcmp0(name, "g") == 0) {
@@ -362,6 +363,14 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 			modal_switch_view(-1);
 			return TRUE;
 		}
+		/* gf: the 3D reading view (fly head-on, full-frame, then the flat
+		 * pixel-exact page; again to fly back).  Outside a 3D window
+		 * nothing performs the action, so 'f' falls through to hints. */
+		if (g_strcmp0(name, "f") == 0
+		    && gsurf_module_manager_execute_action(
+		           gsurf_module_manager_get_default(), NULL, view,
+		           GSURF_ACTION_LRG_READING, NULL))
+			return TRUE;
 		/* fall through: 'g' then other key — treat the new key normally */
 	}
 
@@ -483,6 +492,8 @@ gsurf_modal_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
 	gsurf_keybind_help_append(entries, "r", "Reload the page", "modal", "reload");
 	gsurf_keybind_help_append(entries, "gt", "Next tab", "modal", "tab-next");
 	gsurf_keybind_help_append(entries, "gT", "Previous tab", "modal", "tab-prev");
+	gsurf_keybind_help_append(entries, "gf",
+		"3D: read the tab full-frame (again: back out)", "modal", "lrg-reading");
 }
 
 static void
