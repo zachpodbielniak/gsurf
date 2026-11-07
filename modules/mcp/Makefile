@@ -15,7 +15,7 @@ LIBGSURF_LINK ?= -L$(LIBDIR) -lgsurf
 
 all: $(OUTDIR)/$(MODULE_NAME).so
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(wildcard *.h) $(GSURF_HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(MCP_CFLAGS) $(LDFLAGS) -o $@ $(SRCS) \
 		$(LIBGSURF_LINK) $(MCP_LDFLAGS)
