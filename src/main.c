@@ -702,11 +702,38 @@ main(int argc, char *argv[])
 
 	context = g_option_context_new("[URI] - GObject Surf web browser");
 	g_option_context_set_description(context,
+		"3D tab space (--lrg=3d[:ARRANGEMENT][:ENVIRONMENT], tokens in any order):\n"
+#ifndef GSURF_HAVE_LRG_3D
+		"  (not in this build: needs LRG_BACKEND=1 LRG_3D=1)\n"
+#endif
+		"  Arrangements (how the tabs are laid out):\n"
+		"    carousel      a ring around you, the active tab in front (default)\n"
+		"    grid          a curved wall of rows and columns\n"
+		"    stack         a deck: active tab in front, others receding to the sides\n"
+		"    free          a loose row; drag panels anywhere and they stay pinned\n"
+		"    single-panel  (by name only; meant for cmacs)\n"
+		"    per-window    (by name only; meant for cmacs)\n"
+		"  Environments (the room around them):\n"
+		"    studio        neutral grey with a ringed floor (default)\n"
+		"    sky           sky dome following the time of day, ground grid\n"
+		"    workshop      dark room with a grid floor\n"
+		"    cockpit       enclosed grid room\n"
+		"    void          plain dark background\n"
+		"  Controls: double-click a tab or gf to read it full-frame (gf again: back);\n"
+		"    Alt+Shift+a / Alt+Shift+e cycle arrangement / environment;\n"
+		"    Alt+Shift+h history depth; Alt+Shift+o overview; Alt+Shift+c camera reset;\n"
+		"    middle-drag orbit, Ctrl+wheel zoom, Ctrl+middle-drag move and pin a tab.\n"
+		"  Defaults come from the lrg: config block; gsurfctl 3d* drives a running\n"
+		"  window.  Full reference: docs/lrg-3d.org.\n"
+		"\n"
 		"Examples:\n  gsurf --kiosk https://example.org\n"
 		"  gsurf ./page.html\n"
 		"  gsurf /usr/share/doc/index.html\n"
 		"  gsurf ~/notes/index.html\n"
 		"  gsurf file:///tmp/page.html\n"
+		"  gsurf --lrg=3d https://example.org\n"
+		"  gsurf --lrg=3d:grid:sky https://example.org\n"
+		"  gsurf --lrg=3d:stack:workshop\n"
 		"  gsurf --pwa --pwa-name Mail https://mail.example.org\n"
 		"  sudo gsurf --pwa https://example.org");
 	g_option_context_add_main_entries(context, entries, NULL);
