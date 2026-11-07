@@ -65,7 +65,25 @@ typedef struct {
 	GtkWidget *toplevel;
 	guint prompts;        /* open-prompt reached the core keymap */
 	gboolean consumed;    /* what the key routing returned last */
+	guint reads;          /* lrg-reading reached the host executor */
+	gboolean read_ok;     /* whether the executor "performed" it (3D) */
 } H;
+
+/* A stand-in for main.c's executor: counts lrg-reading (the 3D reading view
+ * `gf` asks for) and performs it only when the test says the window is 3D. */
+static gboolean
+record_action(GsurfWindow *window, GsurfView *view, GsurfAction action,
+              gpointer user_data)
+{
+	H *h = user_data;
+
+	(void)window;
+	(void)view;
+	if (action != GSURF_ACTION_LRG_READING)
+		return FALSE;
+	h->reads++;
+	return h->read_ok;
+}
 
 /* A copy of main.c's on_key_press routing (see the header). */
 static gboolean
@@ -371,6 +389,24 @@ test_modes(void)
 
 		g_assert_cmpstr(active, !=, "plain");
 	}
+
+	/* 6. `gf` asks the host for the 3D reading view (lrg-reading).  In a 3D
+	 *    window the chord is consumed; elsewhere nothing performs it and
+	 *    `f` falls through to link hints, as after any other `g`. */
+	gsurf_module_manager_set_action_executor(mgr, record_action, &h, NULL);
+	h.read_ok = TRUE;
+	press(&h, GDK_KEY_g);
+	press(&h, GDK_KEY_f);
+	g_assert_true(h.consumed);
+	g_assert_cmpuint(h.reads, ==, 1);
+	g_assert_false(inserting());
+	h.read_ok = FALSE;
+	press(&h, GDK_KEY_g);
+	press(&h, GDK_KEY_f);
+	g_assert_true(h.consumed);          /* f: hints */
+	g_assert_cmpuint(h.reads, ==, 2);
+	press(&h, GDK_KEY_Escape);          /* leave the hints */
+	gsurf_module_manager_set_action_executor(mgr, NULL, NULL, NULL);
 
 	gsurf_module_manager_deactivate_all(mgr);
 	gsurf_module_manager_set_application(mgr, NULL);

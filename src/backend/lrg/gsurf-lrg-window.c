@@ -60,7 +60,7 @@
 #define LRG_3D_DRAG_THRESHOLD 3.0f
 #define LRG_3D_ORBIT_DEG_PX   0.4f
 #define LRG_3D_LOOK_DEG_PX    0.25f
-#define LRG_3D_DOUBLE_US      (450 * 1000)
+#define LRG_3D_DOUBLE_US      GSURF_LRG_SCENE_DOUBLE_CLICK_US
 #define LRG_3D_DOLLY_STEP     0.9f
 /* Keyboard camera steps. */
 #define LRG_3D_ORBIT_STEP     15.0f
@@ -140,6 +140,11 @@ struct _GsurfLrgWindow
 	int        page_x, page_y;    /* last page pixel sent to page_view */
 	gint64     last_click_us;
 	GsurfView *last_click_view;   /* compared only, never dereferenced */
+
+	/* Plain left clicks, for the double click that reads a tab. */
+	gint64     plain_click_us;
+	GsurfView *plain_click_view;  /* compared only, never dereferenced */
+	gfloat     plain_click_x, plain_click_y;
 };
 
 G_DEFINE_FINAL_TYPE(GsurfLrgWindow, gsurf_lrg_window, GSURF_TYPE_WINDOW)
@@ -606,6 +611,17 @@ lrg3d_page_button(GsurfLrgWindow *self, GsurfView *view, int x, int y,
 	self->page_y = y;
 }
 
+/* Read @view: make it the active tab and fly head-on to it, full-frame;
+ * once the camera settles the flat path draws it pixel-exact. */
+static void
+lrg3d_read_view(GsurfLrgWindow *self, GsurfView *view)
+{
+	gsurf_window_set_active_view(GSURF_WINDOW(self), view);
+	gsurf_lrg_scene_note_active(self->scene, view);
+	gsurf_lrg_scene_set_reading(self->scene, TRUE);
+	gsurf_lrg_window_notify_scene(self, "reading");
+}
+
 /* A press that ended without moving: the click actions of the 3D gestures. */
 static void
 lrg3d_gesture_click(GsurfLrgWindow *self, guint button, GsurfView *view,
@@ -625,11 +641,10 @@ lrg3d_gesture_click(GsurfLrgWindow *self, guint button, GsurfView *view,
 	if (button == GSURF_BUTTON_PRIMARY && ctrl) {
 		/* Ctrl+click: fly to the tab and make it active; Ctrl+double-click:
 		 * read it (head-on, then pixel-exact). */
-		gsurf_window_set_active_view(win, view);
 		if (twice) {
-			gsurf_lrg_scene_set_reading(self->scene, TRUE);
-			gsurf_lrg_window_notify_scene(self, "reading");
+			lrg3d_read_view(self, view);
 		} else {
+			gsurf_window_set_active_view(win, view);
 			gsurf_lrg_scene_focus_view(self->scene, view);
 			gsurf_lrg_window_notify_scene(self, "focus");
 		}
@@ -765,6 +780,27 @@ lrg_window_forward_pointer_3d(GsurfLrgWindow *self, guint mods, int wx, int wy)
 					gsurf_lrg_window_notify_scene(self, "history");
 				}
 				continue;
+			}
+			/* A double click on a panel reads that tab: it becomes the
+			 * active one and the camera re-snaps head-on, full-frame, then
+			 * hands over to the pixel-exact flat view.  (The first click
+			 * already did its usual thing; the second is not forwarded.) */
+			if (b == GSURF_BUTTON_PRIMARY) {
+				gint64 now = g_get_monotonic_time();
+				gboolean twice = gsurf_lrg_scene_is_double_click(
+					self->plain_click_view, self->plain_click_us,
+					self->plain_click_x, self->plain_click_y,
+					pick.view, now, mx, my);
+
+				if (twice) {
+					self->plain_click_view = NULL;
+					lrg3d_read_view(self, pick.view);
+					continue;
+				}
+				self->plain_click_us = now;
+				self->plain_click_view = pick.view;
+				self->plain_click_x = mx;
+				self->plain_click_y = my;
 			}
 			/* A background tab: the first click brings it forward. */
 			if (pick.view != active && b == GSURF_BUTTON_PRIMARY) {

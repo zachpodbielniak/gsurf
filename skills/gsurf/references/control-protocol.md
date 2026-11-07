@@ -96,7 +96,7 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 
 `layout.*` go through the `GsurfWindowLayout` vfuncs: without a layout they fail -32002, in kiosk mode -32003.
 
-`lrg.*` (since 0.6) act on a `gsurf --lrg=3d` window; anywhere else, or in a build without the scene, they fail -32002. Every change also emits an `lrg.<what>` event. `config.get` knows `lrg.arrangement`, `lrg.environment`, `lrg.background-fps`, `lrg.history-depth`, `lrg.reading-single-tab`.
+`lrg.*` (since 0.5.1) act on a `gsurf --lrg=3d` window; anywhere else, or in a build without the scene, they fail -32002. Every change also emits an `lrg.<what>` event. `config.get` knows `lrg.arrangement`, `lrg.environment`, `lrg.background-fps`, `lrg.history-depth`, `lrg.reading-single-tab`.
 
 ## Events
 

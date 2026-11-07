@@ -138,6 +138,19 @@ gsurf_lrg_scene_refresh_interval(gboolean is_active, gfloat coverage,
 	return base;
 }
 
+gboolean
+gsurf_lrg_scene_is_double_click(gconstpointer prev_view, gint64 prev_us,
+                                gfloat prev_x, gfloat prev_y,
+                                gconstpointer view, gint64 now_us,
+                                gfloat x, gfloat y)
+{
+	return view != NULL && view == prev_view
+	    && now_us >= prev_us
+	    && now_us - prev_us < GSURF_LRG_SCENE_DOUBLE_CLICK_US
+	    && fabsf(x - prev_x) <= GSURF_LRG_SCENE_DOUBLE_CLICK_SLOP
+	    && fabsf(y - prev_y) <= GSURF_LRG_SCENE_DOUBLE_CLICK_SLOP;
+}
+
 guint64
 gsurf_lrg_scene_history_key(gint offset)
 {

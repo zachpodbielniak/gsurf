@@ -12,7 +12,7 @@ The point is a /tab space/ rather than a tab strip: you see what is open, groupe
 
 It is the same 3D surface cmacs uses for =emacs --lrg=3d= (lrgterm): libregnum's =Lrg3DSurface= from its =term/= module. Everything here is available from the keyboard (=Alt+Shift+...=), the pointer, the control socket (=lrg.*= methods and events) and =gsurfctl 3d*=.
 
-=3d= is implemented since 0.6. =3dvr= (stereo for VR headsets) is still reserved: gsurf accepts the word and refuses to start with it.
+=3d= is implemented since 0.5.1. =3dvr= (stereo for VR headsets) is still reserved: gsurf accepts the word and refuses to start with it.
 
 * Starting it
 
@@ -160,13 +160,13 @@ The environment is the room the panels stand in. It never changes how panels are
 
 * Reading mode
 
-Reading mode is for reading. Turning it on (=Alt+Shift+r=, =Ctrl+double-click= on a panel, =lrg.reading=, =gsurfctl 3d-reading on=):
+Reading mode is for reading. Turning it on (=Alt+Shift+r=, =gf= in the modal module's NORMAL mode, a double click on a panel, =lrg.reading=, =gsurfctl 3d-reading on=):
 
 1. remembers the current camera pose;
 2. flies the camera so the active tab's panel fills the view head-on, edge to edge;
 3. once the camera has settled (nothing is animating any more), the window stops rendering the scene and draws the active tab with the flat 2D path: the page texture blitted 1:1 under the address bar, pixel-exact, with the 2D input path (keys, clicks and the wheel go straight to the page, as in =--lrg=).
 
-Reading mode follows the active tab: switching tabs while reading (=Ctrl+Tab=, =gt=, =gsurfctl tab=, =Ctrl+double-click=, =lrg.focus=) keeps it on; the camera flies head-on to the new tab, then hands back to the pixel-exact flat path. Reading mode and history depth exclude each other: turning one on turns the other off. Turning reading off (the same toggles) flies back to the remembered camera. =lrg-camera-reset= also ends reading, but without returning to the old pose; =lrg-overview= and restoring a camera bookmark end it too.
+Reading mode follows the active tab: switching tabs while reading (=Ctrl+Tab=, =gt=, =gsurfctl tab=, a double click, =lrg.focus=) keeps it on; the camera flies head-on to the new tab, then hands back to the pixel-exact flat path. Reading mode and history depth exclude each other: turning one on turns the other off. Turning reading off (the same toggles) flies back to the remembered camera. =lrg-camera-reset= also ends reading, but without returning to the old pose; =lrg-overview= and restoring a camera bookmark end it too.
 
 History thumbnails keep being taken while you read flat, and screenshots (=lrg.screenshot=) capture the flat frame exactly as shown.
 
@@ -195,6 +195,7 @@ The pointer is ray-cast into the scene every frame. What it hits decides where a
 | Move | Hover goes to the tab under the pointer, at the page pixel the ray hits (link hover, CSS =:hover=), background tabs included. |
 | Left click on the active tab | A normal click on the page at that pixel. Mousebinds and modules see the press first. |
 | Left click on a background tab | Makes that tab active (the carousel spins to it); the click itself is not delivered. Emits =lrg.focus=. |
+| Double click on a panel (same tab, within 450 ms and 8 px) | Reads that tab: it becomes the active one and the camera re-snaps head-on, full-frame (in the carousel the ring spins it to the front first), then hands over to the pixel-exact flat view. The first click did its usual thing (on the active tab it reached the page); the second is not delivered. Leave with =gf= or =Alt+Shift+r=. |
 | Right click | Goes to the page under the pointer (after mousebinds and modules). |
 | Wheel | Scrolls the tab under the pointer, a background tab too. |
 | =Ctrl+wheel= | Dollies the camera (0.9 of the distance per notch toward the scene). |
@@ -202,7 +203,7 @@ The pointer is ray-cast into the scene every frame. What it hits decides where a
 | Middle click (no drag) | Delivered after the drag check: first to mousebinds and modules (the default =Button2= is =open-new-view-background=, open the link in a background tab), else to the page as a middle press and release (X11 paste). |
 | =Ctrl+left drag= (or =Super+left drag=) | Turns the view in place (look around, 0.25 degrees per pixel). |
 | =Ctrl+click= | Makes the tab active and flies the camera to frame it. |
-| =Ctrl+double-click= (same tab, within 450 ms) | Makes the tab active and enters reading mode. |
+| =Ctrl+double-click= (same tab, within 450 ms) | The same as a double click, without the first click reaching the page. |
 | =Ctrl+middle drag= or =Super+middle drag= on a panel | Moves that panel under the pointer; dropping it pins it there. Started over empty space it orbits instead. |
 | Left click on a history thumbnail | Jumps there and leaves history depth. |
 
@@ -212,13 +213,13 @@ A press goes to a page's tab together with its release: a release follows its pr
 
 * Keyboard
 
-Keys go to the active tab as in 2D. The scene's own actions are ordinary key-binding actions (since 0.6):
+Keys go to the active tab as in 2D. The scene's own actions are ordinary key-binding actions (since 0.5.1):
 
 | Default key | Action | Effect |
 |-------------+--------+--------|
 | =Alt+Shift+a= | =lrg-cycle-arrangement= | the next arrangement (carousel, grid, stack, free) |
 | =Alt+Shift+e= | =lrg-cycle-environment= | the next environment (studio, sky, workshop, cockpit, void) |
-| =Alt+Shift+r= | =lrg-reading= | reading mode on/off |
+| =Alt+Shift+r= | =lrg-reading= | reading mode on/off (also =gf= in the modal module's NORMAL mode) |
 | =Alt+Shift+h= | =lrg-history= | history depth on/off |
 | =Alt+Shift+f= | =lrg-focus= | fly the camera to the active tab |
 | =Alt+Shift+p= | =lrg-pin= | pin the active tab's panel where it is, or unpin it |

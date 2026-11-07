@@ -87,7 +87,7 @@ Actions with no built-in implementation (`open-prompt`, `find`, `tab-*`, `follow
 | NORMAL (start) | `Escape`, `start_mode: normal` | bare letters are commands, except while a text field or the address bar has focus |
 | INSERT | `i` / `a` (`insert_keys`), `gi` (focus the first text field), `enter-insert-mode` | every bare key goes to the page (web apps' own shortcuts) |
 
-NORMAL keys: `h j k l` scroll, `d` / `u` half page, `gg` / `G` top / bottom, `H` / `L` back / forward, `r` reload, `gt` / `gT` next / previous tab, `f` link hints, `F` hint into a new tab, `gi` focus input. `Escape` in INSERT returns to NORMAL and blurs the field. Focus is tracked in every frame and open shadow roots, so typing into a field never needs `i` first. Closed shadow roots are opaque: use `i`.
+NORMAL keys: `h j k l` scroll, `d` / `u` half page, `gg` / `G` top / bottom, `H` / `L` back / forward, `r` reload, `gt` / `gT` next / previous tab, `gf` read the tab full-frame in `--lrg=3d` (toggle; elsewhere `f` hints as usual), `f` link hints, `F` hint into a new tab, `gi` focus input. `Escape` in INSERT returns to NORMAL and blurs the field. Focus is tracked in every frame and open shadow roots, so typing into a field never needs `i` first. Closed shadow roots are opaque: use `i`.
 
 Link hints: labels from `hint_chars` grow to 2-4 characters as targets increase; typing narrows, a unique match is clicked, `Escape` cancels. Mode indicators (`-- INSERT --`) show in the chromebar and the wmux status line; tune them with `mode_indicator`, `mode_hide_normal` and the three `mode_*_color` keys in each module.
 
@@ -110,6 +110,7 @@ Source: `docs/lrg-3d.org`. `gsurf --lrg=3d[:ARRANGEMENT][:ENVIRONMENT] URL` (a `
 | middle drag | orbit the room |
 | middle click (no drag) | `Button2` mousebind (open link in background tab), else the page |
 | `Ctrl+left` drag | look around in place |
+| double click on a panel / `gf` | read that tab: re-snap head-on, full-frame, then pixel-exact (`gf` again backs out) |
 | `Ctrl+click` / `Ctrl+double-click` | fly to that tab / read it |
 | `Ctrl+middle` (or `Super+middle`) drag on a panel | move it; the drop pins it |
 | `Ctrl+wheel` | dolly the camera |
