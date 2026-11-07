@@ -174,6 +174,87 @@ test_foreign_active_view(void)
 	g_assert_cmpuint(changes, ==, 2);
 }
 
+/* What a button-press handler saw during gsurf_window_emit_wheel(). */
+typedef struct {
+	guint      buttons[16];
+	guint      states[16];
+	GsurfView *pointer[16];
+	guint      n;
+	gboolean   consume;   /* the handler's answer */
+} WheelLog;
+
+static gboolean
+wheel_pressed(GsurfWindow *window, guint button, guint state, gpointer data)
+{
+	WheelLog *log = data;
+
+	g_assert_cmpuint(log->n, <, G_N_ELEMENTS(log->buttons));
+	log->buttons[log->n] = button;
+	log->states[log->n] = state;
+	log->pointer[log->n] = gsurf_window_get_pointer_view(window);
+	log->n++;
+	return log->consume;
+}
+
+/* gsurf_window_emit_wheel(): notches become wheel buttons 4-7 with the
+ * pointer view set; fractional travel adds up; an unbound wheel is not
+ * consumed (the page scrolls). */
+static void
+test_wheel(void)
+{
+	g_autoptr(GsurfWindow) window = g_object_new(test_lifetime_window_get_type(), NULL);
+	g_autoptr(GsurfView) view = g_object_new(test_lifetime_view_get_type(), NULL);
+	WheelLog log = { { 0 }, { 0 }, { NULL }, 0, TRUE };
+
+	g_signal_connect(window, "button-press", G_CALLBACK(wheel_pressed), &log);
+
+	/* 1. A mouse wheel: each notch is a press, up = 4, down = 5, with the
+	 *    view under the pointer; it is unset again afterwards. */
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -1.0, GSURF_MOD_CTRL));
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -1.0, GSURF_MOD_CTRL));
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, 1.0, GSURF_MOD_CTRL));
+	g_assert_cmpuint(log.n, ==, 3);
+	g_assert_cmpuint(log.buttons[0], ==, GSURF_BUTTON_WHEEL_UP);
+	g_assert_cmpuint(log.buttons[1], ==, GSURF_BUTTON_WHEEL_UP);
+	g_assert_cmpuint(log.buttons[2], ==, GSURF_BUTTON_WHEEL_DOWN);
+	g_assert_cmpuint(log.states[0], ==, GSURF_MOD_CTRL);
+	g_assert_true(log.pointer[0] == view);
+	g_assert_null(gsurf_window_get_pointer_view(window));
+
+	/* 2. Horizontal: the dominant axis picks 6 / 7. */
+	log.n = 0;
+	gsurf_window_emit_wheel(window, NULL, -1.0, 0.2, 0);
+	gsurf_window_emit_wheel(window, NULL, 1.0, 0.0, 0);
+	g_assert_cmpuint(log.n, ==, 2);
+	g_assert_cmpuint(log.buttons[0], ==, GSURF_BUTTON_WHEEL_LEFT);
+	g_assert_cmpuint(log.buttons[1], ==, GSURF_BUTTON_WHEEL_RIGHT);
+	g_assert_null(log.pointer[0]);
+
+	/* 3. A touchpad: the first delta in a direction is a notch at once,
+	 *    then a notch per whole unit; between notches the scroll stays
+	 *    consumed (the page must not move under a zoom). */
+	log.n = 0;
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -0.25, GSURF_MOD_CTRL));
+	g_assert_cmpuint(log.n, ==, 1);
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -0.25, GSURF_MOD_CTRL));
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -0.25, GSURF_MOD_CTRL));
+	g_assert_cmpuint(log.n, ==, 1);
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -0.5, GSURF_MOD_CTRL));
+	g_assert_cmpuint(log.n, ==, 2);
+	/* Other modifiers start over: a notch at once. */
+	g_assert_true(gsurf_window_emit_wheel(window, view, 0.0, -0.25, 0));
+	g_assert_cmpuint(log.n, ==, 3);
+
+	/* 4. Unbound (the handler declines): not consumed, notch or not, so
+	 *    the page scrolls; no zero-length event is emitted. */
+	log.n = 0;
+	log.consume = FALSE;
+	g_assert_false(gsurf_window_emit_wheel(window, view, 0.0, 1.0, 0));
+	g_assert_false(gsurf_window_emit_wheel(window, view, 0.0, 0.25, 0));
+	g_assert_false(gsurf_window_emit_wheel(window, view, 0.0, 0.0, 0));
+	g_assert_cmpuint(log.n, ==, 1);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -183,5 +264,6 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/window/duplicate-view", test_duplicate_view);
 	g_test_add_func("/gsurf/window/duplicate-window", test_duplicate_window);
 	g_test_add_func("/gsurf/window/foreign-active-view", test_foreign_active_view);
+	g_test_add_func("/gsurf/window/wheel", test_wheel);
 	return g_test_run();
 }

@@ -266,6 +266,48 @@ test_default_singleton(void)
 	g_assert_null(gsurf_config_get_default());
 }
 
+/* "none" (any case) in a later layer removes a binding an earlier one made
+ * (the built-in defaults); an unknown action name leaves it alone. */
+static void
+test_yaml_unbind(void)
+{
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_true(gsurf_config_load_from_data(c,
+		"keybinds:\n  \"Ctrl+r\": reload\n  \"Ctrl+l\": open-prompt\n"
+		"mousebinds:\n  \"Ctrl+Button4\": zoom-in\n  \"Ctrl+Button5\": zoom-out\n"
+		"  \"Button8\": back\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_true(gsurf_config_load_from_data(c,
+		"keybinds:\n  \"Ctrl+r\": none\n  \"Ctrl+l\": not-an-action\n"
+		"mousebinds:\n  \"Ctrl+Button4\": none\n  \"Ctrl+Button5\": NONE\n"
+		"  \"Button8\": bogus\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+r"), ==, GSURF_ACTION_NONE);
+	g_assert_cmpint(gsurf_config_get_keybind_action(c, "Ctrl+l"), ==, GSURF_ACTION_OPEN_PROMPT);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Ctrl+Button4"), ==, GSURF_ACTION_NONE);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Ctrl+Button5"), ==, GSURF_ACTION_NONE);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button8"), ==, GSURF_ACTION_BACK);
+}
+
+/* The shipped defaults zoom on Ctrl+wheel (buttons 4 and 5). */
+static void
+test_default_wheel_zoom(void)
+{
+	g_autofree gchar *exe = g_file_read_link("/proc/self/exe", NULL);
+	g_autofree gchar *dir = g_path_get_dirname(exe);
+	g_autofree gchar *path = g_build_filename(dir, "..", "..", "data", "default-config.yaml", NULL);
+	g_autoptr(GsurfConfig) c = gsurf_config_new();
+	g_autoptr(GError) error = NULL;
+
+	g_assert_true(gsurf_config_load_from_file(c, path, &error));
+	g_assert_no_error(error);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Ctrl+Button4"), ==, GSURF_ACTION_ZOOM_IN);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Ctrl+Button5"), ==, GSURF_ACTION_ZOOM_OUT);
+	g_assert_cmpint(gsurf_config_get_mousebind_action(c, "Button5"), ==, GSURF_ACTION_NONE);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -280,6 +322,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/config/override", test_override);
 	g_test_add_func("/gsurf/config/ignore-yaml", test_ignore_yaml);
 	g_test_add_func("/gsurf/config/set-binds", test_set_binds);
+	g_test_add_func("/gsurf/config/yaml-unbind", test_yaml_unbind);
+	g_test_add_func("/gsurf/config/default-wheel-zoom", test_default_wheel_zoom);
 	g_test_add_func("/gsurf/config/non-mapping-root", test_non_mapping_root);
 	g_test_add_func("/gsurf/config/default-singleton", test_default_singleton);
 	return g_test_run();

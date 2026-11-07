@@ -487,7 +487,10 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view,
 	 * raw wheel ticks; the engine converts each tick to one discrete scroll
 	 * step (a px multiplier here over-scrolled badly). */
 	wheel = grl_input_get_mouse_wheel_move();
-	if (in_body && wheel != 0.0f)
+	/* The window sees the notch first (wheel buttons 4-7), so a mousebind
+	 * consumes it: Ctrl+wheel zooms the page by default. */
+	if (in_body && wheel != 0.0f &&
+	    !gsurf_window_emit_wheel(GSURF_WINDOW(self), GSURF_VIEW(view), 0.0, -wheel, mods))
 		gsurf_lrg_view_send_axis(view, px, py, 0.0, -wheel, mods);
 
 #ifdef GSURF_HAVE_LRG_3D

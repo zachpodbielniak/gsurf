@@ -445,9 +445,14 @@ on_button_press(GsurfWindow *window, guint button, guint state, gpointer user_da
 	GsurfApplication *app = user_data;
 	GsurfConfig *config = gsurf_application_get_config(app);
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
-	GsurfView *view = gsurf_window_get_active_view(window);
+	GsurfView *view = gsurf_window_get_pointer_view(window);
 	g_autofree gchar *binding = NULL;
 	GsurfAction action;
+
+	/* A wheel notch acts on the view under the pointer (a wmux pane);
+	 * every other button on the active view. */
+	if (view == NULL)
+		view = gsurf_window_get_active_view(window);
 
 	/* Modules get first crack at the raw button. */
 	if (gsurf_module_manager_dispatch_mouse_event(mgr, view, button, state))

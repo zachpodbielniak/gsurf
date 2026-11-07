@@ -68,6 +68,7 @@ gsurf_config_init(void)
 	/* gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS); */
 	/* gsurf_config_set_keybind(config, "Alt+Shift+a", GSURF_ACTION_LRG_CYCLE_ARRANGEMENT); */
 	/* gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK); */
+	/* gsurf_config_set_mousebind(config, "Ctrl+Button4", GSURF_ACTION_NONE); (no Ctrl+wheel zoom) */
 
 	/* --- Module options can be supplied as embedded YAML via
 	 *     gsurf_config_load_from_data(), as in sensible-config.c.

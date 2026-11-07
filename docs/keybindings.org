@@ -36,6 +36,20 @@ Punctuation follows the same idea. GDK reports a shifted punctuation key as its 
 Values are action nicks (see =gsurf --generate-yaml-config=). Both =-= and =_=
 separators are accepted (=reload-nocache= or =reload_nocache=).
 
+The value =none= removes a binding an earlier layer made: the built-in defaults are loaded first and your file over them, so =keybinds: { "Ctrl+r": none }= unbinds =Ctrl+r= (since 0.5.7). Any other unknown action name is ignored and the earlier binding stays.
+
+** Mouse buttons and the wheel
+
+=mousebinds:= takes =[Mods+]ButtonN= strings, written with a capital =B= (=Button2=, =Ctrl+Button1=): =Button1= left, =Button2= middle, =Button3= right, =Button8= / =Button9= the thumb buttons. The wheel is buttons 4 to 7, the X11 convention: =Button4= up, =Button5= down, =Button6= left, =Button7= right (since 0.5.7). Each wheel notch is one press. A touchpad's small scroll steps add up to notches; the first step in a new direction, or with other modifiers held, counts as a notch at once. A wheel binding applies to the tab under the pointer (a =wmux= pane that does not have the focus), and it consumes the scroll, so the page does not move. An unbound wheel scrolls the page as usual. This works the same on GTK3, GTK4 and =--lrg=2d=; =--lrg=3d= keeps =Ctrl+wheel= for its camera dolly, but its flat reading view zooms the page.
+
+The defaults bind =Ctrl+Button4= to =zoom-in= and =Ctrl+Button5= to =zoom-out=, so =Ctrl+wheel= zooms the page like other browsers (in steps of 10%, as =Ctrl+plus= / =Ctrl+minus= do). Turn it off with:
+
+#+begin_src yaml
+mousebinds:
+  "Ctrl+Button4": none
+  "Ctrl+Button5": none
+#+end_src
+
 * Default bindings (core table)
 
 | Key            | Action            |
@@ -46,6 +60,7 @@ separators are accepted (=reload-nocache= or =reload_nocache=).
 | =Alt+Left=     | back              |
 | =Alt+Right=    | forward           |
 | =Ctrl+plus/minus/0= | zoom in/out/reset |
+| =Ctrl+wheel= (mousebind) | zoom in/out  |
 | =Ctrl+f=       | find              |
 | =Ctrl+g= / =Ctrl+Shift+g= | find next/prev |
 | =F11=          | toggle-fullscreen |

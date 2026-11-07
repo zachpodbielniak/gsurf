@@ -77,6 +77,10 @@ typedef enum /*< flags >*/ {
  * @GSURF_BUTTON_PRIMARY: left button
  * @GSURF_BUTTON_MIDDLE: middle button
  * @GSURF_BUTTON_SECONDARY: right button
+ * @GSURF_BUTTON_WHEEL_UP: one wheel notch up (button 4, the X11 convention)
+ * @GSURF_BUTTON_WHEEL_DOWN: one wheel notch down (button 5)
+ * @GSURF_BUTTON_WHEEL_LEFT: one wheel notch left (button 6)
+ * @GSURF_BUTTON_WHEEL_RIGHT: one wheel notch right (button 7)
  * @GSURF_BUTTON_BACK: thumb back (button 8)
  * @GSURF_BUTTON_FORWARD: thumb forward (button 9)
  *
@@ -86,6 +90,10 @@ typedef enum {
 	GSURF_BUTTON_PRIMARY   = 1,
 	GSURF_BUTTON_MIDDLE    = 2,
 	GSURF_BUTTON_SECONDARY = 3,
+	GSURF_BUTTON_WHEEL_UP    = 4,
+	GSURF_BUTTON_WHEEL_DOWN  = 5,
+	GSURF_BUTTON_WHEEL_LEFT  = 6,
+	GSURF_BUTTON_WHEEL_RIGHT = 7,
 	GSURF_BUTTON_BACK      = 8,
 	GSURF_BUTTON_FORWARD   = 9
 } GsurfMousebutton;

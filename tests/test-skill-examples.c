@@ -261,6 +261,9 @@ check_yaml_names(
 		for (l = keys; l != NULL; l = l->next) {
 			const gchar *action = yaml_mapping_get_string_member(section, l->data);
 
+			/* "none" / "" unbind a default; anything else must exist. */
+			if (action != NULL && (*action == '\0' || g_ascii_strcasecmp(action, "none") == 0))
+				continue;
 			if (gsurf_action_from_string(action) == GSURF_ACTION_NONE)
 				g_test_fail_printf("%s: '%s' is bound to unknown action '%s'",
 					what, (const gchar *)l->data, action);

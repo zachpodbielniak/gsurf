@@ -149,6 +149,30 @@ view_for_widget(GsurfGtk4Window *self, GtkWidget *widget)
 	return NULL;
 }
 
+/* Surface-unit scroll deltas (a touchpad, in pixels) per wheel notch. */
+#define GSURF_GTK4_SCROLL_PX_PER_NOTCH (50.0)
+
+/* A wheel or touchpad scroll on a view widget (capture phase, before
+ * WebKit scrolls the page): it goes through the window as wheel buttons
+ * (4-7), so a mousebind (Ctrl+wheel zooms by default) can consume it and
+ * act on this view. Wheel deltas are already in notches; touchpad ones are
+ * pixels, scaled to notches. */
+static gboolean
+on_view_scroll(GtkEventControllerScroll *scroll, gdouble dx, gdouble dy, gpointer user_data)
+{
+	GsurfGtk4Window *self = user_data;
+	GtkEventController *ctrl = GTK_EVENT_CONTROLLER(scroll);
+	GtkWidget *widget = gtk_event_controller_get_widget(ctrl);
+	guint mods = translate_modifiers(gtk_event_controller_get_current_event_state(ctrl));
+
+	if (gtk_event_controller_scroll_get_unit(scroll) == GDK_SCROLL_UNIT_SURFACE) {
+		dx /= GSURF_GTK4_SCROLL_PX_PER_NOTCH;
+		dy /= GSURF_GTK4_SCROLL_PX_PER_NOTCH;
+	}
+	return gsurf_window_emit_wheel(GSURF_WINDOW(self), view_for_widget(self, widget),
+		dx, dy, mods);
+}
+
 /* Focus follows click: with a layout showing several views, the view
  * that takes keyboard focus (a click into it, Tab) becomes the active
  * view. Without a layout only the active view is visible; a hidden
@@ -207,6 +231,7 @@ remove_view_controllers(GtkWidget *widget)
 		const gchar *name = gtk_event_controller_get_name(c);
 
 		if (g_strcmp0(name, "gsurf-view-click") == 0 ||
+		    g_strcmp0(name, "gsurf-view-scroll") == 0 ||
 		    g_strcmp0(name, "gsurf-view-focus") == 0)
 			g_ptr_array_add(ours, c);
 		else
@@ -225,6 +250,7 @@ gsurf_gtk4_window_wire_view(GsurfGtk4Window *self, GtkWidget *widget)
 {
 	GtkGesture *click;
 	GtkEventController *focus;
+	GtkEventController *scroll;
 	GWeakRef *ref;
 
 	if (is_wired(self, widget))
@@ -244,6 +270,13 @@ gsurf_gtk4_window_wire_view(GsurfGtk4Window *self, GtkWidget *widget)
 		GTK_PHASE_CAPTURE);
 	g_signal_connect_object(click, "pressed", G_CALLBACK(on_view_pressed), self, 0);
 	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
+
+	/* The wheel too (Ctrl+wheel zooms by default), before WebKit's own. */
+	scroll = gtk_event_controller_scroll_new(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES);
+	gtk_event_controller_set_name(scroll, "gsurf-view-scroll");
+	gtk_event_controller_set_propagation_phase(scroll, GTK_PHASE_CAPTURE);
+	g_signal_connect_object(scroll, "scroll", G_CALLBACK(on_view_scroll), self, 0);
+	gtk_widget_add_controller(widget, scroll);
 
 	/* Focus follows click (only acts while a layout is set). */
 	focus = gtk_event_controller_focus_new();

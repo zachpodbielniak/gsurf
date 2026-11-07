@@ -144,6 +144,8 @@ mousebinds:
   "Button9": forward               # forward thumb button
   "Ctrl+Button1": open-new-view-background  # Ctrl-click link -> background child tab
   "Button2": open-new-view-background       # middle-click link -> background child tab
+  "Ctrl+Button4": zoom-in          # Ctrl+wheel up (wheel = Button4-7)
+  "Ctrl+Button5": zoom-out         # Ctrl+wheel down
   # open-new-view opens the link in a foreground tab instead
 
 # ===== Search engines (search-engines module) =====
