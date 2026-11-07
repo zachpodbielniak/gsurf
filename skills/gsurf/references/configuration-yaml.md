@@ -31,7 +31,7 @@ leaves every other module without `enabled: true`, so modal, chromebar, search_e
 
 | Section | Keys |
 |---|---|
-| `browser` | `homepage` (startup URI when none is given), `new_view_uri` (new tabs), `default_zoom` (1.0), `smooth_scroll`, `fullscreen_on_start` |
+| `browser` | `homepage` (startup URI when none is given), `new_view_uri` (new tabs), `default_zoom` (1.0), `smooth_scroll`, `fullscreen_on_start`, `languages` (`[en-US, de]`: navigator.language + Accept-Language; empty = the locale's, en-US under `C`) |
 | `user_agent` | root string; `""` = the engine default |
 | `webkit` | `javascript`, `images`, `webgl` (false), `webaudio`, `media`, `media_stream` (false), `webrtc` (false), `plugins`, `smooth_scrolling`, `caret_browsing`, `dns_prefetch` (false), `hyperlink_auditing` (false), `site_quirks`, `developer_extras` (false), `default_font_size` (16), `default_monospace_font_size` (13), `default_charset` (`UTF-8`), `javascript_can_open_windows` (false), `javascript_can_access_clipboard` (false) |
 | `tls` | `strict` (true: reject invalid certificates) |

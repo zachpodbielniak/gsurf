@@ -25,6 +25,7 @@ browser:
   default_zoom: 1.0
   smooth_scroll: true
   fullscreen_on_start: false
+  languages: []                # [en-US, de]; empty = the locale's
 
 user_agent: ""                 # "" = engine default
 
@@ -65,6 +66,8 @@ GTK3, GTK4, and LRG apply =webkit.webrtc= to the engine on each settings update.
 An empty =user_agent= (or =NULL= in C settings) restores the engine's default user agent, including after a per-URI user-agent override stops matching. This reset applies to all three backends.
 
 Native settings regressions run with =make test-gui= under Xvfb. On an existing display, run =GSURF_TEST_GUI=1 ./build/release/test-backend-settings= after =make test=; ordinary headless tests skip these display-dependent checks.
+
+=browser.languages= (since 0.5.8) lists the languages pages see, most preferred first: =navigator.language= (the first one; WebKit exposes only that) and the =Accept-Language= header (all of them, with decreasing =q= weights). Give BCP 47 tags (=[en-US, de]=); POSIX names (=de_DE.UTF-8=) are converted, a comma string (="en-US, de"=) works too, and an entry that is not a language is dropped. Empty (the default) takes the locale's languages from =LANGUAGE=, =LC_ALL=, =LC_MESSAGES= and =LANG=. The C and POSIX locales name no language, so gsurf then uses =en-US=, as Firefox and Chromium do. Before 0.5.8 gsurf left this to WebKit, which reported ="C"= under =LANG=C.UTF-8=; =Intl= rejects that tag, so pages broke with =RangeError: invalid language tag: C= (Forgejo's =webcomponents.js=, for one). All backends apply it, to the default context and to every container's. In a C config: =config->languages = g_strsplit("en-US,de", ",", -1);=.
 
 =network.do_not_track= (default =false=) asks for a =DNT: 1= header. WebKit has no Do Not Track switch, so the header is sent by the =hardening= module's web-process extension and only while that module is enabled; its own =dnt:= key overrides this one. See [[file:hardening.org][hardening.org]], which also covers https-only, tracking-parameter stripping, Referer trimming, Global Privacy Control, third-party cookies and per-site exemptions.
 

@@ -19,6 +19,7 @@
 
 #include "backend/webkit/gsurf-webkit-protocol.h"
 #include "backend/webkit/gsurf-webkit-content.h"
+#include "backend/webkit/gsurf-webkit-session.h"
 
 #include "backend/lrg/gsurf-lrg-engine.h"
 
@@ -520,6 +521,8 @@ gsurf_lrg_engine_new(GsurfView *owner, GError **error)
 	g_object_ref_sink(self->offscreen);
 
 	gsurf_webkit_content_attach_context(webkit_web_context_get_default());
+	/* Languages too: under the C locale WebKit would report "C". */
+	gsurf_webkit_session_apply_languages(webkit_web_context_get_default());
 	self->webview = WEBKIT_WEB_VIEW(webkit_web_view_new());
 	gsurf_webkit_protocol_attach(self->webview);
 

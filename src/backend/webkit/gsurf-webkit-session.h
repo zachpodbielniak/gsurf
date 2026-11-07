@@ -32,6 +32,12 @@ void gsurf_webkit_session_install(void);
  * so config changes made at runtime reach later views. */
 void gsurf_webkit_session_prepare_default(void);
 
+/* Tell @ctx which languages pages see (navigator.language,
+ * Accept-Language): `browser.languages`, else the locale's, en-US under
+ * the C locale (left alone, WebKit reports "C", which Intl rejects). Every
+ * context a view uses gets it. */
+void gsurf_webkit_session_apply_languages(WebKitWebContext *ctx);
+
 /* The web context a view in @native's container must use (4.1: @native
  * itself, or the default context; 6.0: always the default context, as
  * isolation lives in the network session). Web-process extensions are
