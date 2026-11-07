@@ -45,11 +45,21 @@ gchar *
 gsurf_pwa_install(const gchar *uri, const gchar *name,
 	const gchar *executable, const gchar *applications_dir, GError **error)
 {
+	return gsurf_pwa_install_full(uri, name, NULL, executable, applications_dir,
+		error);
+}
+
+gchar *
+gsurf_pwa_install_full(const gchar *uri, const gchar *name,
+	const gchar *container, const gchar *executable,
+	const gchar *applications_dir, GError **error)
+{
 	g_autoptr(GUri) parsed = NULL;
 	g_autoptr(GKeyFile) desktop = NULL;
 	g_autoptr(GFile) file = NULL;
 	g_autofree gchar *quoted_executable = NULL;
 	g_autofree gchar *quoted_uri = NULL;
+	g_autofree gchar *quoted_container = NULL;
 	g_autofree gchar *exec = NULL;
 	g_autofree gchar *digest = NULL;
 	g_autofree gchar *filename = NULL;
@@ -61,10 +71,12 @@ gsurf_pwa_install(const gchar *uri, const gchar *name,
 
 	/* Validate before creating directories; malformed input leaves no state. */
 	if (!valid_text(uri) || (name != NULL && !valid_text(name)) ||
+	    (container != NULL && !valid_text(container)) ||
 	    !valid_text(executable) || !g_path_is_absolute(executable) ||
 	    applications_dir == NULL || !g_path_is_absolute(applications_dir)) {
 		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
-			"PWA requires a site URL, nonempty name, and absolute executable/destination paths");
+			"PWA requires a site URL, nonempty name/container, and absolute "
+			"executable/destination paths");
 		return NULL;
 	}
 	/* GLib checks Exec's executable before expanding %% field escapes.
@@ -101,13 +113,24 @@ gsurf_pwa_install(const gchar *uri, const gchar *name,
 	path = g_build_filename(applications_dir, filename, NULL);
 	quoted_executable = quote_exec_argument(executable);
 	quoted_uri = quote_exec_argument(uri);
-	exec = g_strdup_printf("%s --kiosk -- %s", quoted_executable, quoted_uri);
+	/* A pinned container is a startup request (gsurf --container), which
+	 * outranks the container rules; without one the rules place the app. */
+	if (container != NULL) {
+		quoted_container = quote_exec_argument(container);
+		exec = g_strdup_printf("%s --kiosk --container %s -- %s", quoted_executable,
+			quoted_container, quoted_uri);
+	} else {
+		exec = g_strdup_printf("%s --kiosk -- %s", quoted_executable, quoted_uri);
+	}
 	desktop = g_key_file_new();
 	g_key_file_set_string(desktop, "Desktop Entry", "Type", "Application");
 	g_key_file_set_string(desktop, "Desktop Entry", "Name", name != NULL ? name : host);
 	g_key_file_set_string(desktop, "Desktop Entry", "Exec", exec);
 	/* What --list-pwa shows, without having to parse Exec back. */
 	g_key_file_set_string(desktop, "Desktop Entry", "X-Gsurf-PWA-URI", uri);
+	if (container != NULL)
+		g_key_file_set_string(desktop, "Desktop Entry", "X-Gsurf-PWA-Container",
+			container);
 	g_key_file_set_string(desktop, "Desktop Entry", "Icon", "gsurf");
 	g_key_file_set_string(desktop, "Desktop Entry", "Categories", "Network;WebBrowser;");
 	g_key_file_set_boolean(desktop, "Desktop Entry", "Terminal", FALSE);
@@ -153,6 +176,7 @@ gsurf_pwa_entry_free(GsurfPwaEntry *entry)
 	g_free(entry->name);
 	g_free(entry->uri);
 	g_free(entry->path);
+	g_free(entry->container);
 	g_free(entry);
 }
 
@@ -195,12 +219,13 @@ slugify(const gchar *name)
 	return g_string_free(slug, FALSE);
 }
 
-/* The site URL of a launcher written before X-Gsurf-PWA-URI: the argument
- * after "--" in Exec.  Exec's quoting is a subset of the shell's (double
+/* The argument after @flag in a launcher's Exec ("--" gives the site URL,
+ * "--container" the pinned container), for launchers written before the
+ * X-Gsurf-PWA-* keys.  Exec's quoting is a subset of the shell's (double
  * quotes, backslash before " ` $ \), and GKeyFile already undid the
  * desktop-string layer; "%%" is the escaped '%'. */
 static gchar *
-uri_from_exec(const gchar *exec)
+arg_from_exec(const gchar *exec, const gchar *flag)
 {
 	g_auto(GStrv) argv = NULL;
 	gint argc = 0;
@@ -209,11 +234,14 @@ uri_from_exec(const gchar *exec)
 	if (exec == NULL || !g_shell_parse_argv(exec, &argc, &argv, NULL))
 		return NULL;
 	for (i = 0; i + 1 < argc; i++) {
-		if (g_strcmp0(argv[i], "--") == 0) {
+		if (g_strcmp0(argv[i], flag) == 0) {
 			g_auto(GStrv) parts = g_strsplit(argv[i + 1], "%%", -1);
 
 			return g_strjoinv("%", parts);
 		}
+		/* Nothing after "--" is an option. */
+		if (g_strcmp0(argv[i], "--") == 0)
+			break;
 	}
 	return NULL;
 }
@@ -247,14 +275,17 @@ scan_directory(const gchar *directory, gboolean system, GPtrArray *out,
 		entry->system = system;
 		if (g_key_file_load_from_file(desktop, entry->path, G_KEY_FILE_NONE, NULL)) {
 			entry->name = g_key_file_get_string(desktop, "Desktop Entry", "Name", NULL);
+			g_autofree gchar *exec = g_key_file_get_string(desktop,
+				"Desktop Entry", "Exec", NULL);
+
 			entry->uri = g_key_file_get_string(desktop, "Desktop Entry",
 				"X-Gsurf-PWA-URI", NULL);
-			if (entry->uri == NULL) {
-				g_autofree gchar *exec = g_key_file_get_string(desktop,
-					"Desktop Entry", "Exec", NULL);
-
-				entry->uri = uri_from_exec(exec);
-			}
+			if (entry->uri == NULL)
+				entry->uri = arg_from_exec(exec, "--");
+			entry->container = g_key_file_get_string(desktop, "Desktop Entry",
+				"X-Gsurf-PWA-Container", NULL);
+			if (entry->container == NULL)
+				entry->container = arg_from_exec(exec, "--container");
 		}
 		/* An unreadable launcher still lists (and uninstalls) by its hash. */
 		if (entry->name == NULL)

@@ -25,6 +25,7 @@ Kiosk sessions load normal YAML/C settings and the same enabled runtime modules 
 gsurf --pwa https://mail.example.org
 gsurf --pwa --pwa-name 'My Mail' https://mail.example.org
 sudo gsurf --pwa --pwa-name 'Shared Dashboard' https://dashboard.example.org
+gsurf --pwa --pwa-name Gmail --pwa-container personal https://mail.google.com
 #+end_src
 
 =--pwa= installs a =.desktop= launcher and exits without initializing GTK, loading configuration or modules, opening a browser, or contacting the site. It accepts exactly one absolute HTTP or HTTPS URL without embedded credentials or whitespace. Percent-encode spaces in URLs. =--pwa-name= is valid only with =--pwa=; without it, the displayed name is the URL's hostname.
@@ -46,15 +47,32 @@ sudo gsurf --uninstall-pwa shared-dashboard
 =--list-pwa= prints every gsurf launcher in both destinations, per user and system-wide, one per row, sorted by id:
 
 #+begin_example
-ID                  NAME       SCOPE   URL
-dashboard-a1695deb  Dashboard  user    https://dash.example.org/b
-dashboard-ee045c87  Dashboard  user    https://dash.example.org/a
-my-mail             My Mail    user    https://mail.example.org
+ID                  NAME       CONTAINER  SCOPE   URL
+dashboard-a1695deb  Dashboard  -          user    https://dash.example.org/b
+dashboard-ee045c87  Dashboard  -          user    https://dash.example.org/a
+gmail               Gmail      personal   user    https://mail.google.com
+my-mail             My Mail    -          user    https://mail.example.org
 #+end_example
+
+=CONTAINER= is the pinned container (below), or =-= when the app is placed by your container rules.
 
 The *ID* is what =--uninstall-pwa= takes. It is the display name as a slug: ASCII letters and digits lowercased, every other run of characters one =-= (=My Mail= becomes =my-mail=; a name with no Latin letters or digits becomes =pwa=). When two launchers would share a slug, both get the first eight hex digits of their URL hash appended, and if one URL is installed both per user and system-wide the scope is appended as well (=-user=, =-system=), so an id is always unique within a listing. Ids follow the names: uninstalling one of two same-named apps gives the other its plain slug back.
 
 =--uninstall-pwa= also accepts the exact display name (any case) or the exact URL when exactly one launcher matches; if several do, it refuses and prints their ids. It removes the launcher the same way installation chose its destination: a system-wide launcher needs root (the error prints the =sudo= command), a per-user one does not. The launcher is moved to the trash where its filesystem has one (restore it from there to undo), otherwise deleted, and the command says which. Both options take no URI and cannot be combined with =--pwa=, =--kiosk= or each other. Like =--pwa=, they run before GTK, configuration or modules.
+
+* Containers and logins
+
+A launcher runs gsurf with your normal configuration, so with the =containers= module enabled the app's single tab is placed like any startup tab ([[file:containers.org][containers.org]], "Placement"): by the host rule matching the app's URL, else by =new_tab=. Kiosk mode never moves that tab to another container, so a login flow that passes through other hosts (=accounts.google.com=) keeps its cookies in the app's container. Nothing has to be configured for an app whose URL matches one of your host rules.
+
+An app whose URL matches no rule follows =new_tab=; with =new_tab: temporary= that is a fresh temporary container on every launch, and the app is logged out each time. Either install it with a URL that a rule matches, add a rule for its host, or pin it:
+
+#+begin_src bash
+gsurf --pwa --pwa-name Gmail --pwa-container personal https://mail.google.com
+#+end_src
+
+=--pwa-container ID= (only with =--pwa=) writes =--container ID= into the launcher (=gsurf --kiosk --container ID -- URL=) and records it as =X-Gsurf-PWA-Container=. =--container= is an explicit placement request, which outranks the host rules. The value is resolved each time the app starts, against the configuration of that moment: a container id, a container name in any case (=Work Stuff=), =temporary= or =default=. An unknown container is reported on stderr and the tab is placed by the rules as if the app were not pinned. Without =--pwa-container= nothing changes: the rules decide, as before. Reinstalling the same URL without it unpins the app.
+
+=--container ID= also works on an ordinary command line (=gsurf --container work https://example.org=) to open the startup page in a chosen container.
 
 * Scope of PWA support
 

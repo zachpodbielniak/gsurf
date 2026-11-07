@@ -33,7 +33,9 @@ gsurf about:blank
 | =--kiosk=              | Hide browser chrome; disable URL entry and new views |
 | =--pwa=                | Install the URI as a kiosk desktop app and exit       |
 | =--pwa-name NAME=      | App label; defaults to hostname; requires =--pwa=    |
-| =--list-pwa=           | List installed PWAs (id, name, scope, URL) and exit   |
+| =--pwa-container ID=   | Always open the app in this container; requires =--pwa= |
+| =--container ID=       | Open the startup page in this container (id or name)  |
+| =--list-pwa=           | List installed PWAs (id, name, container, scope, URL) and exit |
 | =--uninstall-pwa ID=   | Uninstall a PWA by its =--list-pwa= id and exit       |
 | =-f, --fullscreen=       | Start in fullscreen                                   |
 | =--lrg[=MODE]=          | Use the libregnum/raylib backend (=LRG_BACKEND=1= builds); see below |
