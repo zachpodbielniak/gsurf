@@ -40,6 +40,7 @@ enum {
 	PROP_RELATED,
 	PROP_INITIAL_URI,
 	PROP_OPENER_ID,
+	PROP_EDITING,
 	N_PROPS
 };
 
@@ -183,6 +184,7 @@ gsurf_view_get_property(GObject *object, guint prop_id,
 	case PROP_RELATED:      g_value_set_boolean(value, priv->related); break;
 	case PROP_INITIAL_URI:  g_value_set_string(value, priv->initial_uri); break;
 	case PROP_OPENER_ID:    g_value_set_uint64(value, priv->opener_id); break;
+	case PROP_EDITING:      g_value_set_boolean(value, priv->editing); break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -253,6 +255,19 @@ gsurf_view_class_init(GsurfViewClass *klass)
 	props[PROP_OPENER_ID] = g_param_spec_uint64("opener-id", NULL, NULL,
 		0, G_MAXUINT64, 0,
 		G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:editing:
+	 *
+	 * Whether an editable element (a text field, textarea, select or
+	 * contenteditable) has focus in the page, so bare keys type into it
+	 * (gsurf_view_get_editing()). Notified only when it changes; the
+	 * window's #GsurfWindow:typing and the published input mode
+	 * (gsurf_module_manager_get_mode()) follow it.
+	 *
+	 * Since: 0.5.9
+	 */
+	props[PROP_EDITING] = g_param_spec_boolean("editing", NULL, NULL,
+		FALSE, G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
 	g_object_class_install_properties(object_class, N_PROPS, props);
 
 	/**
@@ -941,7 +956,11 @@ gsurf_view_set_editing(GsurfView *self, gboolean editing)
 	g_return_if_fail(GSURF_IS_VIEW(self));
 
 	priv = gsurf_view_get_instance_private(self);
+	editing = editing != FALSE;
+	if (priv->editing == editing)
+		return;
 	priv->editing = editing;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_EDITING]);
 }
 
 void
@@ -1140,6 +1159,14 @@ void
 gsurf_view_emit_load_changed(GsurfView *self, GsurfLoadEvent event)
 {
 	g_return_if_fail(GSURF_IS_VIEW(self));
+
+	/* A committed load replaced the document, and with it any focused
+	 * field: the old page can no longer report its focusout, and a page
+	 * the focus tracker cannot run in (an error page, a plain-text or
+	 * image document) would never report at all. The new document's
+	 * own reports (an autofocused field) arrive after the commit. */
+	if (event == GSURF_LOAD_COMMITTED)
+		gsurf_view_set_editing(self, FALSE);
 	g_signal_emit(self, signals[SIG_LOAD_CHANGED], 0, event);
 }
 
@@ -1168,6 +1195,9 @@ void
 gsurf_view_emit_web_process_terminated(GsurfView *self)
 {
 	g_return_if_fail(GSURF_IS_VIEW(self));
+
+	/* The page is gone, and its focused field with it. */
+	gsurf_view_set_editing(self, FALSE);
 	g_signal_emit(self, signals[SIG_WEB_PROCESS_TERMINATED], 0);
 }
 

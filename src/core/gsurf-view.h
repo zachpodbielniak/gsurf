@@ -206,8 +206,11 @@ GBytes      *gsurf_view_get_snapshot_finish(GsurfView *self, GAsyncResult *resul
  *
  * Whether an editable element (text input, textarea, contenteditable,
  * select) is currently focused in the page. The backend keeps this
- * updated from page focus events; modal input handlers use it to pass
- * keystrokes through to the field instead of treating them as commands.
+ * updated from page focus events (and clears it when a load commits or
+ * the web process dies); modal input handlers use it to pass keystrokes
+ * through to the field instead of treating them as commands, and the
+ * published input mode reads INSERT while the active view is editing.
+ * Changes are notified as #GsurfView:editing.
  *
  * Returns: %TRUE if the page has an editable element focused
  */
@@ -218,8 +221,10 @@ gboolean gsurf_view_get_editing(GsurfView *self);
  * @self: a #GsurfView
  * @editing: whether an editable element is focused
  *
- * Sets the editing state. Called by the backend; not normally used
- * directly.
+ * Sets the editing state and notifies #GsurfView:editing when it
+ * changes. Called by the backend, and by code that focuses a field
+ * itself and knows the result before the page's asynchronous report
+ * (the modal module's `gi`); not normally used otherwise.
  */
 void gsurf_view_set_editing(GsurfView *self, gboolean editing);
 

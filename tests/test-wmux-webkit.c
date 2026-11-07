@@ -125,8 +125,7 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state, gpoi
 	H *h = user_data;
 	GsurfView *view = gsurf_window_get_active_view(window);
 	gboolean has_mod = (state & (GSURF_MOD_CTRL | GSURF_MOD_ALT | GSURF_MOD_SUPER)) != 0;
-	gboolean typing = (gsurf_module_manager_get_input_passthrough(h->mgr) ||
-	                   (view != NULL && gsurf_view_get_editing(view))) &&
+	gboolean typing = gsurf_module_manager_is_typing(h->mgr, view) &&
 	                  !has_mod && keyval != GDK_KEY_Escape;
 
 	if (typing && !gsurf_window_get_key_grab(window))
@@ -2522,6 +2521,8 @@ test_solo(void)
 	h_free(&h);
 }
 
+#ifndef GSURF_BACKEND_GTK4
+/* (GTK3 only: the wheel case below skips on GTK4.) */
 /* What the window's button-press saw for a wheel notch. */
 typedef struct {
 	guint      button;
@@ -2553,6 +2554,7 @@ on_page_scroll(GtkWidget *widget, GdkEvent *event, gpointer data)
 	(*(guint *)data)++;
 	return FALSE;
 }
+#endif
 
 /* Feature: the wheel over a page reaches the window as wheel buttons
  * (Ctrl+wheel zooms by default), for the view under the pointer: a wmux
@@ -2898,6 +2900,35 @@ test_mode_indicator(void)
 	g_assert_true(has_class(h.w->status_mode, "wmux-mode-insert"));
 	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- INSERT --");
 	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- NORMAL --");
+
+	/* 1b. A page field the user clicks into: its keys are text, so both
+	 *     indicators read INSERT (the modal module itself stays NORMAL);
+	 *     Escape leaves the field and they read NORMAL again. */
+	g_free(gsurf_webkit_test_eval(gsurf_webkit_test_native(h.first),
+		"var i=document.createElement('input');i.id='typed';"
+		"document.body.appendChild(i);i.focus();'f'"));
+	WAIT_UNTIL(gsurf_view_get_editing(h.first));
+	g_assert_false(gsurf_module_manager_get_input_passthrough(h.mgr));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- INSERT --");
+	g_assert_true(has_class(h.w->status_mode, "wmux-mode-insert"));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- INSERT --");
+	g_assert_true(press(&h, GDK_KEY_Escape, 0));
+	g_assert_false(gsurf_view_get_editing(h.first));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- NORMAL --");
+
+	/* 1c. The address bar (open-prompt): typing a URL reads INSERT;
+	 *     enter-normal-mode gives the page the keys back. */
+	g_assert_true(gsurf_module_manager_dispatch_action(h.mgr, h.first,
+		GSURF_ACTION_OPEN_PROMPT));
+	WAIT_UNTIL(gsurf_window_get_entry_focus(h.window));
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- INSERT --");
+	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- INSERT --");
+	g_assert_true(gsurf_module_manager_dispatch_action(h.mgr, h.first,
+		GSURF_ACTION_ENTER_NORMAL_MODE));
+	WAIT_UNTIL(!gsurf_window_get_entry_focus(h.window));
 	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(h.w->status_mode)), ==, "-- NORMAL --");
 	g_assert_cmpstr(gtk_label_get_text(GTK_LABEL(bar_mode)), ==, "-- NORMAL --");
 

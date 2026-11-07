@@ -15,11 +15,21 @@
  *
  * Checks, for a plain <input>, an <input> in an open shadow root and an
  * <input> in an <iframe>: focusing the field is detected, stays detected
- * (an iframe that loads later cannot clear it), and `o`, `a`, `i` are
- * typing (never a command, never the prompt); Escape blurs. Then the
- * modes: `a` and `i` enter INSERT, where `o` is the page's; Escape
- * returns to NORMAL and blurs; `o` with nothing focused is the prompt;
- * `gi` focuses the first field and enters INSERT.
+ * (an iframe that loads later cannot clear it), the mode in effect (what
+ * the indicators show) reads INSERT, and `o`, `a`, `i` are typing (never
+ * a command, never the prompt); Escape blurs and the mode reads NORMAL.
+ * Then the modes: `a` and `i` enter INSERT, where `o` is the page's;
+ * Escape returns to NORMAL and blurs; `o` with nothing focused is the
+ * prompt; `gi` focuses the first field, whose keys are typing until it
+ * loses the focus.
+ *
+ * Then the edges that used to leave the indicator wrong: a focused field
+ * removed from the page (light DOM, shadow DOM) or its shadow host
+ * removed; link hints started over a focused field own the keys and end
+ * with Escape, a mouse press or a tab switch (labels removed); another
+ * tab's field; a focused chrome entry (address bar) and enter-normal-mode
+ * taking the keys back from it; an autofocused field of a new page; a
+ * navigation to a plain-text document; a web process crash.
  *
  * Runs only with GSURF_TEST_GUI=1 (make test-gui), on both toolkits.
  */
@@ -43,17 +53,31 @@ static const gchar MAIN_PAGE[] =
 static const gchar FRAME_PAGE[] =
 	"<!doctype html><html><body><input id=framed></body></html>";
 
+static const gchar AUTOFOCUS_PAGE[] =
+	"<!doctype html><html><body><input id=auto autofocus></body></html>";
+
+static const gchar TEXT_PAGE[] = "just text, no fields\n";
+
 static void
 serve(SoupServer *server, SoupServerMessage *msg, const char *path, GHashTable *query,
       gpointer data)
 {
-	const gchar *body = g_str_equal(path, "/frame") ? FRAME_PAGE : MAIN_PAGE;
+	const gchar *body = MAIN_PAGE;
+	const gchar *type = "text/html";
 
 	(void)server;
 	(void)query;
 	(void)data;
+	if (g_str_equal(path, "/frame"))
+		body = FRAME_PAGE;
+	else if (g_str_equal(path, "/autofocus"))
+		body = AUTOFOCUS_PAGE;
+	else if (g_str_equal(path, "/text")) {
+		body = TEXT_PAGE;
+		type = "text/plain";
+	}
 	soup_server_message_set_status(msg, 200, NULL);
-	soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC,
+	soup_server_message_set_response(msg, type, SOUP_MEMORY_STATIC,
 		body, strlen(body));
 }
 
@@ -62,6 +86,8 @@ typedef struct {
 	GsurfApplication *app;
 	GsurfWindow *window;
 	GsurfView *view;
+	GsurfView *other;     /* a second tab */
+	GtkWidget *entry;     /* a chrome entry (an address bar) */
 	GtkWidget *toplevel;
 	guint prompts;        /* open-prompt reached the core keymap */
 	gboolean consumed;    /* what the key routing returned last */
@@ -99,9 +125,7 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	gboolean typing;
 
 	h->consumed = FALSE;
-	typing = (gsurf_module_manager_get_input_passthrough(mgr) ||
-	          (view != NULL && gsurf_view_get_editing(view))) &&
-	         !has_mod && !is_escape;
+	typing = gsurf_module_manager_is_typing(mgr, view) && !has_mod && !is_escape;
 	if (typing && !gsurf_window_get_key_grab(window))
 		return FALSE;
 	if (gsurf_module_manager_dispatch_key_event(mgr, view, keyval, keycode, state,
@@ -179,6 +203,13 @@ eval(H *h, const gchar *js)
 	return gsurf_webkit_test_eval(gsurf_webkit_test_native(h->view), js);
 }
 
+/* The input mode in effect: what the indicators show. */
+static GsurfModePolicy
+mode(void)
+{
+	return gsurf_module_manager_get_mode(gsurf_module_manager_get_default());
+}
+
 /* Poll (bounded) until the editing state is @want. */
 static void
 wait_editing(H *h, gboolean want)
@@ -224,6 +255,7 @@ check_field(H *h, const Field *field)
 
 	g_free(eval(h, field->focus));
 	wait_editing(h, TRUE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
 	active = eval(h, DEEP_ACTIVE_JS);
 	g_assert_cmpstr(active, ==, field->id);
 	/* Other frames' later reports (the iframe's own focusout settling,
@@ -250,10 +282,67 @@ check_field(H *h, const Field *field)
 	press(h, GDK_KEY_Escape);
 	g_assert_true(h->consumed);
 	g_assert_false(gsurf_view_get_editing(h->view));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
 	gsurf_webkit_test_spin(200);
 	after = eval(h, DEEP_ACTIVE_JS);
 	g_assert_cmpstr(after, !=, field->id);
 	g_assert_false(gsurf_view_get_editing(h->view));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+}
+
+/* Focus a field with @focus_js, then remove it with @remove_js: the page
+ * fires no focusout for a removed field, the tracker's observer must
+ * notice, and the mode reads NORMAL again. */
+static void
+check_removed(H *h, const gchar *focus_js, const gchar *remove_js)
+{
+	g_free(eval(h, focus_js));
+	wait_editing(h, TRUE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	g_free(eval(h, remove_js));
+	wait_editing(h, FALSE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+}
+
+/* Whether link-hint labels are up in @view's page. */
+static gboolean
+hints_shown(GsurfView *view)
+{
+	g_autofree gchar *shown = gsurf_webkit_test_eval(gsurf_webkit_test_native(view),
+		"String(!!(window.__gh&&window.__gh.length))");
+
+	return g_strcmp0(shown, "true") == 0;
+}
+
+/* Poll (bounded) until the mode in effect is @want. */
+static void
+wait_mode(GsurfModePolicy want)
+{
+	guint i;
+
+	for (i = 0; i < 100 && mode() != want; i++)
+		gsurf_webkit_test_spin(30);
+	g_assert_cmpint(mode(), ==, want);
+}
+
+/* Load @uri in the test view and wait for the main page to be usable. */
+static void
+load_main(H *h, const gchar *uri)
+{
+	guint i;
+
+	gsurf_webkit_test_load(gsurf_webkit_test_native(h->view), uri);
+	for (i = 0; i < 100; i++) {
+		g_autofree gchar *ready = eval(h,
+			"String(!!(document.getElementById('host')&&"
+			"document.getElementById('host').shadowRoot&&"
+			"document.getElementById('fr').contentDocument&&"
+			"document.getElementById('fr').contentDocument.getElementById('framed')))");
+
+		if (g_strcmp0(ready, "true") == 0)
+			break;
+		gsurf_webkit_test_spin(30);
+	}
 }
 
 static void
@@ -364,13 +453,15 @@ test_modes(void)
 	press(&h, GDK_KEY_Escape);
 	g_assert_false(inserting());
 
-	/* 5. `gi` focuses the first field and enters INSERT; Escape leaves
-	 *    INSERT and the field. */
+	/* 5. `gi` focuses the first field: its keys are typing (the mode
+	 *    reads INSERT at once, before the page's report) until it loses
+	 *    the focus, with no sticky INSERT; Escape leaves the field. */
 	g_free(eval(&h, "document.getElementById('plain').value='';'c'"));
 	press(&h, GDK_KEY_g);
 	press(&h, GDK_KEY_i);
-	g_assert_true(inserting());
-	wait_editing(&h, TRUE);
+	g_assert_false(inserting());
+	g_assert_true(gsurf_view_get_editing(h.view));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
 	{
 		g_autofree gchar *active = eval(&h, DEEP_ACTIVE_JS);
 
@@ -379,10 +470,23 @@ test_modes(void)
 	press(&h, GDK_KEY_o);
 	g_assert_false(h.consumed);
 	g_assert_cmpuint(h.prompts, ==, 1);
+	/* The page takes the focus away (as a click elsewhere would): the
+	 * next key is a command again, and the mode says so. */
+	g_free(eval(&h, "document.getElementById('plain').blur();'b'"));
+	wait_editing(&h, FALSE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+	press(&h, GDK_KEY_o);
+	g_assert_true(h.consumed);
+	g_assert_cmpuint(h.prompts, ==, 2);
+	/* gi again; Escape leaves the field. */
+	press(&h, GDK_KEY_g);
+	press(&h, GDK_KEY_i);
+	g_assert_true(gsurf_view_get_editing(h.view));
 	press(&h, GDK_KEY_Escape);
 	g_assert_true(h.consumed);
 	g_assert_false(inserting());
 	g_assert_false(gsurf_view_get_editing(h.view));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
 	gsurf_webkit_test_spin(200);
 	{
 		g_autofree gchar *active = eval(&h, DEEP_ACTIVE_JS);
@@ -407,6 +511,170 @@ test_modes(void)
 	g_assert_cmpuint(h.reads, ==, 2);
 	press(&h, GDK_KEY_Escape);          /* leave the hints */
 	gsurf_module_manager_set_action_executor(mgr, NULL, NULL, NULL);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+
+	/* 7. A focused field removed from the page: no focusout is fired, the
+	 *    tracker notices the removal. In the light DOM, inside a shadow
+	 *    root, and with its shadow host removed. */
+	check_removed(&h,
+		"var i=document.createElement('input');i.id='gone';"
+		"document.body.appendChild(i);i.focus();'f'",
+		"document.getElementById('gone').remove();'r'");
+	check_removed(&h,
+		"customElements.define('x-gone',class extends HTMLElement{constructor(){super();"
+		"this.attachShadow({mode:'open'}).innerHTML='<input id=sg>';}});"
+		"var g=document.createElement('x-gone');g.id='g1';document.body.appendChild(g);"
+		"g.shadowRoot.getElementById('sg').focus();'f'",
+		"document.getElementById('g1').shadowRoot.getElementById('sg').remove();'r'");
+	check_removed(&h,
+		"var g=document.createElement('x-gone');g.id='g2';document.body.appendChild(g);"
+		"g.shadowRoot.getElementById('sg').focus();'f'",
+		"document.getElementById('g2').remove();'r'");
+
+	/* 8. Link hints over a focused field own the keys: the mode reads
+	 *    FOLLOW, a key goes to the hints (never into the field), and
+	 *    leaving the hints gives the field back (INSERT). */
+	g_free(eval(&h, "var p=document.getElementById('plain');p.value='';p.focus();'f'"));
+	wait_editing(&h, TRUE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	g_assert_true(gsurf_module_manager_dispatch_action(mgr, h.view,
+		GSURF_ACTION_FOLLOW_HINTS));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_FOLLOW);
+	g_assert_true(hints_shown(h.view));
+	press(&h, GDK_KEY_z);               /* no label: the session ends */
+	g_assert_true(h.consumed);
+	{
+		g_autofree gchar *value = eval(&h, "document.getElementById('plain').value");
+
+		g_assert_cmpstr(value, ==, "");
+	}
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	g_assert_true(gsurf_module_manager_dispatch_action(mgr, h.view,
+		GSURF_ACTION_FOLLOW_HINTS));
+	press(&h, GDK_KEY_Escape);          /* leave the hints, keep the field */
+	g_assert_true(h.consumed);
+	g_assert_false(hints_shown(h.view));
+	g_assert_true(gsurf_view_get_editing(h.view));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	press(&h, GDK_KEY_Escape);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+
+	/*    A mouse press ends the hints (the press still reaches the page)
+	 *    and removes the labels. */
+	press(&h, GDK_KEY_f);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_FOLLOW);
+	g_assert_true(hints_shown(h.view));
+	g_assert_false(gsurf_module_manager_dispatch_mouse_event(mgr, h.view, 1, 0));
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+	gsurf_webkit_test_spin(100);
+	g_assert_false(hints_shown(h.view));
+
+	/* 9. Another tab: its field (or none) decides; hints end on a switch
+	 *    and leave no labels behind. */
+	h.other = gsurf_view_new();
+	gsurf_window_add_view(h.window, h.other);
+	g_free(eval(&h, "document.getElementById('plain').focus();'f'"));
+	wait_editing(&h, TRUE);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	gsurf_window_set_active_view(h.window, h.other);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+	gsurf_window_set_active_view(h.window, h.view);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+	press(&h, GDK_KEY_Escape);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+	press(&h, GDK_KEY_f);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_FOLLOW);
+	gsurf_window_set_active_view(h.window, h.other);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+	gsurf_webkit_test_spin(100);
+	g_assert_false(hints_shown(h.view));
+	gsurf_window_set_active_view(h.window, h.view);
+	gsurf_window_remove_view(h.window, h.other);
+	g_clear_object(&h.other);
+	gsurf_view_focus(h.view);
+	gsurf_webkit_test_spin(50);
+	g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+
+	/* 10. A chrome entry (an address bar) has the keys: the mode reads
+	 *     INSERT and a bare key is not a command; enter-normal-mode (as
+	 *     `gsurfctl mode set normal`) gives the page the keys back. */
+	{
+		guint prompts = h.prompts;
+
+		h.entry = gtk_entry_new();
+		gsurf_window_add_top_widget(h.window, h.entry);
+		gtk_widget_grab_focus(h.entry);
+		gsurf_webkit_test_spin(50);
+		g_assert_true(gsurf_window_get_entry_focus(h.window));
+		g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+		press(&h, GDK_KEY_o);
+		g_assert_cmpuint(h.prompts, ==, prompts);
+		g_assert_true(gsurf_module_manager_dispatch_action(mgr, h.view,
+			GSURF_ACTION_ENTER_NORMAL_MODE));
+		gsurf_webkit_test_spin(50);
+		g_assert_false(gsurf_window_get_entry_focus(h.window));
+		g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+		press(&h, GDK_KEY_o);
+		g_assert_true(h.consumed);
+		g_assert_cmpuint(h.prompts, ==, prompts + 1);
+	}
+
+	/* 11. A new page's autofocused field: INSERT once it loads. A
+	 *     navigation to a document without fields (plain text) and a
+	 *     web process crash both leave NORMAL behind. */
+	{
+		g_autofree gchar *auto_uri = g_strconcat(uri, "autofocus", NULL);
+		g_autofree gchar *text_uri = g_strconcat(uri, "text", NULL);
+
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), auto_uri);
+		wait_editing(&h, TRUE);
+		g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), text_uri);
+		wait_editing(&h, FALSE);
+		g_assert_cmpint(mode(), ==, GSURF_MODE_NORMAL);
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), auto_uri);
+		wait_editing(&h, TRUE);
+		/* Loaded while the address bar has the keys: the page focuses
+		 * its field once it gets the keyboard back. */
+		gtk_widget_grab_focus(h.entry);
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), text_uri);
+		wait_editing(&h, FALSE);
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), auto_uri);
+		gsurf_webkit_test_spin(300);
+		g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);   /* the entry */
+		gsurf_view_focus(h.view);
+		wait_editing(&h, TRUE);
+		g_assert_false(gsurf_window_get_entry_focus(h.window));
+		g_assert_cmpint(mode(), ==, GSURF_MODE_INSERT);   /* the field */
+		webkit_web_view_terminate_web_process(gsurf_webkit_test_native(h.view));
+		wait_mode(GSURF_MODE_NORMAL);
+		g_assert_false(gsurf_view_get_editing(h.view));
+		load_main(&h, uri);
+
+		/* 12. Back to a page with a focused field (the back/forward
+		 *     cache may restore it without a new start): the state
+		 *     matches the page's focus either way. */
+		g_free(eval(&h, "document.getElementById('plain').focus();'f'"));
+		wait_editing(&h, TRUE);
+		gsurf_webkit_test_load(gsurf_webkit_test_native(h.view), text_uri);
+		wait_editing(&h, FALSE);
+		webkit_web_view_go_back(gsurf_webkit_test_native(h.view));
+		gsurf_webkit_test_wait_finished(gsurf_webkit_test_native(h.view));
+		gsurf_webkit_test_spin(300);
+		{
+			g_autofree gchar *active = eval(&h, DEEP_ACTIVE_JS);
+
+			g_test_message("after going back: active=%s editing=%d", active,
+				gsurf_view_get_editing(h.view));
+			g_assert_cmpint(gsurf_view_get_editing(h.view), ==,
+				g_strcmp0(active, "plain") == 0);
+			g_assert_cmpint(mode(), ==, gsurf_view_get_editing(h.view)
+				? GSURF_MODE_INSERT : GSURF_MODE_NORMAL);
+		}
+		press(&h, GDK_KEY_Escape);
+		wait_editing(&h, FALSE);
+		load_main(&h, uri);
+	}
 
 	gsurf_module_manager_deactivate_all(mgr);
 	gsurf_module_manager_set_application(mgr, NULL);
@@ -414,6 +682,7 @@ test_modes(void)
 	gsurf_config_set_default(NULL);
 	g_signal_handlers_disconnect_by_data(h.window, &h);
 	gtk_widget_set_visible(h.toplevel, FALSE);
+	g_clear_object(&h.other);
 	g_clear_object(&h.view);
 	g_clear_object(&h.window);
 	g_clear_object(&h.app);

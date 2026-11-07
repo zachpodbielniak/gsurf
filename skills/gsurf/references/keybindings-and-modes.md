@@ -88,11 +88,13 @@ Actions with no built-in implementation (`open-prompt`, `find`, `tab-*`, `follow
 | Mode | Enter with | Keys |
 |---|---|---|
 | NORMAL (start) | `Escape`, `start_mode: normal` | bare letters are commands, except while a text field or the address bar has focus |
-| INSERT | `i` / `a` (`insert_keys`), `gi` (focus the first text field), `enter-insert-mode` | every bare key goes to the page (web apps' own shortcuts) |
+| INSERT | `i` / `a` (`insert_keys`), `enter-insert-mode` | every bare key goes to the page (web apps' own shortcuts) until `Escape` |
 
 NORMAL keys: `h j k l` scroll, `d` / `u` half page, `gg` / `G` top / bottom, `H` / `L` back / forward, `r` reload, `gt` / `gT` next / previous tab, `gf` read the tab full-frame in `--lrg=3d` (toggle; elsewhere `f` hints as usual), `f` link hints, `F` hint into a new tab, `gi` focus input. `Escape` in INSERT returns to NORMAL and blurs the field. Focus is tracked in every frame and open shadow roots, so typing into a field never needs `i` first. Closed shadow roots are opaque: use `i`.
 
-Link hints: labels from `hint_chars` grow to 2-4 characters as targets increase; typing narrows, a unique match is clicked, `Escape` cancels. Mode indicators (`-- INSERT --`) show in the chromebar and the wmux status line; tune them with `mode_indicator`, `mode_hide_normal` and the three `mode_*_color` keys in each module.
+`gi` focuses the first text field: its keys are typing until it loses the focus (no sticky INSERT since 0.5.9).
+
+Link hints: labels from `hint_chars` grow to 2-4 characters as targets increase; typing narrows, a unique match is clicked, `Escape` cancels; a click, a wheel notch, another tab or pane, a navigation or a crash also end them. Mode indicators (`-- INSERT --`) show in the chromebar and the wmux status line; tune them with `mode_indicator`, `mode_hide_normal` and the three `mode_*_color` keys in each module. Since 0.5.9 they show the mode in effect: `-- INSERT --` whenever a page field (clicked, autofocused, `gi`) or a chrome entry (address bar, find box) has the keys, `-- NORMAL --` as soon as it loses them, `-- FOLLOW --` while hints are up. `gsurfctl mode` reports the same, plus `typing`.
 
 The mode is published on the module manager (`GsurfModuleManager:mode`, `mode-changed`); read it with `gsurfctl mode`, set it with `gsurfctl mode insert`, follow it with `gsurfctl watch mode`.
 

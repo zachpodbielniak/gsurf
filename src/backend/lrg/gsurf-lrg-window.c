@@ -284,6 +284,16 @@ lrg_window_to_page(GsurfLrgWindow *self, GsurfLrgView *view, int wx, int wy,
 	*py = (int)((gint64)by * th / wh);
 }
 
+/* Open or close the LRG address editor. While it is open every key goes
+ * to the URL field: the window is typing (the published mode reads
+ * INSERT), as with a focused GTK address bar. */
+static void
+lrg_set_url_editing(GsurfLrgWindow *self, gboolean editing)
+{
+	self->url_editing = editing;
+	gsurf_window_set_entry_focus(GSURF_WINDOW(self), editing);
+}
+
 /* Load the typed address (URI-handler modules rewrite it -> search etc.). */
 static void
 lrg_window_url_commit(GsurfLrgWindow *self)
@@ -297,7 +307,7 @@ lrg_window_url_commit(GsurfLrgWindow *self)
 		gsurf_view_load_uri(v, rewritten ? rewritten : input);
 		g_free(rewritten);
 	}
-	self->url_editing = FALSE;
+	lrg_set_url_editing(self, FALSE);
 }
 
 /* Type a character into the address field. The pre-filled URI acts as
@@ -418,7 +428,7 @@ lrg_window_forward_input(GsurfLrgWindow *self, GsurfLrgView *view,
 			if (key == GRL_KEY_ENTER || key == GRL_KEY_KP_ENTER)
 				lrg_window_url_commit(self);
 			else if (key == GRL_KEY_ESCAPE)
-				self->url_editing = FALSE;
+				lrg_set_url_editing(self, FALSE);
 			else if (key == GRL_KEY_BACKSPACE)
 				lrg_url_backspace(self);
 		}
@@ -1416,7 +1426,7 @@ gsurf_lrg_window_begin_url_edit(GsurfLrgWindow *self)
 	if (self->chrome_url != NULL)
 		g_string_assign(self->url_input, self->chrome_url);
 	self->url_fresh = self->url_input->len > 0;
-	self->url_editing = TRUE;
+	lrg_set_url_editing(self, TRUE);
 }
 
 /* --- GObject lifecycle --- */

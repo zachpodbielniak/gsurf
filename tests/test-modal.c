@@ -74,6 +74,25 @@ hint_view_init(HintView *self)
 	(void)self;
 }
 
+/* A headless window: view bookkeeping only (no toolkit). */
+typedef GsurfWindow TestModeWindow;
+typedef GsurfWindowClass TestModeWindowClass;
+
+GType test_mode_window_get_type(void);
+G_DEFINE_TYPE(TestModeWindow, test_mode_window, GSURF_TYPE_WINDOW)
+
+static void
+test_mode_window_class_init(TestModeWindowClass *klass)
+{
+	(void)klass;
+}
+
+static void
+test_mode_window_init(TestModeWindow *self)
+{
+	(void)self;
+}
+
 /* Load the built module once and keep its registered GType resident. Each
  * assertion uses a fresh instance so mode/config state cannot leak. */
 static GsurfModule *
@@ -375,13 +394,16 @@ test_insert_keys_config(void)
 	g_assert_false(inserting());
 }
 
-/* gi focuses the first field (the page script) and enters INSERT only
- * when there was one. */
+/* gi focuses the first field (the page script, which checks the focus
+ * took) and, when there was one, records the field's focus at once: the
+ * next keys are the field's (typing in NORMAL) for as long as it keeps
+ * the focus, with no sticky INSERT. Escape leaves the field. */
 static void
 test_gi(void)
 {
 	g_autoptr(GsurfModule) module = new_modal();
 	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 	HintView *hv = (HintView *)view;
 
 	hv->reply = "none";
@@ -389,14 +411,110 @@ test_gi(void)
 	g_assert_true(key(module, view, 'i'));
 	g_assert_nonnull(strstr(hv->script, "querySelectorAll"));
 	g_assert_nonnull(strstr(hv->script, "focus()"));
+	g_assert_nonnull(strstr(hv->script, "a!==e"));
 	g_assert_false(inserting());
+	g_assert_false(gsurf_view_get_editing(view));
 
 	hv->reply = "ok";
 	g_assert_true(key(module, view, 'g'));
 	g_assert_true(key(module, view, 'i'));
+	g_assert_false(inserting());
+	g_assert_true(gsurf_view_get_editing(view));
+	g_assert_true(gsurf_module_manager_is_typing(mgr, view));
+	/* The field's keys: never commands. */
+	g_assert_false(key(module, view, 'j'));
+	/* The field loses the focus (a click elsewhere): commands again. */
+	gsurf_view_set_editing(view, FALSE);
+	g_assert_false(gsurf_module_manager_is_typing(mgr, view));
+	g_assert_true(key(module, view, 'j'));
+
+	g_assert_true(key(module, view, 'g'));
+	g_assert_true(key(module, view, 'i'));
+	g_assert_true(gsurf_view_get_editing(view));
+	g_assert_true(key(module, view, KEY_ESCAPE));
+	g_assert_false(gsurf_view_get_editing(view));
+	g_assert_nonnull(strstr(hv->script, ".blur()"));
+	g_assert_false(inserting());
+}
+
+/* A FOLLOW session ends with its labels: on a mouse press (which still
+ * reaches the page, and drops the labels), when its page commits a new
+ * document or its web process dies, and when another view becomes
+ * active in the window (the old page's labels removed). Escape and the
+ * insert keys are unaffected outside FOLLOW. */
+static void
+test_follow_ends(void)
+{
+	g_autoptr(GsurfModule) module = new_modal();
+	g_autoptr(GsurfView) view = g_object_new(hint_view_get_type(), NULL);
+	g_autoptr(GsurfView) other = g_object_new(hint_view_get_type(), NULL);
+	g_autoptr(GsurfConfig) config = gsurf_config_new();
+	g_autoptr(GsurfApplication) app = gsurf_application_new(config);
+	g_autoptr(GsurfWindow) window = g_object_new(test_mode_window_get_type(), NULL);
+	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
+	HintView *hv = (HintView *)view;
+
+	/* 1. A mouse press. */
+	hv->reply = "3";
+	g_assert_true(key(module, view, 'f'));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_FOLLOW);
+	g_clear_pointer(&hv->script, g_free);
+	g_assert_false(gsurf_input_handler_handle_mouse_event(GSURF_INPUT_HANDLER(module),
+		view, 1, 0));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_assert_nonnull(hv->script);
+	g_assert_nonnull(strstr(hv->script, "__gsurf_clear"));
+	/* Outside FOLLOW a press changes nothing. */
+	g_assert_false(gsurf_input_handler_handle_mouse_event(GSURF_INPUT_HANDLER(module),
+		view, 1, 0));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+
+	/* 2. The page commits a new document; a start alone does not end it. */
+	g_assert_true(key(module, view, 'f'));
+	gsurf_view_emit_load_changed(view, GSURF_LOAD_STARTED);
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_FOLLOW);
+	gsurf_view_emit_load_changed(view, GSURF_LOAD_COMMITTED);
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	/* A later load of the same view is no longer watched. */
+	g_assert_true(key(module, view, 'i'));
+	gsurf_view_emit_load_changed(view, GSURF_LOAD_COMMITTED);
 	g_assert_true(inserting());
 	g_assert_true(key(module, view, KEY_ESCAPE));
-	g_assert_false(inserting());
+
+	/* 3. The web process dies. */
+	g_assert_true(key(module, view, 'f'));
+	gsurf_view_emit_web_process_terminated(view);
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+
+	/* 4. Another view becomes active in the window. */
+	gsurf_window_add_view(window, view);
+	gsurf_window_add_view(window, other);
+	gsurf_application_add_window(app, window);
+	gsurf_module_manager_set_application(mgr, app);
+	g_assert_true(key(module, view, 'f'));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_FOLLOW);
+	g_clear_pointer(&hv->script, g_free);
+	gsurf_window_set_active_view(window, other);
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_assert_nonnull(hv->script);
+	g_assert_nonnull(strstr(hv->script, "__gsurf_clear"));
+
+	/* 5. A hint key that settles the session (no match) ends it too, and
+	 *    the window is no longer watched afterwards. */
+	gsurf_window_set_active_view(window, view);
+	g_assert_true(key(module, view, 'f'));
+	hv->reply = "none";
+	g_assert_true(key(module, view, 'q'));
+	g_assert_cmpint(gsurf_module_manager_get_mode(mgr), ==, GSURF_MODE_NORMAL);
+	g_assert_true(key(module, view, 'i'));
+	gsurf_window_set_active_view(window, other);
+	g_assert_true(inserting());
+	gsurf_action_handler_handle_action(GSURF_ACTION_HANDLER(module), view,
+		GSURF_ACTION_ENTER_NORMAL_MODE);
+
+	gsurf_module_manager_set_application(mgr, NULL);
+	gsurf_window_remove_view(window, other);
+	gsurf_window_remove_view(window, view);
 }
 
 /* The help list follows the configured insert keys and lists gi. */
@@ -441,6 +559,7 @@ main(int argc, char **argv)
 	g_test_add_func("/gsurf/modal/normal-with-field", test_normal_with_field);
 	g_test_add_func("/gsurf/modal/insert-keys-config", test_insert_keys_config);
 	g_test_add_func("/gsurf/modal/gi", test_gi);
+	g_test_add_func("/gsurf/modal/follow-ends", test_follow_ends);
 	g_test_add_func("/gsurf/modal/mode-published", test_mode_published);
 	g_test_add_func("/gsurf/modal/keybind-list", test_keybind_list);
 	result = g_test_run();

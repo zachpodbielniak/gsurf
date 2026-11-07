@@ -69,7 +69,7 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `page.screenshot` | `path`, `view?`/`index?` | `{path, bytes}`; relative to gsurf's launch directory |
 | `actions.list` | | `[{name, allowed}]` |
 | `action.run` | `name`, `view?`/`index?` | `{action, performed}` |
-| `mode.get` / `mode.set` | `mode: normal\|insert`, `view?` | `{mode, label, passthrough, modal_active}`; set needs `modal` |
+| `mode.get` / `mode.set` | `mode: normal\|insert`, `view?` | `{mode, label, passthrough, typing, modal_active}` (the mode in effect: `insert` while a field or the address bar has the keys, `typing: true`); set needs `modal` |
 | `tree.get` | | `{has_tree_provider, tree, grouped, groups}` (nodes carry `children`, `collapsed`) |
 | `tree.move` | `view`, one of `parent` (0: root at the end), `before`, `after`, `index` | the view; `parent` needs `tabs` |
 | `tree.collapse` | `view?`, `collapsed?` (default true) | the view; needs `tabs` |
@@ -111,7 +111,7 @@ After `events.subscribe` each event is a notification line:
 | `view` | `view.added`, `view.removed`, `view.active`, `view.moved` | `view, uri, title` (+ `from, to`) |
 | `uri`, `title` | `uri`, `title` | `view, uri, title` |
 | `load` | `load` | `view, uri, title, state` (`started`, `redirected`, `committed`, `finished`) |
-| `mode` | `mode` | `mode, label, passthrough` |
+| `mode` | `mode` | `mode, label, passthrough, typing` |
 | `layout` | `layout.groups`, `layout.visible` | `what` |
 | `download` | `download.started` only (no progress or completion) | `uri, suggested, destination` |
 | `lrg` | `lrg.arrangement`, `lrg.environment`, `lrg.reading`, `lrg.history`, `lrg.focus`, `lrg.pin`, `lrg.camera` (from keys, the pointer, methods) | `what, arrangement, environment, reading, history` |

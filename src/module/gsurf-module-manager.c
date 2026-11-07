@@ -38,7 +38,8 @@ struct _GsurfModuleManager
 	GsurfApplication *app;      /* weak */
 	GsurfConfig *config;        /* ref */
 	gboolean     input_passthrough; /* INSERT mode: bare keys go to the page */
-	GsurfModePolicy mode;           /* the published input mode */
+	GsurfModePolicy base_mode;      /* the mode owner's mode (set_mode()) */
+	GsurfModePolicy mode;           /* the published (effective) input mode */
 	GsurfActionExecutor executor;   /* the host's keybind actions (0.4.4) */
 	gpointer     executor_data;
 	GDestroyNotify executor_destroy;
@@ -76,18 +77,113 @@ compare_priority(gconstpointer a, gconstpointer b)
 	return (pa > pb) - (pa < pb);
 }
 
+/* --- The published input mode ---
+ *
+ * The module owning the keyboard modes (modal) sets the base mode. What
+ * is published (get_mode(), ::mode-changed, the indicators) is what a
+ * bare key does right now: the base mode, except that NORMAL reads
+ * INSERT while the active window is typing (a focused page field in its
+ * active view, or a focused chrome entry), because those keys go to the
+ * field as text whatever the base mode says. FOLLOW and the other modes
+ * own the keys themselves and are published unchanged. */
+
+static GsurfModePolicy
+effective_mode(GsurfModePolicy base, gboolean typing)
+{
+	if (base == GSURF_MODE_NORMAL && typing)
+		return GSURF_MODE_INSERT;
+	return base;
+}
+
+/* Recompute the published mode from the base mode and the active
+ * window's typing state; notify and emit only when it changes. */
+static void
+update_mode(GsurfModuleManager *self)
+{
+	GsurfWindow *window = gsurf_module_manager_get_active_window(self);
+	GsurfModePolicy mode;
+
+	mode = effective_mode(self->base_mode,
+		window != NULL && gsurf_window_get_typing(window));
+	if (self->mode == mode)
+		return;
+	self->mode = mode;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_MODE]);
+	g_signal_emit(self, signals[SIG_MODE_CHANGED], 0, mode);
+}
+
+static void
+on_window_typing(GsurfWindow *window, GParamSpec *pspec, gpointer user_data)
+{
+	(void)window;
+	(void)pspec;
+	update_mode(GSURF_MODULE_MANAGER(user_data));
+}
+
+static void
+watch_window(GsurfModuleManager *self, GsurfWindow *window)
+{
+	g_signal_connect_object(window, "notify::typing", G_CALLBACK(on_window_typing),
+		self, 0);
+}
+
+static void
+on_window_added(GsurfApplication *app, GsurfWindow *window, gpointer user_data)
+{
+	GsurfModuleManager *self = user_data;
+
+	(void)app;
+	watch_window(self, window);
+	update_mode(self);
+}
+
+/* The active window may have changed (it is the newest one). */
+static void
+on_window_removed(GsurfApplication *app, GsurfWindow *window, gpointer user_data)
+{
+	GsurfModuleManager *self = user_data;
+
+	(void)app;
+	g_signal_handlers_disconnect_by_func(window, on_window_typing, self);
+	update_mode(self);
+}
+
 /* --- Context --- */
 
 void
 gsurf_module_manager_set_application(GsurfModuleManager *self, GsurfApplication *app)
 {
+	GPtrArray *windows;
+	guint i;
+
 	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
 
-	if (self->app != NULL)
+	if (self->app == app)
+		return;
+	/* Stop following the old application's windows. */
+	if (self->app != NULL) {
+		windows = gsurf_application_get_windows(self->app);
+		for (i = 0; windows != NULL && i < windows->len; i++)
+			g_signal_handlers_disconnect_by_func(g_ptr_array_index(windows, i),
+				on_window_typing, self);
+		g_signal_handlers_disconnect_by_func(self->app, on_window_added, self);
+		g_signal_handlers_disconnect_by_func(self->app, on_window_removed, self);
 		g_object_remove_weak_pointer(G_OBJECT(self->app), (gpointer *)&self->app);
+	}
 	self->app = app;
-	if (self->app != NULL)
+	/* Follow the typing state of every window: the active one is the
+	 * newest, so adding or removing a window can change which counts. */
+	if (self->app != NULL) {
 		g_object_add_weak_pointer(G_OBJECT(self->app), (gpointer *)&self->app);
+		g_signal_connect_object(self->app, "window-added", G_CALLBACK(on_window_added),
+			self, 0);
+		g_signal_connect_object(self->app, "window-removed",
+			G_CALLBACK(on_window_removed), self, 0);
+		windows = gsurf_application_get_windows(self->app);
+		for (i = 0; windows != NULL && i < windows->len; i++)
+			watch_window(self, g_ptr_array_index(windows, i));
+	}
+	update_mode(self);
 }
 
 GsurfApplication *
@@ -151,11 +247,8 @@ gsurf_module_manager_set_mode(GsurfModuleManager *self, GsurfModePolicy mode)
 {
 	g_return_if_fail(GSURF_IS_MODULE_MANAGER(self));
 
-	if (self->mode == mode)
-		return;
-	self->mode = mode;
-	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_MODE]);
-	g_signal_emit(self, signals[SIG_MODE_CHANGED], 0, mode);
+	self->base_mode = mode;
+	update_mode(self);
 }
 
 GsurfModePolicy
@@ -163,6 +256,22 @@ gsurf_module_manager_get_mode(GsurfModuleManager *self)
 {
 	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), GSURF_MODE_NORMAL);
 	return self->mode;
+}
+
+gboolean
+gsurf_module_manager_is_typing(GsurfModuleManager *self, GsurfView *view)
+{
+	g_return_val_if_fail(GSURF_IS_MODULE_MANAGER(self), FALSE);
+	g_return_val_if_fail(view == NULL || GSURF_IS_VIEW(view), FALSE);
+
+	/* The mode owner passes keys to the page (INSERT). */
+	if (self->input_passthrough || self->base_mode == GSURF_MODE_INSERT ||
+	    self->base_mode == GSURF_MODE_PASSTHROUGH)
+		return TRUE;
+	/* A focused page field takes the keys, unless a mode that owns them
+	 * (FOLLOW: the hint labels) is in effect. */
+	return self->base_mode == GSURF_MODE_NORMAL &&
+	       view != NULL && gsurf_view_get_editing(view);
 }
 
 /* --- Loading / registration --- */
@@ -914,8 +1023,11 @@ gsurf_module_manager_class_init(GsurfModuleManagerClass *klass)
 	/**
 	 * GsurfModuleManager:mode:
 	 *
-	 * The input mode published by the module that owns the keyboard
-	 * modes (gsurf_module_manager_set_mode()).
+	 * The input mode in effect (gsurf_module_manager_get_mode()): the
+	 * mode published by the module that owns the keyboard modes
+	 * (gsurf_module_manager_set_mode(), which setting the property
+	 * calls), except that NORMAL reads INSERT while the active window
+	 * is typing into a text field (#GsurfWindow:typing).
 	 *
 	 * Since: 0.4.2
 	 */
@@ -929,7 +1041,11 @@ gsurf_module_manager_class_init(GsurfModuleManagerClass *klass)
 	 * @manager: the module manager
 	 * @mode: the new #GsurfModePolicy
 	 *
-	 * Emitted when gsurf_module_manager_set_mode() changes the mode.
+	 * Emitted when the input mode in effect changes: through
+	 * gsurf_module_manager_set_mode(), or because the user started or
+	 * stopped typing into a text field in the active window (a page
+	 * field or a chrome entry), or another view or window became active
+	 * (see gsurf_module_manager_get_mode()).
 	 *
 	 * Since: 0.4.2
 	 */

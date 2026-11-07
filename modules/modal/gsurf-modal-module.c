@@ -7,14 +7,18 @@
  * Implements #GsurfInputHandler at high priority and tracks its own mode.
  * NORMAL mode: bare keys are navigation commands (hjkl, gg, G, d/u, H/L,
  * r, and gt/gT to switch tabs); the insert keys (`i` and `a` by default,
- * modal.insert_keys) enter INSERT (keys pass to the page), `gi` focuses
- * the first text field of the page and enters INSERT; Escape returns to
- * NORMAL and leaves (blurs) a focused field, so the next key is a
- * command again, as in vim. A focused page field always takes its keys,
- * whatever the mode.
+ * modal.insert_keys) enter INSERT (keys pass to the page) until Escape;
+ * `gi` focuses the first text field of the page, whose keys are then the
+ * field's for as long as it keeps focus; Escape returns to NORMAL and
+ * leaves (blurs) a focused field, so the next key is a command again, as
+ * in vim. A focused page field takes its keys in NORMAL, and the
+ * published mode (the indicators) reads INSERT while it does: the module
+ * manager derives that from the page focus, this module owns the rest.
  * `f` enters FOLLOW mode: vimium-style link hints are overlaid on every
  * clickable element with short chord labels; typing a chord narrows the
  * set and a unique match is clicked. `F` opens the match in a new view.
+ * A mouse click, another active view, or the page navigating or crashing
+ * ends FOLLOW (and removes the labels), so it never outlives its hints.
  * Ports surf's modal patch and adds vim navigation + hinting.
  */
 
@@ -41,6 +45,8 @@ struct _GsurfModalModule
 	gchar *hint_bg;
 	gchar *hint_fg;
 	gint hint_font_size;     /* CSS pixels, independent of page font settings */
+	GsurfView *hint_view;     /* weak; the page showing FOLLOW's labels */
+	GsurfWindow *hint_window; /* weak; whose active view FOLLOW watches */
 };
 
 static void gsurf_modal_input_init(GsurfInputHandlerInterface *iface);
@@ -59,29 +65,127 @@ scroll(GsurfView *view, const gchar *js)
 	gsurf_view_run_javascript_async(view, js, NULL, NULL, NULL);
 }
 
+static const gchar CLEAR_HINTS_JS[] = "window.__gsurf_clear&&window.__gsurf_clear()";
+
+/* Stop watching the FOLLOW session's page and window (see watch_hints()). */
+static void unwatch_hints(GsurfModalModule *self);
+
 /* Change mode and publish INSERT passthrough so the host suppresses
  * bare-key dispatch to every module (not just this one) while typing,
- * and the mode itself (gsurf_module_manager_set_mode()). */
+ * and the mode itself (gsurf_module_manager_set_mode()). Leaving FOLLOW
+ * also stops watching its page. */
 static void
 set_mode(GsurfModalModule *self, GsurfModePolicy mode)
 {
 	GsurfModuleManager *mgr = gsurf_module_manager_get_default();
 
+	if (mode != GSURF_MODE_FOLLOW)
+		unwatch_hints(self);
 	self->mode = mode;
 	gsurf_module_manager_set_input_passthrough(mgr, mode == GSURF_MODE_INSERT);
 	/* Publish it for mode indicators (chromebar, the wmux status line). */
 	gsurf_module_manager_set_mode(mgr, mode);
 }
 
+/* End a FOLLOW session that the user left some other way than a hint
+ * key (a click, another view, a navigation): drop the labels from the
+ * page that shows them, if it is still there, and return to NORMAL. */
+static void
+cancel_follow(GsurfModalModule *self, gboolean clear_labels)
+{
+	if (self->mode != GSURF_MODE_FOLLOW)
+		return;
+	if (clear_labels && self->hint_view != NULL)
+		gsurf_view_run_javascript_async(self->hint_view, CLEAR_HINTS_JS, NULL, NULL, NULL);
+	set_mode(self, GSURF_MODE_NORMAL);
+}
+
+/* The hint page navigated: once the new document commits, the labels
+ * are gone, and so is the session. */
+static void
+on_hint_view_load(GsurfView *view, GsurfLoadEvent event, gpointer user_data)
+{
+	(void)view;
+	if (event == GSURF_LOAD_COMMITTED)
+		cancel_follow(GSURF_MODAL_MODULE(user_data), FALSE);
+}
+
+/* The hint page's web process died, taking the labels with it. */
+static void
+on_hint_view_crashed(GsurfView *view, gpointer user_data)
+{
+	(void)view;
+	cancel_follow(GSURF_MODAL_MODULE(user_data), FALSE);
+}
+
+/* Another view became active (a tab switch, a pane click, the hint tab
+ * closing): the labels belong to the old page, so the session ends and
+ * they are removed, or they would greet the user on returning there. */
+static void
+on_hint_active_view_changed(GsurfWindow *window, GsurfView *view, gpointer user_data)
+{
+	GsurfModalModule *self = GSURF_MODAL_MODULE(user_data);
+
+	(void)window;
+	if (view != self->hint_view)
+		cancel_follow(self, TRUE);
+}
+
+/* Follow a FOLLOW session's page (@view) and its window, so the session
+ * ends with its labels rather than lingering in the indicator and
+ * swallowing the next keys. */
+static void
+watch_hints(GsurfModalModule *self, GsurfView *view)
+{
+	GsurfWindow *window = gsurf_module_manager_get_active_window(
+		gsurf_module_manager_get_default());
+
+	unwatch_hints(self);
+	self->hint_view = view;
+	g_object_add_weak_pointer(G_OBJECT(view), (gpointer *)&self->hint_view);
+	g_signal_connect_object(view, "load-changed", G_CALLBACK(on_hint_view_load), self, 0);
+	g_signal_connect_object(view, "web-process-terminated",
+		G_CALLBACK(on_hint_view_crashed), self, 0);
+	if (window != NULL) {
+		self->hint_window = window;
+		g_object_add_weak_pointer(G_OBJECT(window), (gpointer *)&self->hint_window);
+		g_signal_connect_object(window, "active-view-changed",
+			G_CALLBACK(on_hint_active_view_changed), self, 0);
+	}
+}
+
+static void
+unwatch_hints(GsurfModalModule *self)
+{
+	if (self->hint_view != NULL) {
+		g_signal_handlers_disconnect_by_func(self->hint_view, on_hint_view_load, self);
+		g_signal_handlers_disconnect_by_func(self->hint_view, on_hint_view_crashed, self);
+		g_object_remove_weak_pointer(G_OBJECT(self->hint_view),
+			(gpointer *)&self->hint_view);
+		self->hint_view = NULL;
+	}
+	if (self->hint_window != NULL) {
+		g_signal_handlers_disconnect_by_func(self->hint_window,
+			on_hint_active_view_changed, self);
+		g_object_remove_weak_pointer(G_OBJECT(self->hint_window),
+			(gpointer *)&self->hint_window);
+		self->hint_window = NULL;
+	}
+}
+
 /* Leave INSERT (or FOLLOW) for NORMAL from a key or action: also leave
- * the focused page field, so the next key is a command (vim's Escape).
- * The blur is harmless when nothing editable is focused. */
+ * the focused page field, so the next key is a command (vim's Escape),
+ * and give the page the keyboard back from a chrome entry (address bar,
+ * find box) that has it, or the window would still be typing there. The
+ * blur and the focus are harmless when there is nothing to leave. */
 static void
 leave_to_normal(GsurfModalModule *self, GsurfView *view)
 {
 	set_mode(self, GSURF_MODE_NORMAL);
-	if (view != NULL)
+	if (view != NULL) {
 		gsurf_view_blur_editable(view);
+		gsurf_view_focus(view);
+	}
 }
 
 /* Whether @name is one of the configured insert keys. */
@@ -93,8 +197,9 @@ is_insert_key(GsurfModalModule *self, const gchar *name)
 }
 
 /* vimium's `gi`: focus the first visible text field of the page (open
- * shadow roots included) and put the caret at its end. Returns "ok" or
- * "none". */
+ * shadow roots included) and put the caret at its end. Returns "ok" once
+ * the field really has the focus (the deepest active element, through
+ * shadow roots), or "none". */
 static const gchar FOCUS_FIRST_INPUT_JS[] =
 	"(function(){var NOT=/^(button|submit|reset|checkbox|radio|file|image|range|color|hidden)$/;"
 	"function ed(e){if(e.isContentEditable)return true;var t=e.tagName;"
@@ -108,6 +213,9 @@ static const gchar FOCUS_FIRST_INPUT_JS[] =
 	"for(var i=0;i<all.length;i++){var e=all[i];if(ed(e)&&vis(e))return e;"
 	"if(e.shadowRoot){var f=find(e.shadowRoot);if(f)return f;}}return null;}"
 	"var e=find(document);if(!e)return 'none';e.focus();"
+	"var a=document.activeElement;"
+	"while(a&&a.shadowRoot&&a.shadowRoot.activeElement)a=a.shadowRoot.activeElement;"
+	"if(a!==e)return 'none';"
 	"try{if(typeof e.value==='string'&&e.setSelectionRange){var n=e.value.length;e.setSelectionRange(n,n);}}catch(x){}"
 	"return 'ok';})()";
 
@@ -207,6 +315,7 @@ start_hints(GsurfModalModule *self, GsurfView *view, gboolean newview)
 	if (res != NULL && atoi(res) > 0) {
 		set_mode(self, GSURF_MODE_FOLLOW);
 		self->hint_newview = newview;
+		watch_hints(self, view);
 		return TRUE;
 	}
 	return FALSE;
@@ -299,7 +408,7 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	/* FOLLOW (link-hint) mode owns all keys until a match or cancel. */
 	if (self->mode == GSURF_MODE_FOLLOW) {
 		if (g_strcmp0(name, "Escape") == 0) {
-			g_free(run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()"));
+			g_free(run_js_sync(view, CLEAR_HINTS_JS));
 			set_mode(self, GSURF_MODE_NORMAL);
 			return TRUE;
 		}
@@ -349,10 +458,14 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 		if (g_strcmp0(name, "i") == 0) {
 			g_autofree gchar *res = run_js_sync(view, FOCUS_FIRST_INPUT_JS);
 
-			/* The field reports its focus asynchronously; INSERT makes
-			 * the very next key text already. */
+			/* The field has the focus now (the script checked), but the
+			 * page reports it asynchronously: record it at once, so the
+			 * very next key is text and the indicator reads INSERT. It
+			 * stays the field's until it loses the focus (Escape, a
+			 * click elsewhere, a submit that loads the next page), as
+			 * any focused field: no sticky INSERT to leave by hand. */
 			if (g_strcmp0(res, "ok") == 0)
-				set_mode(self, GSURF_MODE_INSERT);
+				gsurf_view_set_editing(view, TRUE);
 			return TRUE;
 		}
 		if (g_strcmp0(name, "t") == 0) {
@@ -414,10 +527,25 @@ gsurf_modal_handle_key_event(GsurfInputHandler *handler, GsurfView *view,
 	return FALSE;
 }
 
+/* A mouse button (or wheel notch) ends a FOLLOW session: the user chose
+ * to click or scroll instead, and the labels would no longer match the
+ * page. The press itself goes on to the page. */
+static gboolean
+gsurf_modal_handle_mouse_event(GsurfInputHandler *handler, GsurfView *view,
+                               guint button, guint state)
+{
+	(void)view;
+	(void)button;
+	(void)state;
+	cancel_follow(GSURF_MODAL_MODULE(handler), TRUE);
+	return FALSE;
+}
+
 static void
 gsurf_modal_input_init(GsurfInputHandlerInterface *iface)
 {
 	iface->handle_key_event = gsurf_modal_handle_key_event;
+	iface->handle_mouse_event = gsurf_modal_handle_mouse_event;
 }
 
 /* Core keybind actions this module owns: hinting and mode switches. */
@@ -442,7 +570,7 @@ gsurf_modal_handle_action(GsurfActionHandler *handler, GsurfView *view,
 		return TRUE;
 	case GSURF_ACTION_ENTER_NORMAL_MODE:
 		if (self->mode == GSURF_MODE_FOLLOW) {
-			g_free(run_js_sync(view, "window.__gsurf_clear&&window.__gsurf_clear()"));
+			g_free(run_js_sync(view, CLEAR_HINTS_JS));
 			set_mode(self, GSURF_MODE_NORMAL);
 		} else {
 			leave_to_normal(self, view);
@@ -476,7 +604,7 @@ gsurf_modal_list_keybinds(GsurfKeybindProvider *provider, GPtrArray *entries)
 				"Enter insert mode", "modal", "enter-insert-mode");
 	}
 	gsurf_keybind_help_append(entries, "gi",
-		"Focus the first text field (insert mode)", "modal", "focus-input");
+		"Focus the first text field (type until it loses focus)", "modal", "focus-input");
 	gsurf_keybind_help_append(entries, "Escape",
 		"Return to normal mode and leave the field", "modal", "enter-normal-mode");
 	gsurf_keybind_help_append(entries, "h", "Scroll left", "modal", "scroll-left");
@@ -625,6 +753,7 @@ gsurf_modal_module_finalize(GObject *object)
 	g_clear_pointer(&self->hint_chars, g_free);
 	g_clear_pointer(&self->hint_bg, g_free);
 	g_clear_pointer(&self->hint_fg, g_free);
+	unwatch_hints(self);
 
 	G_OBJECT_CLASS(gsurf_modal_module_parent_class)->finalize(object);
 }

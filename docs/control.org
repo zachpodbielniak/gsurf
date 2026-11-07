@@ -98,7 +98,7 @@ Views are addressed by =view= (the stable id =gsurf_view_get_id()=, as =views.li
 | =lrg.screenshot=       | =path=                                                                     | ={path, bytes}= once the next frame (scene and chrome, as shown) is written as a PNG; relative paths resolve against gsurf's launch directory; -32000 if it could not be written |
 | =actions.list=         | —                                                                          | =[{name, allowed}]= (=allowed=: false where kiosk forbids it) |
 | =action.run=           | =name=, =view?/index?=                                                     | ={action, performed}=: exactly as its key binding would (=gsurf_module_manager_execute_action()=; kiosk refusals are -32003) |
-| =mode.get=             | —                                                                          | ={mode, label, passthrough, modal_active}= |
+| =mode.get=             | —                                                                          | ={mode, label, passthrough, typing, modal_active}= |
 | =mode.set=             | =mode: "normal"/"insert"=, =view?=                                         | the mode; needs the =modal= module (-32002) |
 | =tree.get=             | —                                                                          | ={has_tree_provider, tree, grouped, groups}=: the roots with =children= and =collapsed=; with wmux the tabs grouped per wmux window, then a background group |
 | =tree.move=            | =view=, one of =parent= (0: a root at the end), =before=, =after=, =index= | the view; =parent= needs the =tabs= module |
@@ -136,7 +136,7 @@ The =layout.*= methods go through the =GsurfWindowLayout= vfuncs (=describe=, =l
 | =uri=      | =uri=                                                           | =view, uri, title=                           |
 | =title=    | =title=                                                         | =view, uri, title=                           |
 | =load=     | =load=                                                          | =view, uri, title, state= (started, redirected, committed, finished) |
-| =mode=     | =mode=                                                          | =mode, label, passthrough=                   |
+| =mode=     | =mode=                                                          | =mode, label, passthrough, typing=           |
 | =layout=   | =layout.groups=, =layout.visible=                               | =what=                                       |
 | =download= | =download.started=                                              | =uri, suggested, destination= (null when the engine picks it) |
 | =lrg=      | =lrg.arrangement=, =lrg.environment=, =lrg.reading=, =lrg.history=, =lrg.focus=, =lrg.pin=, =lrg.camera= | =what, arrangement, environment, reading, history= |

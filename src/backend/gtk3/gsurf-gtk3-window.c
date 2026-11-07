@@ -154,7 +154,8 @@ on_view_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer user_dat
 		dx, dy, translate_modifiers(event->state));
 }
 
-/* Focus follows click: with a layout showing several views, the view
+/* Focus follows click (and the window's typing state follows a chrome
+ * entry): with a layout showing several views, the view
  * the user clicks into (WebKit grabs focus on a press) or tabs into
  * becomes the active view. Without a layout only the active view is
  * visible, so nothing changes; a hidden background view never steals the
@@ -174,6 +175,10 @@ on_set_focus(GtkWindow *toplevel, GtkWidget *focus, gpointer user_data)
 	GtkWidget *widget;
 
 	(void)toplevel;
+	/* A chrome text entry (address bar, find box, prompt) takes bare keys
+	 * as text: the window is typing (the mode indicator reads INSERT). */
+	gsurf_window_set_entry_focus(window, focus != NULL &&
+		(GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus)));
 	if (gsurf_window_get_layout(window) == NULL)
 		return;
 	for (widget = focus; widget != NULL; widget = gtk_widget_get_parent(widget)) {

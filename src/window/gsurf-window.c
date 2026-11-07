@@ -26,6 +26,10 @@ typedef struct {
 	guint      wheel_state;    /* the travel towards the next notch, and */
 	gdouble    wheel_travel;   /* whether that notch was consumed */
 	gboolean   wheel_handled;
+	gboolean   entry_focus;    /* a chrome text entry has keyboard focus */
+	gboolean   typing;         /* entry_focus, or the active view editing */
+	GsurfView *editing_view;   /* borrowed; whose notify::editing we follow */
+	gulong     editing_id;
 } GsurfWindowPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfWindow, gsurf_window, G_TYPE_OBJECT)
@@ -45,6 +49,78 @@ enum {
 };
 
 static guint signals[N_SIGNALS];
+
+enum {
+	PROP_0,
+	PROP_ENTRY_FOCUS,
+	PROP_TYPING,
+	N_PROPS
+};
+
+static GParamSpec *props[N_PROPS];
+
+/* Recompute #GsurfWindow:typing: a chrome entry has the keys, or the
+ * active view's page has a focused field. Notifies only on a change. */
+static void
+update_typing(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+	gboolean typing;
+
+	typing = priv->entry_focus ||
+	         (priv->active != NULL && gsurf_view_get_editing(priv->active));
+	if (priv->typing == typing)
+		return;
+	priv->typing = typing;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_TYPING]);
+}
+
+static void
+on_active_editing_changed(GsurfView *view, GParamSpec *pspec, gpointer user_data)
+{
+	(void)view;
+	(void)pspec;
+	update_typing(GSURF_WINDOW(user_data));
+}
+
+/* Follow the editing state of the active view only: a background tab's
+ * focused field takes no keys. Called whenever the active pointer
+ * changes (including to NULL) and on dispose. */
+static void
+follow_active_editing(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(self);
+
+	if (priv->editing_view != priv->active) {
+		if (priv->editing_view != NULL && priv->editing_id != 0)
+			g_signal_handler_disconnect(priv->editing_view, priv->editing_id);
+		priv->editing_view = priv->active;
+		priv->editing_id = 0;
+		/* Bound to the window's lifetime too, should anything activate a
+		 * view on a window that is being torn down. */
+		if (priv->editing_view != NULL)
+			priv->editing_id = g_signal_connect_object(priv->editing_view,
+				"notify::editing", G_CALLBACK(on_active_editing_changed), self, 0);
+	}
+	update_typing(self);
+}
+
+static void
+gsurf_window_get_property(GObject *object, guint prop_id, GValue *value, GParamSpec *pspec)
+{
+	GsurfWindowPrivate *priv = gsurf_window_get_instance_private(GSURF_WINDOW(object));
+
+	switch (prop_id) {
+	case PROP_ENTRY_FOCUS:
+		g_value_set_boolean(value, priv->entry_focus);
+		break;
+	case PROP_TYPING:
+		g_value_set_boolean(value, priv->typing);
+		break;
+	default:
+		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
+	}
+}
 
 static void
 gsurf_window_constructed(GObject *object)
@@ -73,6 +149,11 @@ gsurf_window_dispose(GObject *object)
 
 	if (priv->layout != NULL)
 		gsurf_window_set_layout(self, NULL);
+	/* Stop following the active view: it may outlive the window. */
+	if (priv->editing_view != NULL && priv->editing_id != 0)
+		g_signal_handler_disconnect(priv->editing_view, priv->editing_id);
+	priv->editing_view = NULL;
+	priv->editing_id = 0;
 
 	G_OBJECT_CLASS(gsurf_window_parent_class)->dispose(object);
 }
@@ -256,7 +337,32 @@ gsurf_window_class_init(GsurfWindowClass *klass)
 	object_class->constructed = gsurf_window_constructed;
 	object_class->dispose = gsurf_window_dispose;
 	object_class->finalize = gsurf_window_finalize;
+	object_class->get_property = gsurf_window_get_property;
 	klass->show_keybind_help = gsurf_window_show_keybind_help_js;
+
+	/**
+	 * GsurfWindow:entry-focus:
+	 *
+	 * Whether a text entry of the window's chrome (address bar, find
+	 * box, prompt, LRG URL editor) has keyboard focus, as the backend
+	 * reports it (gsurf_window_set_entry_focus()).
+	 *
+	 * Since: 0.5.9
+	 */
+	props[PROP_ENTRY_FOCUS] = g_param_spec_boolean("entry-focus", NULL, NULL,
+		FALSE, G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfWindow:typing:
+	 *
+	 * Whether bare keys type text in this window: #GsurfWindow:entry-focus,
+	 * or the active view's #GsurfView:editing (gsurf_window_get_typing()).
+	 * Notified only when it changes.
+	 *
+	 * Since: 0.5.9
+	 */
+	props[PROP_TYPING] = g_param_spec_boolean("typing", NULL, NULL,
+		FALSE, G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+	g_object_class_install_properties(object_class, N_PROPS, props);
 
 	signals[SIG_VIEW_ADDED] = g_signal_new(
 		"view-added", G_TYPE_FROM_CLASS(klass),
@@ -474,6 +580,7 @@ gsurf_window_remove_view(GsurfWindow *self, GsurfView *view)
 				g_ptr_array_index(priv->views, MIN(idx, priv->views->len - 1)));
 		} else {
 			priv->active = NULL;
+			follow_active_editing(self);
 			g_signal_emit(self, signals[SIG_ACTIVE_VIEW_CHANGED], 0, NULL);
 		}
 	}
@@ -543,6 +650,9 @@ gsurf_window_set_active_view(GsurfWindow *self, GsurfView *view)
 		gsurf_window_layout_activate_view(priv->layout, self, view);
 	else if (klass->set_active_view != NULL)
 		klass->set_active_view(self, view);
+	/* Typing now depends on the new view's page focus. Before the
+	 * signal, so its handlers already read the new mode. */
+	follow_active_editing(self);
 
 	g_signal_emit(self, signals[SIG_ACTIVE_VIEW_CHANGED], 0, view);
 }
@@ -775,6 +885,44 @@ gsurf_window_get_key_grab(GsurfWindow *self)
 
 	priv = gsurf_window_get_instance_private(self);
 	return priv->key_grab;
+}
+
+void
+gsurf_window_set_entry_focus(GsurfWindow *self, gboolean focused)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_if_fail(GSURF_IS_WINDOW(self));
+
+	priv = gsurf_window_get_instance_private(self);
+	focused = focused != FALSE;
+	if (priv->entry_focus == focused)
+		return;
+	priv->entry_focus = focused;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_ENTRY_FOCUS]);
+	update_typing(self);
+}
+
+gboolean
+gsurf_window_get_entry_focus(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	return priv->entry_focus;
+}
+
+gboolean
+gsurf_window_get_typing(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+
+	priv = gsurf_window_get_instance_private(self);
+	return priv->typing;
 }
 
 /* --- Native operations --- */
