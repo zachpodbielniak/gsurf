@@ -1,4 +1,4 @@
-.TH GSURF 1 "2026" "gsurf 0.5.2" "User Commands"
+.TH GSURF 1 "2026" "gsurf 0.5.3" "User Commands"
 .SH NAME
 gsurf \- GObject Surf, a minimal modular web browser
 .SH SYNOPSIS
@@ -103,6 +103,20 @@ as effective root. Reinstalling the same URI updates its launcher.
 Desktop launcher display name. Defaults to the site's hostname. Requires
 \-\-pwa. Launchers use the gsurf icon and ordinary browser storage; this does
 not install a web manifest, offline bundle, or separate profile.
+.TP
+.B \-\-list\-pwa
+List the installed PWA launchers, per user and system-wide: an
+.I ID
+(a slug of the name, e.g. "my-mail"; a short URL hash is added when two apps
+share a name), the name, the scope (user or system) and the URL. Then exit.
+.TP
+.BR \-\-uninstall\-pwa =\fIID\fR
+Uninstall the PWA with that
+.I ID
+from \-\-list\-pwa (its exact name or URL works too when only one app
+matches; several matches are refused with their ids). The launcher goes to
+the trash where the filesystem has one, otherwise it is deleted.
+System-wide launchers need root, as installing them does.
 .SH ADDRESSES
 The positional argument and the address bar share one normalizer.
 A bare host such as
@@ -150,6 +164,8 @@ gsurf file:///tmp/page.html#section
 gsurf \-\-kiosk https://example.org
 gsurf \-\-pwa \-\-pwa\-name 'My Mail' https://mail.example.org
 sudo gsurf \-\-pwa https://dashboard.example.org
+gsurf \-\-list\-pwa
+gsurf \-\-uninstall\-pwa my\-mail
 .fi
 .SH KEY BINDINGS
 With the default configuration, common bindings include

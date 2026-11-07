@@ -1,7 +1,46 @@
 /* SPDX-License-Identifier: AGPL-3.0-or-later */
 #include <gsurf.h>
 #include <glib/gstdio.h>
+#include <string.h>
 #include <unistd.h>
+
+/* Run gsurf with @argv (NULL-terminated) and return its stdout; *ok gets
+ * whether it exited successfully. */
+static gchar *
+run_capture(GSubprocessLauncher *launcher, gboolean *ok, const gchar *const *argv)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GSubprocess) child = NULL;
+	gchar *out = NULL;
+
+	child = g_subprocess_launcher_spawnv(launcher, argv, &error);
+	g_assert_no_error(error);
+	g_assert_true(g_subprocess_communicate_utf8(child, NULL, NULL, &out, NULL, &error));
+	g_assert_no_error(error);
+	*ok = g_subprocess_get_successful(child);
+	return out;
+}
+
+/* Delete a directory tree (the test's private trash). */
+static void
+remove_tree(const gchar *path)
+{
+	g_autoptr(GDir) dir = g_dir_open(path, 0, NULL);
+	const gchar *name;
+
+	if (dir != NULL) {
+		while ((name = g_dir_read_name(dir)) != NULL) {
+			g_autofree gchar *child = g_build_filename(path, name, NULL);
+
+			if (g_file_test(child, G_FILE_TEST_IS_DIR) &&
+			    !g_file_test(child, G_FILE_TEST_IS_SYMLINK))
+				remove_tree(child);
+			else
+				g_unlink(child);
+		}
+	}
+	g_rmdir(path);
+}
 
 /* Exercise the real CLI before display initialization and user config. */
 static void
@@ -29,6 +68,9 @@ test_cli(void)
 	g_subprocess_launcher_setenv(launcher, "XDG_DATA_HOME", root, TRUE);
 	g_subprocess_launcher_setenv(launcher, "DISPLAY", "", TRUE);
 	g_subprocess_launcher_setenv(launcher, "WAYLAND_DISPLAY", "", TRUE);
+	/* Plain local GIO: no gvfs daemon writing metadata into XDG_DATA_HOME
+	 * when --uninstall-pwa trashes a launcher. */
+	g_subprocess_launcher_setenv(launcher, "GIO_USE_VFS", "local", TRUE);
 	child = g_subprocess_launcher_spawn(launcher, &error, binary, "--pwa-name", "Orphan", NULL);
 	g_assert_no_error(error);
 	g_assert_true(g_subprocess_wait(child, NULL, &error));
@@ -63,8 +105,48 @@ test_cli(void)
 		g_assert_true(g_str_has_suffix(entry, ".desktop"));
 		path = g_build_filename(directory, entry, NULL);
 		g_assert_null(g_dir_read_name(applications));
-		g_assert_cmpint(g_unlink(path), ==, 0);
 		g_clear_pointer(&applications, g_dir_close);
+
+		/* --list-pwa shows it under an id; --uninstall-pwa takes that id. */
+		{
+			const gchar *list[] = { binary, "--list-pwa", NULL };
+			const gchar *uninstall[] = { binary, "--uninstall-pwa", "test-app", NULL };
+			const gchar *again[] = { binary, "--uninstall-pwa", "test-app", NULL };
+			const gchar *with_uri[] = { binary, "--list-pwa", "https://example.org", NULL };
+			const gchar *with_pwa[] = { binary, "--pwa", "--uninstall-pwa", "x",
+				"https://example.org", NULL };
+			g_autofree gchar *out = NULL;
+			g_autofree gchar *trash = g_build_filename(root, "Trash", NULL);
+			gboolean ok = FALSE;
+
+			g_subprocess_launcher_set_flags(launcher,
+				G_SUBPROCESS_FLAGS_STDOUT_PIPE | G_SUBPROCESS_FLAGS_STDERR_SILENCE);
+			out = run_capture(launcher, &ok, list);
+			g_assert_true(ok);
+			g_assert_nonnull(strstr(out, "test-app"));
+			g_assert_nonnull(strstr(out, "Test App"));
+			g_assert_nonnull(strstr(out, "https://example.org"));
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, uninstall);
+			g_assert_true(ok);
+			g_assert_nonnull(strstr(out, "Uninstalled Test App (test-app)"));
+			g_assert_false(g_file_test(path, G_FILE_TEST_EXISTS));
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, list);
+			g_assert_true(ok);
+			g_assert_nonnull(strstr(out, "No gsurf PWAs installed"));
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, again);
+			g_assert_false(ok);
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, with_uri);
+			g_assert_false(ok);
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, with_pwa);
+			g_assert_false(ok);
+			/* XDG_DATA_HOME points into the test tree, so the trash does. */
+			remove_tree(trash);
+		}
 		g_assert_cmpint(g_rmdir(directory), ==, 0);
 	} else {
 		g_test_message("Root: user-directory installation omitted to avoid system mutation");

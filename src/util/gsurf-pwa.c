@@ -106,6 +106,8 @@ gsurf_pwa_install(const gchar *uri, const gchar *name,
 	g_key_file_set_string(desktop, "Desktop Entry", "Type", "Application");
 	g_key_file_set_string(desktop, "Desktop Entry", "Name", name != NULL ? name : host);
 	g_key_file_set_string(desktop, "Desktop Entry", "Exec", exec);
+	/* What --list-pwa shows, without having to parse Exec back. */
+	g_key_file_set_string(desktop, "Desktop Entry", "X-Gsurf-PWA-URI", uri);
 	g_key_file_set_string(desktop, "Desktop Entry", "Icon", "gsurf");
 	g_key_file_set_string(desktop, "Desktop Entry", "Categories", "Network;WebBrowser;");
 	g_key_file_set_boolean(desktop, "Desktop Entry", "Terminal", FALSE);
@@ -133,4 +135,283 @@ gsurf_pwa_install(const gchar *uri, const gchar *name,
 		return NULL;
 	}
 	return g_steal_pointer(&path);
+}
+
+/* ---------------------------------------------------------------- list -- */
+
+#define PWA_PREFIX "gsurf-pwa-"
+#define PWA_SUFFIX ".desktop"
+#define PWA_DIGEST_LEN 64
+#define PWA_SLUG_MAX 40
+
+void
+gsurf_pwa_entry_free(GsurfPwaEntry *entry)
+{
+	if (entry == NULL)
+		return;
+	g_free(entry->id);
+	g_free(entry->name);
+	g_free(entry->uri);
+	g_free(entry->path);
+	g_free(entry);
+}
+
+/* The launcher filename's URL hash, or NULL if @filename is not one of ours
+ * (gsurf-pwa-<64 hex>.desktop). */
+static gchar *
+launcher_digest(const gchar *filename)
+{
+	gsize prefix = strlen(PWA_PREFIX);
+	gsize i;
+
+	if (!g_str_has_prefix(filename, PWA_PREFIX) || !g_str_has_suffix(filename, PWA_SUFFIX)
+	    || strlen(filename) != prefix + PWA_DIGEST_LEN + strlen(PWA_SUFFIX))
+		return NULL;
+	for (i = 0; i < PWA_DIGEST_LEN; i++)
+		if (!g_ascii_isxdigit(filename[prefix + i]))
+			return NULL;
+	return g_strndup(filename + prefix, PWA_DIGEST_LEN);
+}
+
+/* A typable id from a display name: ASCII letters and digits lowercased,
+ * every other run of characters one '-', trimmed, capped; "pwa" if nothing
+ * is left (a name in another script). */
+static gchar *
+slugify(const gchar *name)
+{
+	GString *slug = g_string_new(NULL);
+	const gchar *p;
+
+	for (p = name; p != NULL && *p != '\0' && slug->len < PWA_SLUG_MAX; p++) {
+		if (g_ascii_isalnum(*p))
+			g_string_append_c(slug, g_ascii_tolower(*p));
+		else if (slug->len > 0 && slug->str[slug->len - 1] != '-')
+			g_string_append_c(slug, '-');
+	}
+	while (slug->len > 0 && slug->str[slug->len - 1] == '-')
+		g_string_truncate(slug, slug->len - 1);
+	if (slug->len == 0)
+		g_string_assign(slug, "pwa");
+	return g_string_free(slug, FALSE);
+}
+
+/* The site URL of a launcher written before X-Gsurf-PWA-URI: the argument
+ * after "--" in Exec.  Exec's quoting is a subset of the shell's (double
+ * quotes, backslash before " ` $ \), and GKeyFile already undid the
+ * desktop-string layer; "%%" is the escaped '%'. */
+static gchar *
+uri_from_exec(const gchar *exec)
+{
+	g_auto(GStrv) argv = NULL;
+	gint argc = 0;
+	gint i;
+
+	if (exec == NULL || !g_shell_parse_argv(exec, &argc, &argv, NULL))
+		return NULL;
+	for (i = 0; i + 1 < argc; i++) {
+		if (g_strcmp0(argv[i], "--") == 0) {
+			g_auto(GStrv) parts = g_strsplit(argv[i + 1], "%%", -1);
+
+			return g_strjoinv("%", parts);
+		}
+	}
+	return NULL;
+}
+
+/* Read one directory's launchers into @out, with their slug as a provisional
+ * id; @digests receives each entry's URL hash (same index). */
+static void
+scan_directory(const gchar *directory, gboolean system, GPtrArray *out,
+               GPtrArray *digests)
+{
+	g_autoptr(GDir) dir = NULL;
+	const gchar *filename;
+
+	if (directory == NULL)
+		return;
+	dir = g_dir_open(directory, 0, NULL);
+	if (dir == NULL)
+		return;
+	while ((filename = g_dir_read_name(dir)) != NULL) {
+		g_autofree gchar *digest = launcher_digest(filename);
+		g_autoptr(GKeyFile) desktop = NULL;
+		g_autofree gchar *path = NULL;
+		GsurfPwaEntry *entry;
+
+		if (digest == NULL)
+			continue;
+		path = g_build_filename(directory, filename, NULL);
+		desktop = g_key_file_new();
+		entry = g_new0(GsurfPwaEntry, 1);
+		entry->path = g_steal_pointer(&path);
+		entry->system = system;
+		if (g_key_file_load_from_file(desktop, entry->path, G_KEY_FILE_NONE, NULL)) {
+			entry->name = g_key_file_get_string(desktop, "Desktop Entry", "Name", NULL);
+			entry->uri = g_key_file_get_string(desktop, "Desktop Entry",
+				"X-Gsurf-PWA-URI", NULL);
+			if (entry->uri == NULL) {
+				g_autofree gchar *exec = g_key_file_get_string(desktop,
+					"Desktop Entry", "Exec", NULL);
+
+				entry->uri = uri_from_exec(exec);
+			}
+		}
+		/* An unreadable launcher still lists (and uninstalls) by its hash. */
+		if (entry->name == NULL)
+			entry->name = g_strdup(filename);
+		entry->id = slugify(entry->name);
+		g_ptr_array_add(out, entry);
+		g_ptr_array_add(digests, g_steal_pointer(&digest));
+	}
+}
+
+/* How many entries carry @id. */
+static guint
+count_id(GPtrArray *entries, const gchar *id)
+{
+	guint i, n = 0;
+
+	for (i = 0; i < entries->len; i++)
+		if (g_strcmp0(((GsurfPwaEntry *)g_ptr_array_index(entries, i))->id, id) == 0)
+			n++;
+	return n;
+}
+
+static gint
+compare_entries(gconstpointer a, gconstpointer b)
+{
+	const GsurfPwaEntry *ea = *(const GsurfPwaEntry *const *)a;
+	const GsurfPwaEntry *eb = *(const GsurfPwaEntry *const *)b;
+
+	return g_strcmp0(ea->id, eb->id);
+}
+
+GPtrArray *
+gsurf_pwa_list(const gchar *user_dir, const gchar *system_dir)
+{
+	GPtrArray *entries = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_pwa_entry_free);
+	g_autoptr(GPtrArray) digests = g_ptr_array_new_with_free_func(g_free);
+	g_autofree gboolean *clash = NULL;
+	guint i;
+
+	scan_directory(user_dir, FALSE, entries, digests);
+	scan_directory(system_dir, TRUE, entries, digests);
+
+	/* 1. Slugs shared by several apps get the URL hash's first 8 digits. */
+	clash = g_new0(gboolean, MAX(entries->len, 1));
+	for (i = 0; i < entries->len; i++)
+		clash[i] = count_id(entries,
+			((GsurfPwaEntry *)g_ptr_array_index(entries, i))->id) > 1;
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		if (clash[i]) {
+			gchar *id = g_strdup_printf("%s-%.8s", e->id,
+				(const gchar *)g_ptr_array_index(digests, i));
+
+			g_free(e->id);
+			e->id = id;
+		}
+	}
+	/* 2. The same URL installed per user and system-wide still collides:
+	 *    the scope tells them apart. */
+	for (i = 0; i < entries->len; i++)
+		clash[i] = count_id(entries,
+			((GsurfPwaEntry *)g_ptr_array_index(entries, i))->id) > 1;
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		if (clash[i]) {
+			gchar *id = g_strdup_printf("%s-%s", e->id, e->system ? "system" : "user");
+
+			g_free(e->id);
+			e->id = id;
+		}
+	}
+
+	g_ptr_array_sort(entries, compare_entries);
+	return entries;
+}
+
+GsurfPwaEntry *
+gsurf_pwa_find(GPtrArray *entries, const gchar *query, GError **error)
+{
+	g_autoptr(GPtrArray) matches = g_ptr_array_new();
+	g_autofree gchar *folded = NULL;
+	guint i;
+
+	g_return_val_if_fail(entries != NULL, NULL);
+
+	if (query == NULL || *query == '\0') {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"no PWA named (give an id from --list-pwa)");
+		return NULL;
+	}
+
+	/* 1. An id is unique by construction. */
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		if (g_strcmp0(e->id, query) == 0)
+			return e;
+	}
+
+	/* 2. A display name (any case) or the exact URL. */
+	folded = g_utf8_casefold(query, -1);
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+		g_autofree gchar *name = g_utf8_casefold(e->name, -1);
+
+		if (g_strcmp0(name, folded) == 0 || g_strcmp0(e->uri, query) == 0)
+			g_ptr_array_add(matches, e);
+	}
+	if (matches->len == 1)
+		return g_ptr_array_index(matches, 0);
+	if (matches->len == 0) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND,
+			"no installed PWA is called '%s' (--list-pwa shows the ids)", query);
+		return NULL;
+	}
+	{
+		g_autoptr(GString) ids = g_string_new(NULL);
+
+		for (i = 0; i < matches->len; i++)
+			g_string_append_printf(ids, "%s%s", i > 0 ? ", " : "",
+				((GsurfPwaEntry *)g_ptr_array_index(matches, i))->id);
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS,
+			"'%s' matches %u PWAs; uninstall one by id: %s", query, matches->len,
+			ids->str);
+	}
+	return NULL;
+}
+
+gboolean
+gsurf_pwa_uninstall(const GsurfPwaEntry *entry, gboolean *out_trashed, GError **error)
+{
+	g_autoptr(GFile) file = NULL;
+	g_autoptr(GError) trash_error = NULL;
+
+	g_return_val_if_fail(entry != NULL && entry->path != NULL, FALSE);
+
+	if (out_trashed != NULL)
+		*out_trashed = FALSE;
+	file = g_file_new_for_path(entry->path);
+	/* Reversible first: the trash, so a mistaken uninstall can be restored. */
+	if (g_file_trash(file, NULL, &trash_error)) {
+		if (out_trashed != NULL)
+			*out_trashed = TRUE;
+		return TRUE;
+	}
+	if (!g_error_matches(trash_error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED)) {
+		g_propagate_prefixed_error(error, g_steal_pointer(&trash_error),
+			"Cannot remove '%s': ", entry->path);
+		return FALSE;
+	}
+	/* No trash on that filesystem (often /usr/local as root): delete. */
+	if (!g_file_delete(file, NULL, error)) {
+		g_prefix_error(error, "Cannot remove '%s': ", entry->path);
+		return FALSE;
+	}
+	return TRUE;
 }
