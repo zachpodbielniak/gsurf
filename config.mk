@@ -232,6 +232,26 @@ LRG_GRAYLIB_LIB := $(GRAYLIB_DIR)/build/lib/libgraylib.a
 LRG_RAYLIB_LIB  := $(GRAYLIB_DIR)/deps/raylib/src/libraylib.a
 LRG_PLATFORM_LIBS := -lGL -lm -lpthread -ldl -lrt -lX11
 
+# --lrg=3d renders tabs as panels in libregnum's 3D scene (Lrg3DSurface, the
+# term/ module cmacs lrgterm uses), so it links libregnum itself, not only
+# graylib.  liblibregnum.a already merges graylib + raylib (+ its yaml-glib),
+# so in a 3D build it REPLACES the two graylib archives on the link line; the
+# static link pulls only the objects the scene reaches (term/, graphics/,
+# vr/ stubs), which need nothing beyond GLib/GIO, json-glib and X11.
+# LRG_3D=0 keeps the old graylib-only build (--lrg=3d then reports that the
+# build has no 3D support).  An embedder that builds libregnum itself points
+# LRG_LIBREGNUM_LIB at its archive.
+LRG_3D ?= 1
+LRG_LIBREGNUM_LIB ?= $(LIBREGNUM_DIR)/build/release/lib/liblibregnum.a
+# How gsurf builds its vendored libregnum when the archive is missing: only the
+# library, without the optional pieces the scene never touches (editor, GIR,
+# tests, examples, OpenXR, fribidi, crispy, ALSA, Steam).  BUILDDIR and DEBUG
+# are pinned because gsurf's own command-line values reach the sub-make via
+# MAKEFLAGS and would move the archive away from LRG_LIBREGNUM_LIB.
+LRG_LIBREGNUM_MAKEFLAGS := BUILDDIR=build/release DEBUG=0 SANITIZE=0 ASAN=0 \
+	BUILD_SHARED=0 BUILD_GIR=0 BUILD_TESTS=0 BUILD_EXAMPLES=0 BUILD_DOCS=0 \
+	BUILD_EDITOR=0 BUILD_EDITOR_UI=0 OPENXR=0 FRIBIDI=0 CRISPY=0 ALSA=0 STEAM=0
+
 ifeq ($(LRG_BACKEND),1)
     # WebKitGTK offscreen engine unless explicitly building the GTK-free WPE one.
     LRG_ENGINE ?= webkitgtk
@@ -262,9 +282,18 @@ for the bundled deps/libregnum, or pass LIBREGNUM_DIR=<a recursively checked-out
         endif
         # -isystem so graylib's own headers don't trip -Wall -Wextra.
         CFLAGS += -isystem $(LRG_GRAYLIB_INC) -isystem $(LRG_LIBREGNUM_INC)
-        # graylib calls raylib, so libgraylib.a must precede libraylib.a.
-        LRG_LIBS := $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) $(LRG_PLATFORM_LIBS) \
-                    $(LRG_FONT_LIBS)
+        ifeq ($(LRG_3D),1)
+            # libregnum.h needs json-glib's headers (gsurf links json-glib
+            # already for the control socket).
+            CFLAGS += -DGSURF_HAVE_LRG_3D=1 \
+                      $(shell pkg-config --cflags json-glib-1.0 2>/dev/null)
+            # liblibregnum.a carries graylib + raylib inside it.
+            LRG_LIBS := $(LRG_LIBREGNUM_LIB) $(LRG_PLATFORM_LIBS) $(LRG_FONT_LIBS)
+        else
+            # graylib calls raylib, so libgraylib.a must precede libraylib.a.
+            LRG_LIBS := $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) $(LRG_PLATFORM_LIBS) \
+                        $(LRG_FONT_LIBS)
+        endif
         LDFLAGS += $(LRG_LIBS)
     endif
 else

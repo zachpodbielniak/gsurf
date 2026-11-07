@@ -38,6 +38,7 @@ struct _GsurfLrgView
 	int             tex_w;
 	int             tex_h;
 	gboolean        frame_dirty;
+	guint64         texture_serial;  /* bumped on every upload */
 	gboolean        focused;
 };
 
@@ -785,6 +786,7 @@ gsurf_lrg_view_get_texture(GsurfLrgView *self, int *out_width, int *out_height)
 			(gfloat)w, (gfloat)h);
 		grl_texture_update_rec(self->texture, rect, px);
 		self->frame_dirty = FALSE;
+		self->texture_serial++;
 	}
 
 	if (out_width != NULL)
@@ -792,6 +794,103 @@ gsurf_lrg_view_get_texture(GsurfLrgView *self, int *out_width, int *out_height)
 	if (out_height != NULL)
 		*out_height = h;
 	return self->texture;
+}
+
+guint64
+gsurf_lrg_view_get_texture_serial(GsurfLrgView *self)
+{
+	g_return_val_if_fail(GSURF_IS_LRG_VIEW(self), 0);
+	return self->texture_serial;
+}
+
+const guint8 *
+gsurf_lrg_view_peek_pixels(GsurfLrgView *self, int *out_width, int *out_height)
+{
+	g_return_val_if_fail(GSURF_IS_LRG_VIEW(self), NULL);
+	return gsurf_lrg_engine_get_pixels(self->engine, out_width, out_height);
+}
+
+/* --- back/forward list (3D history depth) --- */
+
+void
+gsurf_lrg_history_entry_free(GsurfLrgHistoryEntry *entry)
+{
+	if (entry == NULL)
+		return;
+	g_free(entry->uri);
+	g_free(entry->title);
+	g_free(entry);
+}
+
+/* Wrap one WebKit list item as an owned entry. */
+static GsurfLrgHistoryEntry *
+lrg_history_entry_new(WebKitBackForwardListItem *item)
+{
+	GsurfLrgHistoryEntry *e = g_new0(GsurfLrgHistoryEntry, 1);
+	const gchar *title = webkit_back_forward_list_item_get_title(item);
+
+	e->uri = g_strdup(webkit_back_forward_list_item_get_uri(item));
+	e->title = (title != NULL && *title != '\0') ? g_strdup(title) : NULL;
+	return e;
+}
+
+void
+gsurf_lrg_view_get_history(GsurfLrgView *self, guint limit,
+                           GPtrArray **out_back, GPtrArray **out_forward)
+{
+	WebKitBackForwardList *list;
+	GPtrArray *back;
+	GPtrArray *fwd;
+	guint i;
+
+	g_return_if_fail(GSURF_IS_LRG_VIEW(self));
+	g_return_if_fail(out_back != NULL && out_forward != NULL);
+
+	back = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_lrg_history_entry_free);
+	fwd = g_ptr_array_new_with_free_func(
+		(GDestroyNotify)gsurf_lrg_history_entry_free);
+
+	/* get_nth_item(-k) is k steps back and (+k) k steps forward; walking
+	 * outward from the current item gives "nearest first" in both lists
+	 * without depending on the order of the *_list_with_limit() GLists. */
+	list = webkit_web_view_get_back_forward_list(self->webview);
+	for (i = 1; list != NULL && i <= limit; i++) {
+		WebKitBackForwardListItem *item =
+			webkit_back_forward_list_get_nth_item(list, -(gint)i);
+		if (item == NULL)
+			break;
+		g_ptr_array_add(back, lrg_history_entry_new(item));
+	}
+	for (i = 1; list != NULL && i <= limit; i++) {
+		WebKitBackForwardListItem *item =
+			webkit_back_forward_list_get_nth_item(list, (gint)i);
+		if (item == NULL)
+			break;
+		g_ptr_array_add(fwd, lrg_history_entry_new(item));
+	}
+
+	*out_back = back;
+	*out_forward = fwd;
+}
+
+gboolean
+gsurf_lrg_view_go_history(GsurfLrgView *self, gint offset)
+{
+	WebKitBackForwardList *list;
+	WebKitBackForwardListItem *item;
+
+	g_return_val_if_fail(GSURF_IS_LRG_VIEW(self), FALSE);
+
+	if (offset == 0)
+		return FALSE;
+	list = webkit_web_view_get_back_forward_list(self->webview);
+	item = list != NULL ? webkit_back_forward_list_get_nth_item(list, offset)
+	                    : NULL;
+	if (item == NULL)
+		return FALSE;
+	webkit_web_view_go_to_back_forward_list_item(self->webview, item);
+	return TRUE;
 }
 
 void

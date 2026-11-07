@@ -22,6 +22,12 @@
 #include "control/gsurf-control-server.h"
 #include "control/gsurf-control-provider.h"
 #include "control/gsurf-control-private.h"
+#ifdef GSURF_HAVE_LRG_BACKEND
+#include "backend/lrg/gsurf-lrg-window.h"
+#endif
+#ifdef GSURF_HAVE_LRG_3D
+#include "backend/lrg/gsurf-lrg-scene.h"
+#endif
 
 #include <errno.h>
 #include <string.h>
@@ -213,7 +219,7 @@ G_DEFINE_FINAL_TYPE(GsurfControlServer, gsurf_control_server, G_TYPE_OBJECT)
 G_DEFINE_FINAL_TYPE(GsurfControlInvocation, gsurf_control_invocation, G_TYPE_OBJECT)
 
 static const gchar *const core_topics[] = {
-	"view", "uri", "title", "load", "mode", "layout", "download", NULL
+	"view", "uri", "title", "load", "mode", "layout", "download", "lrg", NULL
 };
 
 static void conn_send(Conn *conn, const gchar *line);
@@ -1256,6 +1262,37 @@ on_layout_groups(GsurfWindow *window, gpointer user_data)
 		"layout.groups", layout_data("groups"));
 }
 
+#ifdef GSURF_HAVE_LRG_3D
+/* The 3D scene changed: event "lrg.<what>" on topic "lrg", carrying the
+ * scene's modes so a subscriber needs no follow-up lrg.state call. */
+static void
+on_lrg_scene_changed(GsurfLrgWindow *window, const gchar *what, gpointer user_data)
+{
+	GsurfLrgScene *scene = gsurf_lrg_window_get_scene(window);
+	g_autoptr(JsonBuilder) b = NULL;
+	g_autofree gchar *event = NULL;
+
+	if (scene == NULL || what == NULL)
+		return;
+	b = json_builder_new();
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "what");
+	json_builder_add_string_value(b, what);
+	json_builder_set_member_name(b, "arrangement");
+	json_builder_add_string_value(b, gsurf_lrg_scene_get_arrangement(scene));
+	json_builder_set_member_name(b, "environment");
+	json_builder_add_string_value(b, gsurf_lrg_scene_get_environment(scene));
+	json_builder_set_member_name(b, "reading");
+	json_builder_add_boolean_value(b, gsurf_lrg_scene_get_reading(scene));
+	json_builder_set_member_name(b, "history");
+	json_builder_add_boolean_value(b, gsurf_lrg_scene_get_history(scene));
+	json_builder_end_object(b);
+	event = g_strconcat("lrg.", what, NULL);
+	gsurf_control_server_emit_event(GSURF_CONTROL_SERVER(user_data), "lrg", event,
+		json_builder_get_root(b));
+}
+#endif
+
 static void
 note_focus(GsurfControlServer *self)
 {
@@ -1312,6 +1349,11 @@ watch_window(GsurfControlServer *self, GsurfWindow *window)
 		self, 0);
 	g_signal_connect_object(window, "key-press", G_CALLBACK(on_key), self, 0);
 	g_signal_connect_object(window, "button-press", G_CALLBACK(on_key_or_button), self, 0);
+#ifdef GSURF_HAVE_LRG_3D
+	if (GSURF_IS_LRG_WINDOW(window))
+		g_signal_connect_object(window, "scene-changed",
+			G_CALLBACK(on_lrg_scene_changed), self, 0);
+#endif
 	native = gsurf_window_get_native_widget(window);
 	if (native != NULL && G_IS_OBJECT(native) &&
 	    g_object_class_find_property(G_OBJECT_GET_CLASS(native), "is-active") != NULL)

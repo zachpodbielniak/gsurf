@@ -140,6 +140,81 @@ void gsurf_lrg_view_set_focus(GsurfLrgView *self, gboolean focused);
  */
 gboolean gsurf_lrg_view_get_focus(GsurfLrgView *self);
 
+/**
+ * gsurf_lrg_view_get_texture_serial:
+ * @self: a #GsurfLrgView
+ *
+ * A counter bumped every time gsurf_lrg_view_get_texture() uploads new
+ * pixels.  A consumer that derives data from the texture (the 3D scene's
+ * mipmaps) compares it to know whether to refresh, whoever did the upload.
+ *
+ * Returns: the upload count
+ */
+guint64 gsurf_lrg_view_get_texture_serial(GsurfLrgView *self);
+
+/**
+ * gsurf_lrg_view_peek_pixels:
+ * @self: a #GsurfLrgView
+ * @out_width: (out) (optional): frame width in pixels
+ * @out_height: (out) (optional): frame height in pixels
+ *
+ * Borrows the most recent captured frame as tightly packed RGBA8 pixels (the
+ * same data gsurf_lrg_view_get_texture() uploads), for callers that keep a
+ * copy -- the 3D history view's page thumbnails.  The pointer stays valid
+ * only until the next capture, resize or the view's destruction.
+ *
+ * Returns: (transfer none) (nullable): the pixels, or %NULL before the first
+ *   frame
+ */
+const guint8 *gsurf_lrg_view_peek_pixels(GsurfLrgView *self, int *out_width,
+                                         int *out_height);
+
+/**
+ * GsurfLrgHistoryEntry:
+ * @uri: the entry's URI
+ * @title: (nullable): the entry's page title, if WebKit recorded one
+ *
+ * One back/forward-list entry, as returned by gsurf_lrg_view_get_history().
+ * Free with gsurf_lrg_history_entry_free().
+ */
+typedef struct {
+	gchar *uri;
+	gchar *title;
+} GsurfLrgHistoryEntry;
+
+/**
+ * gsurf_lrg_history_entry_free:
+ * @entry: (transfer full) (nullable): an entry
+ */
+void gsurf_lrg_history_entry_free(GsurfLrgHistoryEntry *entry);
+
+/**
+ * gsurf_lrg_view_get_history:
+ * @self: a #GsurfLrgView
+ * @limit: the maximum number of entries to return in each direction
+ * @out_back: (out) (transfer full) (element-type GsurfLrgHistoryEntry):
+ *   the back list, nearest first (element 0 is one step back)
+ * @out_forward: (out) (transfer full) (element-type GsurfLrgHistoryEntry):
+ *   the forward list, nearest first
+ *
+ * Reads the page's back/forward list.  The 3D history-depth view shows these
+ * entries as panels receding behind the current page.  The arrays own their
+ * elements (freed with gsurf_lrg_history_entry_free()).
+ */
+void gsurf_lrg_view_get_history(GsurfLrgView *self, guint limit,
+                                GPtrArray **out_back, GPtrArray **out_forward);
+
+/**
+ * gsurf_lrg_view_go_history:
+ * @self: a #GsurfLrgView
+ * @offset: steps to move: negative goes back, positive goes forward
+ *
+ * Jumps straight to a back/forward-list entry (several steps at once).
+ *
+ * Returns: %TRUE if an entry exists at @offset and navigation started
+ */
+gboolean gsurf_lrg_view_go_history(GsurfLrgView *self, gint offset);
+
 G_END_DECLS
 
 #endif /* GSURF_LRG_VIEW_H */

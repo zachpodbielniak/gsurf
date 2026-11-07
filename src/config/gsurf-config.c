@@ -243,6 +243,32 @@ parse_root(GsurfConfig *self, YamlMapping *root)
 		}
 	}
 
+	/* lrg: (the --lrg=3d scene, docs/lrg-3d.org) */
+	m = yaml_mapping_get_mapping_member(root, "lrg");
+	if (m != NULL) {
+		if (yaml_mapping_has_member(m, "arrangement")) {
+			const gchar *v = yaml_mapping_get_string_member(m, "arrangement");
+
+			g_free(self->lrg_arrangement);
+			self->lrg_arrangement = (v != NULL && *v != '\0') ? g_strdup(v) : NULL;
+		}
+		if (yaml_mapping_has_member(m, "environment")) {
+			const gchar *v = yaml_mapping_get_string_member(m, "environment");
+
+			g_free(self->lrg_environment);
+			self->lrg_environment = (v != NULL && *v != '\0') ? g_strdup(v) : NULL;
+		}
+		if (yaml_mapping_has_member(m, "background-fps"))
+			self->lrg_background_fps =
+				CLAMP(yaml_mapping_get_double_member(m, "background-fps"), 0.2, 60.0);
+		if (yaml_mapping_has_member(m, "history-depth"))
+			self->lrg_history_depth =
+				CLAMP((gint)yaml_mapping_get_int_member(m, "history-depth"), 1, 32);
+		if (yaml_mapping_has_member(m, "reading-single-tab"))
+			self->lrg_reading_single_tab =
+				yaml_mapping_get_boolean_member(m, "reading-single-tab");
+	}
+
 	/* modules: (retained for module code to parse its own section) */
 	m = yaml_mapping_get_mapping_member(root, "modules");
 	if (m != NULL) {
@@ -453,6 +479,8 @@ gsurf_config_finalize(GObject *object)
 	g_clear_pointer(&self->proxy_mode, g_free);
 	g_clear_pointer(&self->proxy_uri, g_free);
 	g_clear_pointer(&self->control_name, g_free);
+	g_clear_pointer(&self->lrg_arrangement, g_free);
+	g_clear_pointer(&self->lrg_environment, g_free);
 	g_clear_pointer(&self->modules_mapping, yaml_mapping_unref);
 	g_clear_object(&self->settings);
 
@@ -498,6 +526,11 @@ gsurf_config_init(GsurfConfig *self)
 	self->ephemeral = FALSE;
 	self->control_enabled = TRUE;
 	self->control_name = NULL;
+	self->lrg_arrangement = NULL;
+	self->lrg_environment = NULL;
+	self->lrg_background_fps = 4.0;
+	self->lrg_history_depth = 8;
+	self->lrg_reading_single_tab = TRUE;
 }
 
 GsurfConfig *

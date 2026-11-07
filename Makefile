@@ -74,6 +74,9 @@ LIB_SRCS += src/backend/lrg/gsurf-lrg-backend.c \
 	src/backend/lrg/gsurf-lrg-view.c \
 	src/backend/lrg/gsurf-lrg-window.c \
 	src/backend/lrg/gsurf-lrg-engine-$(LRG_ENGINE).c
+ifeq ($(LRG_3D),1)
+LIB_SRCS += src/backend/lrg/gsurf-lrg-scene.c
+endif
 
 # Standalone convenience: build the bundled (or pointed-at) graylib so its
 # graylib/raylib archives -- and its GENERATED headers (grl-version.h, which
@@ -94,10 +97,21 @@ LIB_SRCS += src/backend/lrg/gsurf-lrg-backend.c \
 # `BUILDDIR=build-lrg' would otherwise move graylib's archives away from
 # $(LRG_GRAYLIB_LIB)), and its GIR is skipped (gsurf's `BUILD_GIR=1' is about
 # Gsurf's GIR; graylib's would only add a g-ir-scanner dependency).
+#
+# A 3D build (LRG_3D=1) links liblibregnum.a instead, and libregnum's own build
+# produces graylib at the same paths -- so ONE grouped rule builds all three,
+# rather than two rules racing over the same graylib tree.
+ifeq ($(LRG_3D),1)
+$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) &:
+	$(MAKE) -C $(LIBREGNUM_DIR) all $(LRG_LIBREGNUM_MAKEFLAGS)
+$(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): \
+	$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB)
+else
 $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) &:
 	$(MAKE) -C $(GRAYLIB_DIR) BUILDDIR=$(abspath $(GRAYLIB_DIR))/build BUILD_GIR=0
 $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): \
 	$(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB)
+endif
 # The LRG sources include graylib.h, whose grl-version.h exists only once
 # graylib has been built: order-only, so a rebuilt archive doesn't recompile.
 $(patsubst src/%.c,$(OBJDIR)/%.o,$(filter src/backend/lrg/%,$(LIB_SRCS))): \
@@ -155,7 +169,8 @@ TEST_BINS := $(patsubst tests/%.c,$(OUTDIR)/%,$(TEST_SRCS))
 # depends on it, so a configuration change rebuilds exactly once.
 GSURF_FLAGS_STAMP := $(OBJDIR)/.build-flags
 GSURF_FLAGS_NOW := CC=$(CC) GTK_BACKEND=$(GTK_BACKEND) LRG_BACKEND=$(LRG_BACKEND) \
-	LRG_ENGINE=$(LRG_ENGINE) LIBREGNUM_DIR=$(LIBREGNUM_DIR) STATIC=$(STATIC) \
+	LRG_ENGINE=$(LRG_ENGINE) LRG_3D=$(LRG_3D) LIBREGNUM_DIR=$(LIBREGNUM_DIR) \
+	STATIC=$(STATIC) \
 	CFLAGS=$(CFLAGS) TEST_CFLAGS=$(TEST_CFLAGS) \
 	LDFLAGS=$(LDFLAGS)
 ifeq ($(filter clean clean-all,$(MAKECMDGOALS)),)

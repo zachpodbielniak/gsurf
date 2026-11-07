@@ -46,6 +46,9 @@ static gchar    *opt_pwa_name = NULL;
  * (matching `emacs --lrg').  Parsed by opt_lrg_cb so the value is optional. */
 static gboolean            opt_lrg_given = FALSE;
 static GsurfLrgRenderMode  opt_lrg_mode  = GSURF_LRG_RENDER_MODE_2D;
+/* --lrg=3d:ARRANGEMENT:ENVIRONMENT: the scene tokens (NULL = from config). */
+static gchar              *opt_lrg_arrangement = NULL;
+static gchar              *opt_lrg_environment = NULL;
 
 static gboolean
 opt_lrg_cb(const gchar *name, const gchar *value, gpointer data, GError **error)
@@ -53,8 +56,11 @@ opt_lrg_cb(const gchar *name, const gchar *value, gpointer data, GError **error)
 	(void) name;
 	(void) data;
 	opt_lrg_given = TRUE;
-	/* gsurf_lrg_render_mode_from_string accepts NULL/"" as 2D. */
-	if (!gsurf_lrg_render_mode_from_string(value, &opt_lrg_mode)) {
+	/* NULL/"" is 2D; MODE:ARRANGEMENT:ENVIRONMENT like cmacs. */
+	g_clear_pointer(&opt_lrg_arrangement, g_free);
+	g_clear_pointer(&opt_lrg_environment, g_free);
+	if (!gsurf_lrg_spec_parse(value, &opt_lrg_mode, &opt_lrg_arrangement,
+	                          &opt_lrg_environment)) {
 		g_set_error(error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
 			"unknown --lrg mode '%s' (use 2d, 3d, or 3dvr)", value);
 		return FALSE;
@@ -90,7 +96,8 @@ static const GOptionEntry entries[] = {
 	{ "lrg", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK,
 	  (gpointer) opt_lrg_cb,
 	  "Use the libregnum/raylib backend in a raylib window "
-	  "(MODE: 2d [default], 3d/3dvr reserved)", "MODE" },
+	  "(MODE: 2d [default] or 3d[:ARRANGEMENT][:ENVIRONMENT], e.g. "
+	  "3d:grid:sky; 3dvr is reserved)", "MODE" },
 	{ "version", 'v', 0, G_OPTION_ARG_NONE, &opt_version,
 	  "Show version and exit", NULL },
 	{ NULL }
@@ -291,6 +298,30 @@ execute_action(GsurfApplication *app, GsurfWindow *window,
 		}
 #endif
 		break;
+	case GSURF_ACTION_LRG_CYCLE_ARRANGEMENT:
+	case GSURF_ACTION_LRG_CYCLE_ENVIRONMENT:
+	case GSURF_ACTION_LRG_READING:
+	case GSURF_ACTION_LRG_HISTORY:
+	case GSURF_ACTION_LRG_FOCUS:
+	case GSURF_ACTION_LRG_PIN:
+	case GSURF_ACTION_LRG_UNPIN_ALL:
+	case GSURF_ACTION_LRG_CAMERA_RESET:
+	case GSURF_ACTION_LRG_OVERVIEW:
+	case GSURF_ACTION_LRG_ORBIT_LEFT:
+	case GSURF_ACTION_LRG_ORBIT_RIGHT:
+	case GSURF_ACTION_LRG_ORBIT_UP:
+	case GSURF_ACTION_LRG_ORBIT_DOWN:
+	case GSURF_ACTION_LRG_ZOOM_IN:
+	case GSURF_ACTION_LRG_ZOOM_OUT:
+		/* The 3D scene's own actions; outside --lrg=3d they are unbound
+		 * no-ops, so a shared config can bind them everywhere.  Returning
+		 * FALSE lets the key reach the page. */
+#ifdef GSURF_HAVE_LRG_BACKEND
+		if (GSURF_IS_LRG_WINDOW(window))
+			return gsurf_lrg_window_run_scene_action(GSURF_LRG_WINDOW(window),
+			                                         action);
+#endif
+		return FALSE;
 	default:
 		break;
 	}
@@ -775,7 +806,7 @@ main(int argc, char *argv[])
 	gsurf_init(&argc, &argv);
 
 	/* Select the libregnum backend before backend_init so the right backend
-	 * is initialised.  Bare --lrg / --lrg=2d only; 3d/3dvr are reserved. */
+	 * is initialised.  2d always; 3d with the libregnum scene; 3dvr reserved. */
 	if (opt_lrg_given) {
 		if (!gsurf_backend_is_available(GSURF_BACKEND_LRG)) {
 			g_printerr("gsurf: --lrg requested but this build has no "
@@ -783,9 +814,13 @@ main(int argc, char *argv[])
 			return EXIT_FAILURE;
 		}
 		if (!gsurf_lrg_render_mode_is_implemented(opt_lrg_mode)) {
-			g_printerr("gsurf: --lrg=%s is not yet implemented; "
-				"only 2d is supported\n",
-				gsurf_lrg_render_mode_to_string(opt_lrg_mode));
+			if (opt_lrg_mode == GSURF_LRG_RENDER_MODE_3D)
+				g_printerr("gsurf: --lrg=3d needs a build with the "
+					"libregnum scene (LRG_BACKEND=1 LRG_3D=1)\n");
+			else
+				g_printerr("gsurf: --lrg=%s is not implemented yet; "
+					"use 2d or 3d\n",
+					gsurf_lrg_render_mode_to_string(opt_lrg_mode));
 			return EXIT_FAILURE;
 		}
 		gsurf_backend_set_default_type(GSURF_BACKEND_LRG);
@@ -870,9 +905,23 @@ main(int argc, char *argv[])
 	gsurf_window_set_title(window, config->window_title);
 
 #ifdef GSURF_HAVE_LRG_BACKEND
-	/* Apply the requested render mode to the libregnum window (2D only). */
-	if (opt_lrg_given && GSURF_IS_LRG_WINDOW(window))
+	/* Apply the requested render mode to the libregnum window, and the 3D
+	 * scene settings: the `lrg:' config block, overridden by the spec tokens
+	 * of --lrg=3d:ARRANGEMENT:ENVIRONMENT. */
+	if (opt_lrg_given && GSURF_IS_LRG_WINDOW(window)) {
+		GsurfLrgSceneOptions scene_opts;
+
 		gsurf_lrg_window_set_render_mode(GSURF_LRG_WINDOW(window), opt_lrg_mode);
+		scene_opts.arrangement = opt_lrg_arrangement != NULL
+			? opt_lrg_arrangement : config->lrg_arrangement;
+		scene_opts.environment = opt_lrg_environment != NULL
+			? opt_lrg_environment : config->lrg_environment;
+		scene_opts.background_fps = config->lrg_background_fps;
+		scene_opts.history_limit = config->lrg_history_depth;
+		scene_opts.reading_single_tab = config->lrg_reading_single_tab;
+		gsurf_lrg_window_set_scene_options(GSURF_LRG_WINDOW(window),
+		                                   &scene_opts);
+	}
 #endif
 
 	/* Host-level window signals. "view-added" wires every view (initial,

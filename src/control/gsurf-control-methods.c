@@ -20,10 +20,20 @@
 
 #include "control/gsurf-control-private.h"
 
+#include <math.h>
 #include <string.h>
 #include <unistd.h>
 
+#include <glib/gstdio.h>
+
 #include <yaml-glib.h>
+
+#ifdef GSURF_HAVE_LRG_BACKEND
+#include "backend/lrg/gsurf-lrg-window.h"
+#endif
+#ifdef GSURF_HAVE_LRG_3D
+#include "backend/lrg/gsurf-lrg-scene.h"
+#endif
 
 /* ------------------------------------------------------------------ */
 /* Parameters                                                          */
@@ -2255,6 +2265,11 @@ core_config(GsurfConfig *c)
 	ADD_BOOL("kiosk", c->kiosk);
 	ADD_BOOL("control.enabled", c->control_enabled);
 	ADD_STR("control.name", c->control_name);
+	ADD_STR("lrg.arrangement", c->lrg_arrangement);
+	ADD_STR("lrg.environment", c->lrg_environment);
+	ADD_DBL("lrg.background-fps", c->lrg_background_fps);
+	ADD_INT("lrg.history-depth", c->lrg_history_depth);
+	ADD_BOOL("lrg.reading-single-tab", c->lrg_reading_single_tab);
 #undef ADD_STR
 #undef ADD_INT
 #undef ADD_DBL
@@ -2430,6 +2445,410 @@ m_modules_toggle(GsurfControlServer *server, GsurfControlInvocation *inv, gpoint
 /* Table                                                               */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* The --lrg=3d scene (lrg.*)                                          */
+/* ------------------------------------------------------------------ */
+
+#ifdef GSURF_HAVE_LRG_3D
+/* The 3D scene of the active window, or UNSUPPORTED outside --lrg=3d. */
+static GsurfLrgScene *
+lrg_scene_for(GsurfControlServer *server, GsurfWindow **window_out, GError **error)
+{
+	GsurfWindow *window = get_window(server, error);
+	GsurfLrgScene *scene = NULL;
+
+	if (window_out != NULL)
+		*window_out = window;
+	if (window == NULL)
+		return NULL;
+	if (GSURF_IS_LRG_WINDOW(window))
+		scene = gsurf_lrg_window_get_scene(GSURF_LRG_WINDOW(window));
+	if (scene == NULL)
+		g_set_error_literal(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_UNSUPPORTED,
+			"this window is not a 3D scene (start gsurf with --lrg=3d)");
+	return scene;
+}
+
+/* An optional finite number parameter; FALSE (with INVALID_PARAMS) if it is
+ * present but not a number. */
+static gboolean
+arg_double(JsonObject *params, const gchar *name, gdouble *out, GError **error)
+{
+	JsonNode *node = member(params, name);
+
+	if (node == NULL)
+		return TRUE;
+	if (JSON_NODE_HOLDS_VALUE(node)
+	    && (json_node_get_value_type(node) == G_TYPE_DOUBLE
+	        || json_node_get_value_type(node) == G_TYPE_INT64)) {
+		*out = json_node_get_double(node);
+		if (isfinite(*out))
+			return TRUE;
+	}
+	g_set_error(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+		"'%s' must be a number", name);
+	return FALSE;
+}
+
+/* The scene's state, the reply of lrg.state and of every lrg.* change. */
+static JsonNode *
+lrg_state_node(GsurfWindow *window, GsurfLrgScene *scene)
+{
+	g_autoptr(JsonBuilder) b = json_builder_new();
+	g_auto(GStrv) bookmarks = gsurf_lrg_scene_list_views(scene);
+	GPtrArray *views = gsurf_window_get_views(window);
+	guint i;
+
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "mode");
+	json_builder_add_string_value(b, "3d");
+	json_builder_set_member_name(b, "arrangement");
+	json_builder_add_string_value(b, gsurf_lrg_scene_get_arrangement(scene));
+	json_builder_set_member_name(b, "environment");
+	json_builder_add_string_value(b, gsurf_lrg_scene_get_environment(scene));
+	json_builder_set_member_name(b, "reading");
+	json_builder_add_boolean_value(b, gsurf_lrg_scene_get_reading(scene));
+	json_builder_set_member_name(b, "history");
+	json_builder_add_boolean_value(b, gsurf_lrg_scene_get_history(scene));
+	json_builder_set_member_name(b, "animating");
+	json_builder_add_boolean_value(b, gsurf_lrg_scene_is_animating(scene));
+	json_builder_set_member_name(b, "panels");
+	json_builder_add_int_value(b, gsurf_lrg_scene_get_panel_count(scene));
+	json_builder_set_member_name(b, "background_fps");
+	json_builder_add_double_value(b, gsurf_lrg_scene_get_background_fps(scene));
+	json_builder_set_member_name(b, "history_depth");
+	json_builder_add_int_value(b, gsurf_lrg_scene_get_history_limit(scene));
+
+	/* Pinned tabs with their placement, so an agent can save and restore
+	 * a layout (lrg.pin with "placement"). */
+	json_builder_set_member_name(b, "pinned");
+	json_builder_begin_array(b);
+	for (i = 0; views != NULL && i < views->len; i++) {
+		GsurfView *v = g_ptr_array_index(views, i);
+		g_autofree gchar *placement = NULL;
+
+		if (!gsurf_lrg_scene_is_view_pinned(scene, v))
+			continue;
+		placement = gsurf_lrg_scene_get_view_placement(scene, v);
+		json_builder_begin_object(b);
+		json_builder_set_member_name(b, "view");
+		json_builder_add_int_value(b, (gint64)gsurf_view_get_id(v));
+		json_builder_set_member_name(b, "placement");
+		json_builder_add_string_value(b, placement != NULL ? placement : "");
+		json_builder_end_object(b);
+	}
+	json_builder_end_array(b);
+
+	json_builder_set_member_name(b, "bookmarks");
+	json_builder_begin_array(b);
+	for (i = 0; bookmarks != NULL && bookmarks[i] != NULL; i++)
+		json_builder_add_string_value(b, bookmarks[i]);
+	json_builder_end_array(b);
+	json_builder_end_object(b);
+	return json_builder_get_root(b);
+}
+
+/* Reply with the new state and announce the change as an lrg.* event. */
+static void
+lrg_reply(GsurfControlInvocation *inv, GsurfWindow *window, GsurfLrgScene *scene,
+          const gchar *what)
+{
+	if (what != NULL)
+		gsurf_lrg_window_notify_scene(GSURF_LRG_WINDOW(window), what);
+	gsurf_control_invocation_return_value(inv, lrg_state_node(window, scene));
+}
+
+static void
+m_lrg_state(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+
+	(void)data;
+	if (scene == NULL) {
+		fail(inv, error);
+		return;
+	}
+	lrg_reply(inv, window, scene, NULL);
+}
+
+/* lrg.arrange / lrg.environment: set by id, or step to the next one with
+ * no id.  @data is 0 for the arrangement, 1 for the environment. */
+static void
+m_lrg_mode(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	gboolean environment = GPOINTER_TO_INT(data) == 1;
+	const gchar *member_name = environment ? "environment" : "arrangement";
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+	const gchar *id = NULL;
+
+	if (scene == NULL || !arg_string(params, member_name, &id, &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (id == NULL) {
+		if (environment)
+			gsurf_lrg_scene_cycle_environment(scene);
+		else
+			gsurf_lrg_scene_cycle_arrangement(scene);
+	} else if (!(environment ? gsurf_lrg_scene_set_environment(scene, id)
+	                         : gsurf_lrg_scene_set_arrangement(scene, id))) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+			environment
+			? "unknown environment '%s' (studio, sky, workshop, cockpit, void)"
+			: "unknown arrangement '%s' (carousel, grid, free, single-panel, stack, "
+			  "per-window)", id);
+		return;
+	}
+	lrg_reply(inv, window, scene, member_name);
+}
+
+/* lrg.reading / lrg.history: "enabled" sets, no "enabled" toggles.  @data
+ * is 0 for reading mode, 1 for history depth. */
+static void
+m_lrg_toggle(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	gboolean history = GPOINTER_TO_INT(data) == 1;
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+	gboolean on;
+
+	if (scene == NULL) {
+		fail(inv, error);
+		return;
+	}
+	on = history ? !gsurf_lrg_scene_get_history(scene)
+	             : !gsurf_lrg_scene_get_reading(scene);
+	if (!arg_bool(params, "enabled", &on, &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (history)
+		gsurf_lrg_scene_set_history(scene, on);
+	else
+		gsurf_lrg_scene_set_reading(scene, on);
+	lrg_reply(inv, window, scene, history ? "history" : "reading");
+}
+
+static void
+m_lrg_focus(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+	GsurfView *view;
+
+	(void)data;
+	if (scene == NULL) {
+		fail(inv, error);
+		return;
+	}
+	view = resolve_view(window, params, "view", TRUE, TRUE, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+	/* Focusing a tab also makes it the active one, as Ctrl+click does. */
+	gsurf_window_set_active_view(window, view);
+	if (!gsurf_lrg_scene_focus_view(scene, view)) {
+		gsurf_control_invocation_return_error_literal(inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+			"that view has no panel yet (its first frame is still rendering)");
+		return;
+	}
+	lrg_reply(inv, window, scene, "focus");
+}
+
+/* lrg.pin: pin a view where it is, at a saved "placement", or ("enabled":
+ * false) unpin it. */
+static void
+m_lrg_pin(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+	const gchar *placement = NULL;
+	gboolean on = TRUE;
+	GsurfView *view;
+
+	(void)data;
+	if (scene == NULL || !arg_bool(params, "enabled", &on, &error)
+	    || !arg_string(params, "placement", &placement, &error)) {
+		fail(inv, error);
+		return;
+	}
+	view = resolve_view(window, params, "view", TRUE, TRUE, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+	if (!on) {
+		gsurf_lrg_scene_unpin_view(scene, view);
+	} else if (placement != NULL) {
+		if (!gsurf_lrg_scene_set_view_placement(scene, view, placement)) {
+			gsurf_control_invocation_return_error_literal(inv,
+				GSURF_CONTROL_ERROR_INVALID_PARAMS,
+				"'placement' must be six numbers: x y z yaw width height");
+			return;
+		}
+	} else if (!gsurf_lrg_scene_pin_view(scene, view)) {
+		gsurf_control_invocation_return_error_literal(inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+			"that view has no panel yet (its first frame is still rendering)");
+		return;
+	}
+	lrg_reply(inv, window, scene, "pin");
+}
+
+static void
+m_lrg_unpin_all(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+
+	(void)data;
+	if (scene == NULL) {
+		fail(inv, error);
+		return;
+	}
+	gsurf_lrg_scene_unpin_view(scene, NULL);
+	lrg_reply(inv, window, scene, "pin");
+}
+
+/* lrg.camera: op = orbit {yaw, pitch} | zoom {factor} | reset | overview |
+ * save {name} | restore {name}. */
+static void
+m_lrg_camera(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfWindow *window = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, &window, &error);
+	const gchar *op = NULL;
+	const gchar *name = NULL;
+	gdouble yaw = 0.0, pitch = 0.0, factor = 1.0;
+
+	(void)data;
+	if (scene == NULL || !arg_string(params, "op", &op, &error)
+	    || !arg_string(params, "name", &name, &error)
+	    || !arg_double(params, "yaw", &yaw, &error)
+	    || !arg_double(params, "pitch", &pitch, &error)
+	    || !arg_double(params, "factor", &factor, &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (g_strcmp0(op, "orbit") == 0) {
+		gsurf_lrg_scene_orbit(scene, (gfloat)yaw, (gfloat)pitch, TRUE);
+	} else if (g_strcmp0(op, "zoom") == 0) {
+		if (factor <= 0.0) {
+			gsurf_control_invocation_return_error_literal(inv,
+				GSURF_CONTROL_ERROR_INVALID_PARAMS,
+				"'factor' must be positive (<1 closer, >1 away)");
+			return;
+		}
+		gsurf_lrg_scene_zoom(scene, (gfloat)factor, TRUE);
+	} else if (g_strcmp0(op, "reset") == 0) {
+		gsurf_lrg_scene_reset_camera(scene);
+	} else if (g_strcmp0(op, "overview") == 0) {
+		gsurf_lrg_scene_overview(scene);
+	} else if (g_strcmp0(op, "save") == 0 || g_strcmp0(op, "restore") == 0) {
+		if (name == NULL || *name == '\0') {
+			gsurf_control_invocation_return_error_literal(inv,
+				GSURF_CONTROL_ERROR_INVALID_PARAMS, "missing 'name' (the bookmark)");
+			return;
+		}
+		if (op[0] == 's') {
+			gsurf_lrg_scene_save_view(scene, name);
+		} else if (!gsurf_lrg_scene_restore_view(scene, name)) {
+			gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+				"no camera bookmark '%s' (lrg.state lists them)", name);
+			return;
+		}
+	} else {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"'op' must be orbit, zoom, reset, overview, save or restore");
+		return;
+	}
+	lrg_reply(inv, window, scene, "camera");
+}
+
+/* lrg.screenshot answers once the next frame has been written. */
+static void
+lrg_shot_done(GsurfLrgScene *scene, const gchar *path, gboolean ok, gpointer user_data)
+{
+	GsurfControlInvocation *inv = user_data;
+	g_autoptr(JsonBuilder) b = NULL;
+	GStatBuf st;
+
+	(void)scene;
+	if (!ok) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED,
+			"could not write '%s'", path);
+		g_object_unref(inv);
+		return;
+	}
+	b = json_builder_new();
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "path");
+	json_builder_add_string_value(b, path);
+	json_builder_set_member_name(b, "bytes");
+	json_builder_add_int_value(b, g_stat(path, &st) == 0 ? (gint64)st.st_size : 0);
+	json_builder_end_object(b);
+	gsurf_control_invocation_return_value(inv, json_builder_get_root(b));
+	g_object_unref(inv);
+}
+
+static void
+m_lrg_screenshot(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfLrgScene *scene = lrg_scene_for(server, NULL, &error);
+	const gchar *path = NULL;
+	g_autofree gchar *resolved = NULL;
+
+	(void)data;
+	if (scene == NULL || !arg_string(params, "path", &path, &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (path == NULL || *path == '\0') {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS, "missing 'path' (the PNG file to write)");
+		return;
+	}
+	/* Relative paths resolve against the directory gsurf started in. */
+	resolved = gsurf_resolve_path(path);
+	gsurf_lrg_scene_request_screenshot(scene, resolved, lrg_shot_done,
+	                                   g_object_ref(inv));
+}
+#else /* !GSURF_HAVE_LRG_3D */
+static void
+m_lrg_unsupported(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	(void)server;
+	(void)data;
+	gsurf_control_invocation_return_error_literal(inv, GSURF_CONTROL_ERROR_UNSUPPORTED,
+		"this build has no 3D scene (build with LRG_BACKEND=1 LRG_3D=1)");
+}
+#define m_lrg_state      m_lrg_unsupported
+#define m_lrg_mode       m_lrg_unsupported
+#define m_lrg_toggle     m_lrg_unsupported
+#define m_lrg_focus      m_lrg_unsupported
+#define m_lrg_pin        m_lrg_unsupported
+#define m_lrg_unpin_all  m_lrg_unsupported
+#define m_lrg_camera     m_lrg_unsupported
+#define m_lrg_screenshot m_lrg_unsupported
+#endif /* GSURF_HAVE_LRG_3D */
+
 #define VIEW_DOC "view?: id, index?: int (default: the active view)"
 
 typedef struct {
@@ -2469,6 +2888,28 @@ static const CoreMethod core_methods[] = {
 	  m_page_text, 0 },
 	{ "page.eval", "Run JavaScript in a view's page; returns its last value as JSON. Refused "
 	  "in kiosk mode", "{script: string, " VIEW_DOC "}", m_page_eval, 0 },
+	{ "lrg.state", "The --lrg=3d scene: arrangement, environment, reading, history, "
+	  "panels, pinned tabs (with placements) and camera bookmarks", "{}", m_lrg_state, 0 },
+	{ "lrg.arrange", "Set the 3D tab arrangement (carousel, grid, free, single-panel, stack, "
+	  "per-window); without one, step to the next", "{arrangement?: string}", m_lrg_mode, 0 },
+	{ "lrg.environment", "Set the 3D environment (studio, sky, workshop, cockpit, void); "
+	  "without one, step to the next", "{environment?: string}", m_lrg_mode, 1 },
+	{ "lrg.reading", "3D reading mode: fly to the active tab and show it pixel-exact "
+	  "(no 'enabled': toggle)", "{enabled?: bool}", m_lrg_toggle, 0 },
+	{ "lrg.history", "3D history depth: the active tab's back/forward pages as a stack "
+	  "(no 'enabled': toggle)", "{enabled?: bool}", m_lrg_toggle, 1 },
+	{ "lrg.focus", "Make a view active and fly the 3D camera to it", "{" VIEW_DOC "}",
+	  m_lrg_focus, 0 },
+	{ "lrg.pin", "Pin a view's 3D panel where it is, or at 'placement' (from lrg.state); "
+	  "'enabled': false unpins", "{enabled?: bool, placement?: string, " VIEW_DOC "}",
+	  m_lrg_pin, 0 },
+	{ "lrg.unpin_all", "Unpin every 3D panel", "{}", m_lrg_unpin_all, 0 },
+	{ "lrg.camera", "Move the 3D camera: op = orbit {yaw, pitch degrees} | zoom {factor} | "
+	  "reset | overview | save {name} | restore {name}",
+	  "{op: string, yaw?: number, pitch?: number, factor?: number, name?: string}",
+	  m_lrg_camera, 0 },
+	{ "lrg.screenshot", "Write the next 3D frame (scene and chrome, as shown) as a PNG to "
+	  "'path'; returns {path, bytes}", "{path: string}", m_lrg_screenshot, 0 },
 	{ "page.screenshot", "Write a PNG of a view's visible page to 'path' (relative paths "
 	  "resolve against gsurf's launch directory); returns {path, bytes}",
 	  "{path: string, " VIEW_DOC "}", m_page_screenshot, 0 },

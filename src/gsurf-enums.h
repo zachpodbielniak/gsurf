@@ -403,6 +403,22 @@ typedef enum {
 	/* Open the hovered link in a new tab, a child of the current one,
 	 * without leaving the current one (since 0.4.2) */
 	GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND,
+	/* The --lrg=3d tab space (since 0.6); no-ops in other windows */
+	GSURF_ACTION_LRG_CYCLE_ARRANGEMENT,
+	GSURF_ACTION_LRG_CYCLE_ENVIRONMENT,
+	GSURF_ACTION_LRG_READING,
+	GSURF_ACTION_LRG_HISTORY,
+	GSURF_ACTION_LRG_FOCUS,
+	GSURF_ACTION_LRG_PIN,
+	GSURF_ACTION_LRG_UNPIN_ALL,
+	GSURF_ACTION_LRG_CAMERA_RESET,
+	GSURF_ACTION_LRG_OVERVIEW,
+	GSURF_ACTION_LRG_ORBIT_LEFT,
+	GSURF_ACTION_LRG_ORBIT_RIGHT,
+	GSURF_ACTION_LRG_ORBIT_UP,
+	GSURF_ACTION_LRG_ORBIT_DOWN,
+	GSURF_ACTION_LRG_ZOOM_IN,
+	GSURF_ACTION_LRG_ZOOM_OUT,
 	GSURF_ACTION_LAST
 } GsurfAction;
 
@@ -509,10 +525,31 @@ const gchar *gsurf_lrg_render_mode_to_string(GsurfLrgRenderMode mode);
  * gsurf_lrg_render_mode_is_implemented:
  * @mode: a #GsurfLrgRenderMode
  *
- * Returns: %TRUE if @mode is implemented in this build. Only
- *   %GSURF_LRG_RENDER_MODE_2D is implemented today; 3D / 3D-VR are reserved.
+ * Returns: %TRUE if @mode is implemented in this build: 2D always, 3D in
+ *   builds with the libregnum scene (LRG_3D=1).  3D-VR is reserved.
  */
 gboolean gsurf_lrg_render_mode_is_implemented(GsurfLrgRenderMode mode);
+
+/**
+ * gsurf_lrg_spec_parse:
+ * @spec: (nullable): the @samp{--lrg} argument, @samp{MODE[:A][:B]}
+ * @out_mode: (out): the render mode
+ * @out_arrangement: (out) (transfer full) (nullable): the arrangement id, or
+ *   %NULL when the spec names none
+ * @out_environment: (out) (transfer full) (nullable): the environment id, or
+ *   %NULL when the spec names none
+ *
+ * Parses the full cmacs-style spec: after MODE, each @samp{:}- (or
+ * @samp{,}-) separated token is an environment if it names a built-in
+ * environment (void, workshop, cockpit, sky, studio) and an arrangement
+ * otherwise, so @samp{3d:grid:sky}, @samp{3d:sky} and @samp{3d:sky:grid} all
+ * work.  Empty tokens are skipped.  Arrangement ids are not validated here
+ * (the scene falls back to its default for an unknown one).
+ *
+ * Returns: %TRUE if MODE is known (see gsurf_lrg_render_mode_from_string())
+ */
+gboolean gsurf_lrg_spec_parse(const gchar *spec, GsurfLrgRenderMode *out_mode,
+                              gchar **out_arrangement, gchar **out_environment);
 
 G_END_DECLS
 
