@@ -174,6 +174,21 @@ gdouble      gsurf_view_get_zoom_level(GsurfView *self);
 /* --- Settings --- */
 void         gsurf_view_apply_settings(GsurfView *self, GsurfSettings *settings);
 
+/**
+ * gsurf_view_get_container_user_agent:
+ * @self: a #GsurfView
+ *
+ * The user agent of the view's container (see
+ * gsurf_container_registry_set_network()).  gsurf_view_apply_settings()
+ * sends it in place of the global user agent; a per-site user agent (the
+ * useragent module's rules) still wins.  Setting providers that would set
+ * a general default should leave the container's alone.
+ *
+ * Returns: (transfer none) (nullable): the container's user agent, or
+ *   %NULL (since 0.5.5)
+ */
+const gchar *gsurf_view_get_container_user_agent(GsurfView *self);
+
 /* --- Scripting / capture --- */
 void         gsurf_view_run_javascript_async(GsurfView *self, const gchar *script,
                                              GCancellable *cancellable,

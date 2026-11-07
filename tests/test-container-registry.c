@@ -57,6 +57,10 @@ typedef struct {
 	gboolean  last_itp;
 	gint      last_cookie_policy;
 	gboolean  default_policied;
+	guint     proxies;          /* apply_proxy calls */
+	gchar    *last_proxy;       /* its @proxy ("(global)" for NULL) */
+	gchar    *last_proxy_ignore; /* its hosts, comma-joined */
+	gchar    *last_proxy_native; /* the session it went to */
 } FakeBackend;
 
 static FakeBackend fake;
@@ -91,8 +95,21 @@ fake_apply_policy(gpointer native, gboolean itp, gint cookie_policy)
 		fake.default_policied = TRUE;
 }
 
+static void
+fake_apply_proxy(gpointer native, const gchar *proxy, const gchar * const *ignore_hosts)
+{
+	fake.proxies++;
+	g_free(fake.last_proxy);
+	fake.last_proxy = g_strdup(proxy != NULL ? proxy : "(global)");
+	g_free(fake.last_proxy_ignore);
+	fake.last_proxy_ignore = ignore_hosts != NULL
+		? g_strjoinv(",", (gchar **)ignore_hosts) : NULL;
+	g_free(fake.last_proxy_native);
+	fake.last_proxy_native = g_strdup(native);
+}
+
 static const GsurfSessionBackend fake_backend = {
-	fake_create, fake_destroy, fake_apply_policy
+	fake_create, fake_destroy, fake_apply_policy, fake_apply_proxy
 };
 
 static void
@@ -100,6 +117,9 @@ fake_reset(void)
 {
 	g_clear_pointer(&fake.last_id, g_free);
 	g_clear_pointer(&fake.last_data_dir, g_free);
+	g_clear_pointer(&fake.last_proxy, g_free);
+	g_clear_pointer(&fake.last_proxy_ignore, g_free);
+	g_clear_pointer(&fake.last_proxy_native, g_free);
 	memset(&fake, 0, sizeof(fake));
 }
 
@@ -510,6 +530,115 @@ test_sessions_and_policy(void)
 	g_assert_true(gsurf_test_rmtree(home));
 }
 
+/* ===== per-container network (proxy, user agent) ===== */
+
+static void
+test_network(void)
+{
+	GsurfContainerRegistry *registry = registry_for_test();
+	g_autofree gchar *home = g_dir_make_tmp("gsurf-containers-XXXXXX", NULL);
+	g_autofree gchar *data_home = g_build_filename(home, "data", NULL);
+	g_autofree gchar *cache_home = g_build_filename(home, "cache", NULL);
+	static const gchar *const good[] = {
+		"http://127.0.0.1:8080", "https://proxy.example:443", "socks4://10.0.0.1:1080",
+		"socks4a://h:1080", "socks5://user:pa%20ss@127.0.0.1:9050", "socks://h",
+		"SOCKS5://H:1/", "none",
+	};
+	static const gchar *const bad[] = {
+		"ftp://h:21", "socks5://", "socks5://h:1/path", "http://h?q=1", "h:1080",
+		"just text",
+	};
+	const gchar *ignore[] = { "localhost", "*.corp", NULL };
+	g_autoptr(GError) error = NULL;
+	GsurfContainer *work;
+	guint i;
+
+	g_setenv("XDG_DATA_HOME", data_home, TRUE);
+	g_setenv("XDG_CACHE_HOME", cache_home, TRUE);
+
+	/* 1. Validation: the four proxy kinds (and socks, none) pass. */
+	for (i = 0; i < G_N_ELEMENTS(good); i++)
+		g_assert_true(gsurf_container_validate_proxy(good[i], NULL));
+	g_assert_true(gsurf_container_validate_proxy(NULL, NULL));
+	for (i = 0; i < G_N_ELEMENTS(bad); i++) {
+		g_assert_false(gsurf_container_validate_proxy(bad[i], &error));
+		g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+		g_clear_error(&error);
+	}
+
+	/* 2. Stored before any session exists; nothing is applied yet. */
+	work = gsurf_container_registry_define(registry, "net-work", "Work", NULL, NULL);
+	g_assert_nonnull(work);
+	gsurf_container_registry_set_session_backend(registry, &fake_backend);
+	g_assert_true(gsurf_container_registry_set_network(registry, "net-work",
+		"socks5://127.0.0.1:1080", ignore, "TestUA/1.0", &error));
+	g_assert_no_error(error);
+	g_assert_cmpstr(gsurf_container_get_proxy(work), ==, "socks5://127.0.0.1:1080");
+	g_assert_cmpstr(gsurf_container_get_proxy_ignore(work)[1], ==, "*.corp");
+	g_assert_cmpstr(gsurf_container_get_user_agent(work), ==, "TestUA/1.0");
+	g_assert_cmpuint(fake.proxies, ==, 0);
+
+	/* An invalid proxy or an unknown container changes nothing. */
+	g_assert_false(gsurf_container_registry_set_network(registry, "net-work",
+		"ftp://h", NULL, NULL, &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_clear_error(&error);
+	g_assert_cmpstr(gsurf_container_get_user_agent(work), ==, "TestUA/1.0");
+	g_assert_false(gsurf_container_registry_set_network(registry, "nope", NULL, NULL,
+		NULL, &error));
+	g_assert_error(error, GSURF_CONTAINER_ERROR, GSURF_CONTAINER_ERROR_NOT_FOUND);
+	g_clear_error(&error);
+
+	{
+		g_autoptr(GsurfView) view = new_view(NULL, "net-work", NULL, FALSE);
+
+		/* 3. The session gets the container's proxy when it is made. */
+		g_assert_cmpuint(fake.created, ==, 1);
+		g_assert_cmpuint(fake.proxies, ==, 1);
+		g_assert_cmpstr(fake.last_proxy, ==, "socks5://127.0.0.1:1080");
+		g_assert_cmpstr(fake.last_proxy_ignore, ==, "localhost,*.corp");
+		g_assert_cmpstr(fake.last_proxy_native, ==, "net-work");
+
+		/* 4. A live session switches at once; same settings again is a
+		 *    no-op; a user-agent-only change does not touch the proxy. */
+		g_assert_true(gsurf_container_registry_set_network(registry, "net-work",
+			"https://proxy.example:3129", NULL, "TestUA/1.0", NULL));
+		g_assert_cmpuint(fake.proxies, ==, 2);
+		g_assert_cmpstr(fake.last_proxy, ==, "https://proxy.example:3129");
+		g_assert_null(fake.last_proxy_ignore);
+		g_assert_true(gsurf_container_registry_set_network(registry, "net-work",
+			"https://proxy.example:3129", NULL, "Other/2", NULL));
+		g_assert_cmpuint(fake.proxies, ==, 2);
+		g_assert_cmpstr(gsurf_container_get_user_agent(work), ==, "Other/2");
+
+		/* 5. "none" forces direct; NULL/"" go back to the global proxy. */
+		g_assert_true(gsurf_container_registry_set_network(registry, "net-work",
+			GSURF_CONTAINER_PROXY_NONE, NULL, NULL, NULL));
+		g_assert_cmpstr(fake.last_proxy, ==, "none");
+		g_assert_true(gsurf_container_registry_set_network(registry, "net-work",
+			"", NULL, "", NULL));
+		g_assert_cmpuint(fake.proxies, ==, 4);
+		g_assert_cmpstr(fake.last_proxy, ==, "(global)");
+		g_assert_null(gsurf_container_get_proxy(work));
+		g_assert_null(gsurf_container_get_user_agent(work));
+	}
+
+	/* 6. A container without its own proxy never calls apply_proxy. */
+	g_assert_nonnull(gsurf_container_registry_define(registry, "net-plain", NULL, NULL,
+		NULL));
+	fake.proxies = 0;
+	{
+		g_autoptr(GsurfView) view = new_view(NULL, "net-plain", NULL, FALSE);
+
+		g_assert_cmpuint(fake.proxies, ==, 0);
+	}
+
+	g_assert_true(gsurf_container_registry_undefine(registry, "net-work", NULL));
+	g_assert_true(gsurf_container_registry_undefine(registry, "net-plain", NULL));
+	gsurf_container_registry_set_session_backend(registry, NULL);
+	g_assert_true(gsurf_test_rmtree(home));
+}
+
 /* ===== view identity and opener ===== */
 
 static void
@@ -675,6 +804,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/containers/temporary-unused", test_temporary_unused_and_reacquired);
 	g_test_add_func("/gsurf/containers/resolve", test_resolve);
 	g_test_add_func("/gsurf/containers/sessions-and-policy", test_sessions_and_policy);
+	g_test_add_func("/gsurf/containers/network", test_network);
 	g_test_add_func("/gsurf/view/identity-and-opener", test_view_identity);
 	g_test_add_func("/gsurf/view/script-messages", test_script_messages);
 	g_test_add_func("/gsurf/window/order", test_window_order);

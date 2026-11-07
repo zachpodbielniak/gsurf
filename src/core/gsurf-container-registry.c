@@ -37,6 +37,13 @@ struct _GsurfContainer
 	guint     cleanup_id;   /* pending temporary-container destruction */
 	gpointer  registry;     /* owning GsurfContainerRegistry (borrowed: it
 	                         * outlives every container it holds) */
+
+	/* Network identity (gsurf_container_registry_set_network): the proxy
+	 * (NULL = the global network.proxy, "none" = direct), the hosts that
+	 * bypass it, and the user agent (NULL = the global one). */
+	gchar    *proxy;
+	gchar   **proxy_ignore;
+	gchar    *user_agent;
 };
 
 enum {
@@ -66,6 +73,9 @@ gsurf_container_finalize(GObject *object)
 	g_free(self->id);
 	g_free(self->name);
 	g_free(self->color);
+	g_free(self->proxy);
+	g_strfreev(self->proxy_ignore);
+	g_free(self->user_agent);
 	G_OBJECT_CLASS(gsurf_container_parent_class)->finalize(object);
 }
 
@@ -189,6 +199,68 @@ gsurf_container_get_data_dir(GsurfContainer *self)
 {
 	g_return_val_if_fail(GSURF_IS_CONTAINER(self), NULL);
 	return self->data_dir;
+}
+
+const gchar *
+gsurf_container_get_proxy(GsurfContainer *self)
+{
+	g_return_val_if_fail(GSURF_IS_CONTAINER(self), NULL);
+	return self->proxy;
+}
+
+const gchar * const *
+gsurf_container_get_proxy_ignore(GsurfContainer *self)
+{
+	g_return_val_if_fail(GSURF_IS_CONTAINER(self), NULL);
+	return (const gchar * const *)self->proxy_ignore;
+}
+
+const gchar *
+gsurf_container_get_user_agent(GsurfContainer *self)
+{
+	g_return_val_if_fail(GSURF_IS_CONTAINER(self), NULL);
+	return self->user_agent;
+}
+
+/* Proxy URI schemes the engine (WebKit over GIO) understands: http (plain),
+ * https (TLS to the proxy), socks (SOCKS5 with SOCKS4/4a fallback), socks4,
+ * socks4a (the proxy resolves host names) and socks5. */
+static const gchar *const proxy_schemes[] = {
+	"http", "https", "socks", "socks4", "socks4a", "socks5", NULL
+};
+
+gboolean
+gsurf_container_validate_proxy(const gchar *proxy, GError **error)
+{
+	g_autoptr(GUri) uri = NULL;
+	g_autofree gchar *scheme = NULL;
+	const gchar *path;
+
+	if (proxy == NULL || g_strcmp0(proxy, GSURF_CONTAINER_PROXY_NONE) == 0)
+		return TRUE;
+	uri = g_uri_parse(proxy, G_URI_FLAGS_ENCODED, NULL);
+	if (uri == NULL || g_uri_get_scheme(uri) == NULL) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"proxy '%s' is not a URL (e.g. socks5://127.0.0.1:1080)", proxy);
+		return FALSE;
+	}
+	scheme = g_ascii_strdown(g_uri_get_scheme(uri), -1);
+	if (!g_strv_contains(proxy_schemes, scheme)) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"proxy '%s': unsupported scheme '%s' (use http, https, socks4, "
+			"socks4a, socks5 or socks)", proxy, scheme);
+		return FALSE;
+	}
+	path = g_uri_get_path(uri);
+	if (g_uri_get_host(uri) == NULL || *g_uri_get_host(uri) == '\0' ||
+	    (path != NULL && *path != '\0' && g_strcmp0(path, "/") != 0) ||
+	    g_uri_get_query(uri) != NULL || g_uri_get_fragment(uri) != NULL) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"proxy '%s' needs a host (and optionally :port and user:password@), "
+			"nothing else", proxy);
+		return FALSE;
+	}
+	return TRUE;
 }
 
 /* ===================================================================
@@ -692,6 +764,10 @@ gsurf_container_registry_acquire(GsurfContainerRegistry *self, const gchar *id)
 			if (self->policy_set && self->backend->apply_policy != NULL)
 				self->backend->apply_policy(container->native, self->itp,
 					self->cookie_policy);
+			/* The container's own proxy over the global one. */
+			if (container->proxy != NULL && self->backend->apply_proxy != NULL)
+				self->backend->apply_proxy(container->native, container->proxy,
+					(const gchar * const *)container->proxy_ignore);
 			g_signal_emit(self, signals[SIG_SESSION_CREATED], 0, container,
 				container->native);
 		}
@@ -722,6 +798,68 @@ gsurf_container_registry_set_temp_cleanup_delay(GsurfContainerRegistry *self,
 {
 	g_return_if_fail(GSURF_IS_CONTAINER_REGISTRY(self));
 	self->temp_delay = seconds;
+}
+
+/* Two optional string lists are equal (NULL and empty are the same). */
+static gboolean
+strv_equal_nullable(const gchar * const *a, const gchar * const *b)
+{
+	guint i;
+
+	for (i = 0; ; i++) {
+		const gchar *x = (a != NULL) ? a[i] : NULL;
+		const gchar *y = (b != NULL) ? b[i] : NULL;
+
+		if (x == NULL || y == NULL)
+			return x == y;
+		if (g_strcmp0(x, y) != 0)
+			return FALSE;
+	}
+}
+
+gboolean
+gsurf_container_registry_set_network(GsurfContainerRegistry *self, const gchar *id,
+                                     const gchar *proxy,
+                                     const gchar * const *proxy_ignore,
+                                     const gchar *user_agent, GError **error)
+{
+	GsurfContainer *container;
+	gboolean proxy_changed;
+
+	g_return_val_if_fail(GSURF_IS_CONTAINER_REGISTRY(self), FALSE);
+
+	container = (id != NULL) ? g_hash_table_lookup(self->by_id, id) : NULL;
+	if (container == NULL) {
+		g_set_error(error, GSURF_CONTAINER_ERROR, GSURF_CONTAINER_ERROR_NOT_FOUND,
+			"no container '%s'", id != NULL ? id : "(null)");
+		return FALSE;
+	}
+	if (proxy != NULL && *proxy == '\0')
+		proxy = NULL;
+	if (user_agent != NULL && *user_agent == '\0')
+		user_agent = NULL;
+	if (!gsurf_container_validate_proxy(proxy, error))
+		return FALSE;
+
+	proxy_changed = g_strcmp0(container->proxy, proxy) != 0 ||
+		!strv_equal_nullable((const gchar * const *)container->proxy_ignore,
+			proxy_ignore);
+	g_free(container->proxy);
+	container->proxy = g_strdup(proxy);
+	g_strfreev(container->proxy_ignore);
+	container->proxy_ignore = (proxy_ignore != NULL && proxy_ignore[0] != NULL)
+		? g_strdupv((gchar **)proxy_ignore) : NULL;
+	g_free(container->user_agent);
+	container->user_agent = g_strdup(user_agent);
+
+	/* A live session takes the new proxy now; one made later gets it when
+	 * it is created.  (The user agent is per view, read whenever a view in
+	 * the container applies its settings.) */
+	if (proxy_changed && container->native != NULL && self->backend != NULL &&
+	    self->backend->apply_proxy != NULL)
+		self->backend->apply_proxy(container->native, container->proxy,
+			(const gchar * const *)container->proxy_ignore);
+	return TRUE;
 }
 
 void

@@ -69,6 +69,10 @@ modules:
         hosts: ['(^|\.)youtube\.com$', '(^|\.)twitch\.tv$']
       - name: Work Stuff        # id "work-stuff"
         hosts: ['(^|\.)corp\.example$']
+        proxy: socks5://127.0.0.1:1080   # http https socks4 socks4a socks5 socks, or none
+        proxy_ignore: [localhost]
+        user_agent: "Mozilla/5.0 ..."
+    temp_proxy: socks5://127.0.0.1:9050  # also temp_proxy_ignore, temp_user_agent
     key_new_temp: "Ctrl+Alt+t"
     key_reopen_next: "Ctrl+Alt+c"
 ```
@@ -80,7 +84,8 @@ modules:
 - **Host assignment**: navigating the main frame to a host assigned to another container cancels the load and reopens it in that container, in the same place in the tree and pane. Typed addresses and bookmarks switch before the request; clicked links switch at the response (one request already went out with the old container's cookies). Iframes and downloads never move.
 - A view cannot change container: every container change creates a new view (a **new view id**) and closes the old one.
 - Actions: `container-new-temp` (new tab, fresh temporary container), `container-reopen-next` (cycle default → persistent in order → new temporary). Kiosk mode refuses both.
-- Errors (bad id, bad regex, unknown `new_tab`) warn and skip only the bad part.
+- **Per-container network** (0.5.5): `proxy` overrides the global `network.proxy` for that container (`https://` = TLS to the proxy; `socks4a`/`socks5` resolve names at the proxy; `none` = direct); `user_agent` replaces the global UA from the first request, but a `useragent` module per-site rule still wins. Temporary containers use `temp_proxy`/`temp_user_agent`. Changes apply to live sessions on reload. API: `gsurf_container_registry_set_network()`.
+- Errors (bad id, bad regex, unknown `new_tab`, bad proxy URL) warn and skip only the bad part.
 - Removing a container from the config keeps its directories; delete them by hand (`gio trash`) to forget its data.
 
 ## Session (`modules.session`, off by default)

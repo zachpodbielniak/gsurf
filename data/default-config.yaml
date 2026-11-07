@@ -533,6 +533,10 @@ modules:
     #  - name: Media                # id defaults to the lowercased name ("media")
     #    color: "#f9e2af"
     #    hosts: ['(^|\.)youtube\.com$', '(^|\.)twitch\.tv$']
+    #    proxy: socks5://127.0.0.1:1080   # http:// https:// socks4:// socks4a:// socks5:// or none
+    #    proxy_ignore: [localhost]
+    #    user_agent: "Mozilla/5.0 ..."    # in place of the global user agent
+    # temp_proxy / temp_proxy_ignore / temp_user_agent: the same for temporary containers
     key_new_temp: "Ctrl+Alt+t"      # container-new-temp
     key_reopen_next: "Ctrl+Alt+c"   # container-reopen-next
   # LibreWolf-style privacy hardening; see docs/hardening.org.

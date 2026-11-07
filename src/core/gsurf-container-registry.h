@@ -53,6 +53,13 @@ G_BEGIN_DECLS
  */
 #define GSURF_CONTAINER_DEFAULT "default"
 
+/**
+ * GSURF_CONTAINER_PROXY_NONE:
+ *
+ * A container proxy meaning "connect directly", overriding a global proxy.
+ */
+#define GSURF_CONTAINER_PROXY_NONE "none"
+
 #define GSURF_CONTAINER_ERROR (gsurf_container_error_quark())
 
 /**
@@ -132,6 +139,47 @@ guint gsurf_container_get_n_views(GsurfContainer *self);
  */
 const gchar *gsurf_container_get_data_dir(GsurfContainer *self);
 
+/**
+ * gsurf_container_get_proxy:
+ * @self: a #GsurfContainer
+ *
+ * Returns: (transfer none) (nullable): the container's proxy URL, or
+ *   #GSURF_CONTAINER_PROXY_NONE for a direct connection, or %NULL when it
+ *   uses the global network.proxy (since 0.5.5)
+ */
+const gchar *gsurf_container_get_proxy(GsurfContainer *self);
+
+/**
+ * gsurf_container_get_proxy_ignore:
+ * @self: a #GsurfContainer
+ *
+ * Returns: (transfer none) (nullable) (array zero-terminated=1): hosts that
+ *   bypass the container's proxy, or %NULL (since 0.5.5)
+ */
+const gchar * const *gsurf_container_get_proxy_ignore(GsurfContainer *self);
+
+/**
+ * gsurf_container_get_user_agent:
+ * @self: a #GsurfContainer
+ *
+ * Returns: (transfer none) (nullable): the user agent views in the container
+ *   send in place of the global one, or %NULL (since 0.5.5)
+ */
+const gchar *gsurf_container_get_user_agent(GsurfContainer *self);
+
+/**
+ * gsurf_container_validate_proxy:
+ * @proxy: (nullable): a container proxy
+ * @error: return location for a #GError
+ *
+ * Accepts %NULL, #GSURF_CONTAINER_PROXY_NONE, or a URL whose scheme is
+ * http, https (TLS to the proxy), socks4, socks4a, socks5 or socks, with a
+ * host, optionally a port and user:password, and nothing else.
+ *
+ * Returns: whether @proxy is usable (since 0.5.5)
+ */
+gboolean gsurf_container_validate_proxy(const gchar *proxy, GError **error);
+
 /* --- backend vtable --- */
 
 /**
@@ -145,6 +193,9 @@ const gchar *gsurf_container_get_data_dir(GsurfContainer *self);
  * @apply_policy: apply the registry's privacy policy to a native session;
  *   @native is %NULL for the engine's default session. @cookie_policy is
  *   -1 to leave the policy alone, else 0 always, 1 never, 2 no third-party.
+ * @apply_proxy: apply a container's proxy to its native session: @proxy is
+ *   a URL, #GSURF_CONTAINER_PROXY_NONE, or %NULL to go back to the global
+ *   network.proxy; @ignore_hosts bypass it (since 0.5.5; may be %NULL)
  *
  * Supplied by the active backend; see
  * gsurf_container_registry_set_session_backend().
@@ -154,6 +205,8 @@ typedef struct {
 	                          const gchar *cache_dir);
 	void     (*destroy)      (gpointer native);
 	void     (*apply_policy) (gpointer native, gboolean itp, gint cookie_policy);
+	void     (*apply_proxy)  (gpointer native, const gchar *proxy,
+	                          const gchar * const *ignore_hosts);
 } GsurfSessionBackend;
 
 /* --- GsurfContainerRegistry --- */
@@ -220,6 +273,33 @@ GsurfContainer *gsurf_container_registry_define(GsurfContainerRegistry *self,
                                                 const gchar *name,
                                                 const gchar *color,
                                                 GError **error);
+
+/**
+ * gsurf_container_registry_set_network:
+ * @self: a #GsurfContainerRegistry
+ * @id: a container id (persistent or temporary)
+ * @proxy: (nullable): a proxy URL, #GSURF_CONTAINER_PROXY_NONE, or %NULL
+ *   (or "") for the global network.proxy
+ * @proxy_ignore: (nullable) (array zero-terminated=1): hosts that bypass
+ *   the proxy
+ * @user_agent: (nullable): a user agent for the container's views, or %NULL
+ *   (or "") for the global one
+ * @error: return location for a #GError
+ *
+ * Gives a container its own network identity, the way Firefox containers
+ * with a per-container proxy do.  A live session switches proxy at once;
+ * views pick the user agent up the next time they apply their settings
+ * (every navigation).  An invalid proxy (see
+ * gsurf_container_validate_proxy()) changes nothing.
+ *
+ * Returns: %TRUE when applied (since 0.5.5)
+ */
+gboolean gsurf_container_registry_set_network(GsurfContainerRegistry *self,
+                                              const gchar *id,
+                                              const gchar *proxy,
+                                              const gchar * const *proxy_ignore,
+                                              const gchar *user_agent,
+                                              GError **error);
 
 /**
  * gsurf_container_registry_undefine:

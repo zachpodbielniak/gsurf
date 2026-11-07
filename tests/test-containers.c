@@ -234,6 +234,108 @@ test_config(void)
 	g_assert_null(gsurf_container_registry_lookup(registry, "money"));
 }
 
+/* ===== per-container network (proxy, user agent) ===== */
+
+static void
+test_network(void)
+{
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+	GsurfModule *module = NULL;
+	GsurfModuleManager *mgr;
+	GsurfContainer *c;
+	g_autofree gchar *temp = NULL;
+	const gchar *yaml =
+		"modules:\n"
+		"  containers:\n"
+		"    enabled: true\n"
+		"    new_tab: default\n"
+		"    temp_cleanup_delay: 0\n"
+		"    temp_proxy: socks4a://10.0.0.9:1080\n"
+		"    temp_proxy_ignore: [localhost]\n"
+		"    temp_user_agent: TempUA/1\n"
+		"    containers:\n"
+		"      - name: Work\n"
+		"        proxy: socks5://user:secret@127.0.0.1:1080\n"
+		"        proxy_ignore: [localhost, '*.corp', '']\n"
+		"        user_agent: WorkUA/3\n"
+		"      - name: Tls\n"
+		"        proxy: https://proxy.example:3129\n"
+		"      - name: Direct\n"
+		"        proxy: none\n"
+		"      - name: Broken\n"
+		"        proxy: ftp://nope\n"
+		"        user_agent: ''\n";
+
+	g_test_expect_message(NULL, G_LOG_LEVEL_WARNING,
+		"*'broken': proxy 'ftp://nope': unsupported scheme 'ftp'*using the global proxy*");
+	mgr = mgr_with(yaml, &module);
+	g_test_assert_expected_messages();
+	if (mgr == NULL)
+		return;
+
+	/* The keys reach the registry; an empty host and an empty user agent
+	 * mean "none"; a bad proxy leaves the container on the global one. */
+	c = gsurf_container_registry_lookup(registry, "work");
+	g_assert_cmpstr(gsurf_container_get_proxy(c), ==, "socks5://user:secret@127.0.0.1:1080");
+	g_assert_cmpstr(gsurf_container_get_proxy_ignore(c)[0], ==, "localhost");
+	g_assert_cmpstr(gsurf_container_get_proxy_ignore(c)[1], ==, "*.corp");
+	g_assert_null(gsurf_container_get_proxy_ignore(c)[2]);
+	g_assert_cmpstr(gsurf_container_get_user_agent(c), ==, "WorkUA/3");
+	g_assert_cmpstr(gsurf_container_get_proxy(gsurf_container_registry_lookup(registry,
+		"tls")), ==, "https://proxy.example:3129");
+	g_assert_cmpstr(gsurf_container_get_proxy(gsurf_container_registry_lookup(registry,
+		"direct")), ==, GSURF_CONTAINER_PROXY_NONE);
+	c = gsurf_container_registry_lookup(registry, "broken");
+	g_assert_null(gsurf_container_get_proxy(c));
+	g_assert_null(gsurf_container_get_user_agent(c));
+
+	/* A view knows its container's user agent; the default container has
+	 * none. */
+	{
+		g_autoptr(GsurfView) in_work = new_view(NULL, "work", NULL, FALSE);
+		g_autoptr(GsurfView) plain = new_view(NULL, NULL, "https://example.org", FALSE);
+
+		g_assert_cmpstr(gsurf_view_get_container_user_agent(in_work), ==, "WorkUA/3");
+		g_assert_null(gsurf_view_get_container_user_agent(plain));
+	}
+
+	/* Every temporary container gets the temp_* identity. */
+	{
+		g_autoptr(GsurfView) view = new_view(NULL, GSURF_CONTAINER_TEMPORARY, NULL, FALSE);
+
+		temp = g_strdup(gsurf_view_get_container_id(view));
+		g_assert_true(g_str_has_prefix(temp, "tmp-"));
+		c = gsurf_container_registry_lookup(registry, temp);
+		g_assert_cmpstr(gsurf_container_get_proxy(c), ==, "socks4a://10.0.0.9:1080");
+		g_assert_cmpstr(gsurf_container_get_proxy_ignore(c)[0], ==, "localhost");
+		g_assert_cmpstr(gsurf_container_get_user_agent(c), ==, "TempUA/1");
+		g_assert_cmpstr(gsurf_view_get_container_user_agent(view), ==, "TempUA/1");
+	}
+
+	/* Reconfiguring without the keys gives everything back to the global
+	 * proxy and user agent. */
+	reconfigure(module,
+		"modules:\n"
+		"  containers:\n"
+		"    enabled: true\n"
+		"    temp_cleanup_delay: 0\n"
+		"    containers:\n"
+		"      - name: Work\n");
+	c = gsurf_container_registry_lookup(registry, "work");
+	g_assert_null(gsurf_container_get_proxy(c));
+	g_assert_null(gsurf_container_get_proxy_ignore(c));
+	g_assert_null(gsurf_container_get_user_agent(c));
+	{
+		g_autoptr(GsurfView) view = new_view(NULL, GSURF_CONTAINER_TEMPORARY, NULL, FALSE);
+
+		c = gsurf_container_registry_lookup(registry, gsurf_view_get_container_id(view));
+		g_assert_null(gsurf_container_get_proxy(c));
+		g_assert_null(gsurf_container_get_user_agent(c));
+	}
+
+	mgr_free(mgr, module);
+}
+
 /* ===== resolver ===== */
 
 static void
@@ -647,6 +749,7 @@ main(int argc, char **argv)
 	g_test_init(&argc, &argv, G_TEST_OPTION_ISOLATE_DIRS, NULL);
 
 	g_test_add_func("/gsurf/containers-module/config", test_config);
+	g_test_add_func("/gsurf/containers-module/network", test_network);
 	g_test_add_func("/gsurf/containers-module/resolver", test_resolver);
 	g_test_add_func("/gsurf/containers-module/disabled", test_disabled);
 	g_test_add_func("/gsurf/containers-module/bad-input", test_bad_input);

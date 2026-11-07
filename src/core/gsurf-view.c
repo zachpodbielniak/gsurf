@@ -9,6 +9,7 @@
 #include "util/gsurf-runtime-dir.h"
 #include "core/gsurf-view.h"
 #include "core/gsurf-container-registry.h"
+#include "config/gsurf-config.h"
 
 #include <errno.h>
 #include <pwd.h>
@@ -789,17 +790,59 @@ gsurf_view_get_zoom_level(GsurfView *self)
 
 /* --- Settings --- */
 
+const gchar *
+gsurf_view_get_container_user_agent(GsurfView *self)
+{
+	GsurfContainer *container;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+
+	container = gsurf_container_registry_lookup(gsurf_container_registry_get_default(),
+		gsurf_view_get_container_id(self));
+	return container != NULL ? gsurf_container_get_user_agent(container) : NULL;
+}
+
+/* NULL and "" both mean "the engine's default user agent". */
+static gboolean
+same_user_agent(const gchar *a, const gchar *b)
+{
+	return g_strcmp0((a != NULL && *a != '\0') ? a : NULL,
+	                 (b != NULL && *b != '\0') ? b : NULL) == 0;
+}
+
 void
 gsurf_view_apply_settings(GsurfView *self, GsurfSettings *settings)
 {
 	GsurfViewClass *klass;
+	g_autoptr(GsurfSettings) own = NULL;
+	const gchar *container_ua;
 
 	g_return_if_fail(GSURF_IS_VIEW(self));
 	g_return_if_fail(GSURF_IS_SETTINGS(settings));
 
 	klass = GSURF_VIEW_GET_CLASS(self);
-	if (klass->apply_settings != NULL)
-		klass->apply_settings(self, settings);
+	if (klass->apply_settings == NULL)
+		return;
+
+	/* A container's user agent replaces the GLOBAL one: when @settings
+	 * still carries the configured user agent (every caller that applies
+	 * the config as is, and navigations no per-site rule matched), the
+	 * view sends its container's instead.  A per-site rule's user agent
+	 * (the useragent module) differs from the global one and is kept. */
+	container_ua = gsurf_view_get_container_user_agent(self);
+	if (container_ua != NULL) {
+		GsurfConfig *cfg = gsurf_config_get_default();
+		const gchar *global_ua = (cfg != NULL && cfg->settings != NULL)
+			? cfg->settings->user_agent : NULL;
+
+		if (same_user_agent(settings->user_agent, global_ua) &&
+		    !same_user_agent(settings->user_agent, container_ua)) {
+			own = gsurf_settings_copy(settings);
+			gsurf_settings_set_user_agent(own, container_ua);
+			settings = own;
+		}
+	}
+	klass->apply_settings(self, settings);
 }
 
 /* --- Scripting / capture --- */

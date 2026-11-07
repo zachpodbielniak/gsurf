@@ -47,6 +47,9 @@ modules:
 | =inherit_opener=     | =true=         | A tab opened from another tab (a link opened in a new tab, a hint, a reopened tab) goes into its opener's container unless a host rule says otherwise. With =false= such tabs follow =new_tab=. |
 | =temp_cleanup_delay= | =30=           | Seconds a temporary container survives after its last tab closes, so closing and reopening a tab (=tab-reopen=) within that time keeps its cookies. =0= removes it right after the last tab. Negative or huge values are reported and the default is used. |
 | =temp_color=         | =#89b4fa=      | Colour given to temporary containers made by this module. =""= gives none. |
+| =temp_proxy=         | none           | Proxy of every temporary container (same values as a container's =proxy=, below). Unset: the global =network.proxy=. Since 0.5.5. |
+| =temp_proxy_ignore=  | none           | Hosts that bypass =temp_proxy=. Since 0.5.5. |
+| =temp_user_agent=    | none           | User agent of every temporary container. Unset: the global one. Since 0.5.5. |
 | =containers=         | =[]=           | The persistent containers, in order. The order is also the =container-reopen-next= cycle and the order of host rules. |
 | =key_new_temp=       | =Ctrl+Alt+t=   | Key for =container-new-temp=. =""= or =null= unbinds it. |
 | =key_reopen_next=    | =Ctrl+Alt+c=   | Key for =container-reopen-next=. =""= or =null= unbinds it. |
@@ -59,6 +62,9 @@ Each element of =containers= is a mapping:
 | =id=    | no       | Stable id; it names the data directory, so changing it starts an empty profile. Default: the name with ASCII letters lowercased, digits, =_= and =-= kept and every other character (spaces, punctuation, each non-ASCII character) replaced by =-=: =Media= → =media=, =Work Stuff= → =work-stuff=. |
 | =color= | no       | CSS colour string. |
 | =hosts= | no       | Regular expressions matched case-insensitively against the bare host (no scheme, port or path) of a URL, as in every =GsurfHostRules= list: write =(^|\.)example\.com$= for a domain and its subdomains. The first matching rule over all containers, in config order, wins. |
+| =proxy= | no | This container's own proxy, like a Firefox/Sidebery per-container proxy (since 0.5.5): =http://HOST:PORT= (HTTP), =https://HOST:PORT= (TLS to the proxy), =socks4://HOST:PORT=, =socks4a://HOST:PORT= (the proxy resolves host names), =socks5://[USER:PASSWORD@]HOST:PORT= (resolves remotely too), =socks://HOST:PORT= (SOCKS5 with SOCKS4/4a fallback), or =none= to connect directly even when =network.proxy= sets one. Unset: the global =network.proxy=. See [[*Proxies and user agents][Proxies and user agents]]. |
+| =proxy_ignore= | no | Hosts that bypass =proxy= (e.g. =[localhost, "*.corp"]=). |
+| =user_agent= | no | User agent the container's tabs send in place of the global one (=settings.user_agent=). A per-site rule of the =useragent= module still wins. |
 
 An id must be 1-64 characters of =[A-Za-z0-9_-]= and may not be =temporary=, =default= or start with =tmp-= (those are reserved). Container names derived to such an id (a container named "Temporary" or "Default") need an explicit =id=.
 
@@ -69,11 +75,40 @@ Every problem is reported on stderr as a warning naming the entry, and the modul
 - an entry that is not a mapping, has no name, an invalid id or a duplicate id is skipped;
 - a host pattern that is empty or not a valid regular expression is skipped (the container and its other patterns stay);
 - =hosts= or =containers= that is not a list is ignored;
-- an unknown or empty =new_tab= falls back to =temporary=; a bad =temp_cleanup_delay= to =30=.
+- an unknown or empty =new_tab= falls back to =temporary=; a bad =temp_cleanup_delay= to =30=;
+- a =proxy= / =temp_proxy= that is not one of the forms above is ignored (the container uses the global proxy); =proxy_ignore= that is not a list is ignored.
 
 ** Reconfiguring
 
 =configure()= replaces the whole configuration, including going back to the defaults for omitted keys. Containers the old configuration defined and the new one does not are removed from the registry; one that still has open tabs cannot be removed, so it stays (without host rules; only tabs opened from its remaining tabs join it) and is removed when its last tab closes. A container that stays in the configuration keeps its session and tabs; only its name and colour change. Setting =enabled: false= removes the placement policy and every container the module defined (again, in-use ones once their tabs close). Data on disk is never deleted.
+
+* Proxies and user agents
+
+Each container has its own network session, so it can have its own proxy and user agent, the way Sidebery configures Firefox containers:
+
+#+begin_src yaml
+modules:
+  containers:
+    enabled: true
+    temp_proxy: socks5://127.0.0.1:9050        # every temporary container via Tor
+    containers:
+      - name: Work
+        hosts: ['(^|\.)corp\.example$']
+        proxy: http://proxy.corp.example:3128
+        proxy_ignore: [localhost, "*.corp.example"]
+      - name: Shopping
+        proxy: socks5://user:secret@vpn.example:1080
+        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0"
+      - name: Banking
+        proxy: none                               # never through the global proxy
+#+end_src
+
+- *Proxy kinds.* The value is a URL whose scheme picks the protocol: =http= (a plain HTTP proxy; HTTPS sites go through it with =CONNECT=), =https= (the connection to the proxy itself is TLS), =socks4=, =socks4a=, =socks5= and =socks=. WebKit hands the URL to GIO, which implements all of them. =socks4= needs the client to resolve host names, so DNS queries leave the machine directly; =socks4a= and =socks5= send the host name to the proxy, so they don't. Credentials go in the URL (=user:password@=); GIO passes them to a SOCKS5 proxy. Proxy authentication was not covered by the local tests below, so check it against your proxy.
+- *Precedence.* A container's =proxy= replaces the global =network.proxy= for that container only; =none= forces a direct connection; leaving it out follows =network.proxy= (=default= = the system's proxy settings). The =proxy_switch= module's key changes the proxy of the active tab's session, which is its container's: the switch lasts until the next reconfigure or restart.
+- *When it applies.* A container's session gets its proxy when it is created; changing the config (a reload) switches a live session at once, and removing the key goes back to the global proxy.
+- *User agent.* A container's =user_agent= is sent from the tab's first request on, in place of the global user agent. The =useragent= module's per-site =rules= still win over it, and the container's beats that module's =default=. Order: per-site rule, container, =useragent= default, =settings.user_agent=, the engine's.
+- *Temporary containers* take =temp_proxy=, =temp_proxy_ignore= and =temp_user_agent=, however they are created (=new_tab: temporary=, =container-new-temp=, =gsurf --container temporary=).
+- *Verified* (0.5.5) against local test proxies: HTTP, TLS-to-proxy, SOCKS4 (by address), SOCKS4a and SOCKS5 (by host name), =none= over a global proxy, a container without =proxy= following the global one, and a container user agent on the first request.
 
 * Placement
 

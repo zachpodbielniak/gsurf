@@ -240,7 +240,7 @@ fake_destroy(gpointer native)
 	fake_sessions--;
 }
 
-static const GsurfSessionBackend fake_backend = { fake_create, fake_destroy, NULL };
+static const GsurfSessionBackend fake_backend = { fake_create, fake_destroy, NULL, NULL };
 
 static void
 test_temp_container_dirs(void)
