@@ -37,7 +37,7 @@ ifeq ($(WEBEXT_AVAILABLE),1)
 all: $(WEBEXT_SO)
 endif
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS) $(wildcard *.h) $(GSURF_HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $(SRCS) $(LIBGSURF_LINK)
 

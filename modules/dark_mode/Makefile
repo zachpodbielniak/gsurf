@@ -55,7 +55,7 @@ $(RES_H): $(RES_XML) $(JS)
 	@$(GLIB_COMPILE_RESOURCES) --sourcedir=. --target=$@ --generate-header \
 		--internal --manual-register --c-name gsurf_dark_mode_res $(RES_XML)
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(RES_C) $(RES_H)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(RES_C) $(RES_H) $(wildcard *.h) $(GSURF_HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -I$(GENDIR) $(LDFLAGS) -o $@ $(SRCS) $(RES_C) $(LIBGSURF_LINK)
 

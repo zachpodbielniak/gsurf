@@ -251,6 +251,12 @@ endif
 # Build all modules. A module that fails to compile fails the build
 # (`|| exit`); otherwise the loop would carry on and a broken module would
 # silently be missing from $(OUTDIR)/modules.
+#
+# GSURF_HDRS: every libgsurf header and the shared module headers. A
+# module's .so depends on them (and on its own *.h), so a header change (an
+# enum growing, a struct field) rebuilds the modules instead of leaving
+# them compiled against the old layout.
+GSURF_HDRS := $(abspath $(shell find src modules/include -name '*.h'))
 ifeq ($(MCP_AVAILABLE),1)
 modules: mcp-glib
 endif
@@ -267,6 +273,7 @@ modules: lib $(OUTDIR)/modules
 				MCP_LDFLAGS="$(MCP_LDFLAGS)" \
 				GTK_BACKEND=$(GTK_BACKEND) \
 				PKG_CONFIG="$(PKG_CONFIG)" \
+				GSURF_HDRS="$(GSURF_HDRS)" \
 				$(STATIC_MODULE_FLAGS) || exit $$?; \
 		fi \
 	done

@@ -54,7 +54,7 @@ $(JS_HDR): $(JS)
 	@sed 's/\\/\\\\/g; s/"/\\"/g; s/^/"/; s/$$/\\n"/' js/cosmetic.js >> $@
 	@echo ";" >> $@
 
-$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS) $(JS_HDR)
+$(OUTDIR)/$(MODULE_NAME).so: $(SRCS) $(HDRS) $(JS_HDR) $(wildcard *.h) $(GSURF_HDRS)
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) $(SOUP_CFLAGS) -I$(GENDIR) $(LDFLAGS) -o $@ $(SRCS) $(LIBGSURF_LINK) $(SOUP_LIBS)
 
