@@ -118,6 +118,8 @@ mousebinds:
   "Button9": forward
   "Button2": open-new-view-background
   "Ctrl+Button1": open-new-view-background
+  "Ctrl+Button4": zoom-in
+  "Ctrl+Button5": zoom-out
 
 # ===== Modules =====
 modules:

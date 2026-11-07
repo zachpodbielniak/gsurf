@@ -2522,6 +2522,105 @@ test_solo(void)
 	h_free(&h);
 }
 
+/* What the window's button-press saw for a wheel notch. */
+typedef struct {
+	guint      button;
+	guint      state;
+	GsurfView *pointer;
+	guint      n;
+} WheelSeen;
+
+static gboolean
+on_wheel_press(GsurfWindow *window, guint button, guint state, gpointer data)
+{
+	WheelSeen *seen = data;
+
+	seen->button = button;
+	seen->state = state;
+	seen->pointer = gsurf_window_get_pointer_view(window);
+	seen->n++;
+	/* Like the default mousebinds: only Ctrl+wheel is bound. */
+	return (state & GSURF_MOD_CTRL) != 0;
+}
+
+/* Runs after gsurf's scroll handler only when it let the event through to
+ * the page (a consumed scroll stops the emission). */
+static gboolean
+on_page_scroll(GtkWidget *widget, GdkEvent *event, gpointer data)
+{
+	(void)widget;
+	(void)event;
+	(*(guint *)data)++;
+	return FALSE;
+}
+
+/* Feature: the wheel over a page reaches the window as wheel buttons
+ * (Ctrl+wheel zooms by default), for the view under the pointer: a wmux
+ * pane that is not the active one. GTK3 (GTK4's scroll controller needs a
+ * real event for the modifier state). */
+static void
+test_wheel_pointer_view(void)
+{
+#ifdef GSURF_BACKEND_GTK4
+	g_test_skip("GTK3 only: synthesizes GdkEventScroll");
+#else
+	H h;
+	GsurfView *a, *b;
+	WheelSeen seen = { 0, 0, NULL, 0 };
+	GdkEvent *event;
+	gboolean handled = FALSE;
+	guint page_a = 0;
+	guint page_b = 0;
+	gulong id;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h, NULL, NULL, NULL))
+		return;
+	a = h.first;
+	cmd(&h, GDK_KEY_percent, SHIFT);
+	b = active_view(&h);
+	g_assert_true(a != b);
+	id = g_signal_connect(h.window, "button-press", G_CALLBACK(on_wheel_press), &seen);
+	g_signal_connect(gsurf_view_get_native_widget(a), "scroll-event",
+		G_CALLBACK(on_page_scroll), &page_a);
+	g_signal_connect(gsurf_view_get_native_widget(b), "scroll-event",
+		G_CALLBACK(on_page_scroll), &page_b);
+
+	/* 1. Ctrl+wheel up over the inactive pane: button 4, Ctrl, that view;
+	 *    consumed (the page does not scroll); the active pane stays. */
+	event = gdk_event_new(GDK_SCROLL);
+	event->scroll.direction = GDK_SCROLL_UP;
+	event->scroll.state = GDK_CONTROL_MASK;
+	g_signal_emit_by_name(gsurf_view_get_native_widget(a), "scroll-event", event, &handled);
+	g_assert_true(handled);
+	g_assert_cmpuint(page_a, ==, 0);
+	g_assert_cmpuint(seen.n, ==, 1);
+	g_assert_cmpuint(seen.button, ==, GSURF_BUTTON_WHEEL_UP);
+	g_assert_cmpuint(seen.state, ==, GSURF_MOD_CTRL);
+	g_assert_true(seen.pointer == a);
+	g_assert_true(active_view(&h) == b);
+	g_assert_null(gsurf_window_get_pointer_view(h.window));
+
+	/* 2. A plain smooth scroll down: button 5, unbound, so the page gets
+	 *    it (not consumed; WebKit itself then scrolls). */
+	event->scroll.direction = GDK_SCROLL_SMOOTH;
+	event->scroll.delta_x = 0.0;
+	event->scroll.delta_y = 1.0;
+	event->scroll.state = 0;
+	g_signal_emit_by_name(gsurf_view_get_native_widget(b), "scroll-event", event, &handled);
+	g_assert_cmpuint(page_b, ==, 1);
+	g_assert_cmpuint(seen.n, ==, 2);
+	g_assert_cmpuint(seen.button, ==, GSURF_BUTTON_WHEEL_DOWN);
+	g_assert_true(seen.pointer == b);
+	gdk_event_free(event);
+
+	g_signal_handler_disconnect(h.window, id);
+	g_signal_handlers_disconnect_by_func(gsurf_view_get_native_widget(a), on_page_scroll, &page_a);
+	g_signal_handlers_disconnect_by_func(gsurf_view_get_native_widget(b), on_page_scroll, &page_b);
+	check_invariants(&h);
+	h_free(&h);
+#endif
+}
+
 /* --- Opened-from-tab children (main.c's host handlers, copied) --- */
 
 /* main.c's make_tab_full(): a new view of @opener, active or not. */
@@ -3015,6 +3114,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/wmux/webkit/mode-indicator", test_mode_indicator);
 	g_test_add_func("/gsurf/wmux/webkit/group-rename", test_group_rename);
 	g_test_add_func("/gsurf/wmux/webkit/solo", test_solo);
+	g_test_add_func("/gsurf/wmux/webkit/wheel-pointer-view", test_wheel_pointer_view);
 
 	ret = g_test_run();
 	g_clear_object(&server);

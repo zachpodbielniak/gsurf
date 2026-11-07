@@ -127,6 +127,33 @@ view_for_widget(GsurfGtk3Window *self, GtkWidget *widget)
 	return NULL;
 }
 
+/* A wheel or touchpad scroll on a view widget, before WebKit scrolls the
+ * page: it goes through the window as wheel buttons (4-7), so a mousebind
+ * (Ctrl+wheel zooms by default) can consume it and act on this view.
+ * Discrete steps are one notch; smooth deltas are already in notches. */
+static gboolean
+on_view_scroll_event(GtkWidget *widget, GdkEventScroll *event, gpointer user_data)
+{
+	GsurfGtk3Window *self = user_data;
+	gdouble dx = 0.0;
+	gdouble dy = 0.0;
+
+	switch (event->direction) {
+	case GDK_SCROLL_UP:    dy = -1.0; break;
+	case GDK_SCROLL_DOWN:  dy = 1.0; break;
+	case GDK_SCROLL_LEFT:  dx = -1.0; break;
+	case GDK_SCROLL_RIGHT: dx = 1.0; break;
+	case GDK_SCROLL_SMOOTH:
+		if (!gdk_event_get_scroll_deltas((GdkEvent *)event, &dx, &dy))
+			return FALSE;
+		break;
+	default:
+		return FALSE;
+	}
+	return gsurf_window_emit_wheel(GSURF_WINDOW(self), view_for_widget(self, widget),
+		dx, dy, translate_modifiers(event->state));
+}
+
 /* Focus follows click: with a layout showing several views, the view
  * the user clicks into (WebKit grabs focus on a press) or tabs into
  * becomes the active view. Without a layout only the active view is
@@ -177,9 +204,15 @@ gsurf_gtk3_window_wire_view(GsurfGtk3Window *self, GtkWidget *widget)
 		return;
 	g_signal_handlers_disconnect_matched(widget, G_SIGNAL_MATCH_FUNC,
 		0, 0, NULL, on_view_button_press_event, NULL);
-	gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK);
+	g_signal_handlers_disconnect_matched(widget, G_SIGNAL_MATCH_FUNC,
+		0, 0, NULL, on_view_scroll_event, NULL);
+	gtk_widget_add_events(widget, GDK_BUTTON_PRESS_MASK | GDK_SCROLL_MASK |
+		GDK_SMOOTH_SCROLL_MASK);
 	g_signal_connect_object(widget, "button-press-event",
 		G_CALLBACK(on_view_button_press_event), self, 0);
+	/* The wheel too (Ctrl+wheel zooms by default). */
+	g_signal_connect_object(widget, "scroll-event",
+		G_CALLBACK(on_view_scroll_event), self, 0);
 }
 
 /* --- Vfunc implementations --- */

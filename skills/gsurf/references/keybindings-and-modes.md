@@ -9,7 +9,8 @@ Source: `docs/keybindings.org`. Key strings are used by the core `keybinds:` / `
 - Shifted punctuation is its shifted keysym: with `Shift`, `period`/`.` becomes `greater`, `bracketleft`/`[` becomes `braceleft`, `slash` → `question`, `semicolon` → `colon`, `apostrophe` → `quotedbl`, `bracketright` → `braceright`, `minus` → `underscore`, `equal` → `plus`, `grave` → `asciitilde`, `backslash` → `bar`, `comma` → `less`. So `Ctrl+Shift+.` = `Ctrl+Shift+period` = `Ctrl+Shift+greater`.
 - `+` separates modifiers: write a literal plus as `plus` (`Ctrl+plus`).
 - Shift+Tab (`ISO_Left_Tab`) matches `Shift+Tab`.
-- Mouse: `[Mods+]ButtonN` (`Button2` middle, `Button8`/`Button9` thumb buttons, `Ctrl+Button1`).
+- Mouse: `[Mods+]ButtonN`, capital B (`Button2` middle, `Button8`/`Button9` thumb buttons, `Ctrl+Button1`). Wheel = `Button4` up, `Button5` down, `Button6`/`Button7` left/right; one press per notch, applies to the tab under the pointer, consumes the scroll. Defaults: `Ctrl+Button4` zoom-in, `Ctrl+Button5` zoom-out (GTK3, GTK4, `--lrg=2d`; 3D keeps Ctrl+wheel for the camera).
+- `none` as the action removes a default binding (`"Ctrl+Button4": none`).
 
 ## Core table
 
@@ -53,6 +54,8 @@ mousebinds:
   "Button9": forward
   "Ctrl+Button1": open-new-view-background
   "Button2": open-new-view-background
+  "Ctrl+Button4": zoom-in        # Ctrl+wheel up
+  "Ctrl+Button5": zoom-out       # Ctrl+wheel down
 ```
 
 The YAML `keybinds:` map is merged over the defaults; there is no YAML way to delete a default binding except rebinding the key. **An unknown action name (or `none`) is skipped without a warning**: check spelling against `gsurfctl actions` or the table below. In C, `gsurf_config_set_keybind(config, "Ctrl+q", GSURF_ACTION_NONE)` removes it.

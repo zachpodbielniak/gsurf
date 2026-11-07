@@ -259,6 +259,42 @@ gboolean    gsurf_window_emit_key_press(GsurfWindow *self, guint keyval, guint k
 gboolean    gsurf_window_emit_button_press(GsurfWindow *self, guint button, guint state);
 gboolean    gsurf_window_emit_close_request(GsurfWindow *self);
 
+/**
+ * gsurf_window_emit_wheel:
+ * @self: a #GsurfWindow
+ * @view: (nullable): the view under the pointer, or %NULL for the active one
+ * @dx: horizontal travel in wheel notches (positive: content to the right)
+ * @dy: vertical travel in wheel notches (positive: content down)
+ * @state: #GsurfKeyMod flags held
+ *
+ * Reports a wheel or touchpad scroll as button presses: each whole notch
+ * of travel emits #GsurfWindow::button-press with
+ * %GSURF_BUTTON_WHEEL_UP, %GSURF_BUTTON_WHEEL_DOWN,
+ * %GSURF_BUTTON_WHEEL_LEFT or %GSURF_BUTTON_WHEEL_RIGHT (buttons 4-7), so
+ * mousebinds ("Ctrl+Button4": zoom-in) and modules act on the wheel. The
+ * first event in a new direction, or with other modifiers, is a notch at
+ * once; fractional deltas (a touchpad) add up. While a handler runs,
+ * gsurf_window_get_pointer_view() returns @view.
+ *
+ * Returns: %TRUE when a handler consumed the scroll (the page must not
+ *   scroll); between notches, whether the last notch was consumed
+ */
+gboolean    gsurf_window_emit_wheel(GsurfWindow *self, GsurfView *view,
+                                    gdouble dx, gdouble dy, guint state);
+
+/**
+ * gsurf_window_get_pointer_view:
+ * @self: a #GsurfWindow
+ *
+ * The view a wheel event is over, while gsurf_window_emit_wheel() emits
+ * it; actions bound to the wheel apply to it rather than the active view
+ * (a wmux pane under the pointer).
+ *
+ * Returns: (transfer none) (nullable): that view, or %NULL outside a
+ *   wheel emission or when the backend did not say
+ */
+GsurfView  *gsurf_window_get_pointer_view(GsurfWindow *self);
+
 G_END_DECLS
 
 #endif /* GSURF_WINDOW_H */

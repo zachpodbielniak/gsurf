@@ -20,6 +20,12 @@ typedef struct {
 	GsurfWindowLayout *layout; /* owned; NULL = the backend's view stack */
 	gboolean   layout_warned;  /* refusal already logged for this window */
 	gboolean   key_grab;       /* every key goes to key-press */
+	GsurfView *pointer_view;   /* borrowed; the view a wheel event is over,
+	                            * set only while it is emitted */
+	guint      wheel_button;   /* last wheel notch: button and modifiers, */
+	guint      wheel_state;    /* the travel towards the next notch, and */
+	gdouble    wheel_travel;   /* whether that notch was consumed */
+	gboolean   wheel_handled;
 } GsurfWindowPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfWindow, gsurf_window, G_TYPE_OBJECT)
@@ -937,6 +943,72 @@ gsurf_window_emit_button_press(GsurfWindow *self, guint button, guint state)
 
 	g_signal_emit(self, signals[SIG_BUTTON_PRESS], 0, button, state, &handled);
 	return handled;
+}
+
+/* The wheel button for a delta: the dominant axis, its sign (positive dy
+ * scrolls the content down). */
+static guint
+wheel_button_for(gdouble dx, gdouble dy)
+{
+	if (ABS(dy) >= ABS(dx))
+		return dy < 0.0 ? GSURF_BUTTON_WHEEL_UP : GSURF_BUTTON_WHEEL_DOWN;
+	return dx < 0.0 ? GSURF_BUTTON_WHEEL_LEFT : GSURF_BUTTON_WHEEL_RIGHT;
+}
+
+gboolean
+gsurf_window_emit_wheel(GsurfWindow *self, GsurfView *view, gdouble dx, gdouble dy,
+                        guint state)
+{
+	GsurfWindowPrivate *priv;
+	gdouble amount;
+	guint button;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), FALSE);
+	priv = gsurf_window_get_instance_private(self);
+	if (dx == 0.0 && dy == 0.0)
+		return FALSE;
+
+	/* 1. One notch per whole unit of travel. A new direction or new
+	 *    modifiers start over with a notch at once, so a mouse wheel acts
+	 *    on its first click; a touchpad's small deltas add up to one. */
+	button = wheel_button_for(dx, dy);
+	amount = MAX(ABS(dx), ABS(dy));
+	if (button != priv->wheel_button || state != priv->wheel_state) {
+		priv->wheel_button = button;
+		priv->wheel_state = state;
+		priv->wheel_travel = 1.0;
+	} else {
+		priv->wheel_travel += amount;
+	}
+
+	/* 2. Between notches the event goes where the last notch went: still
+	 *    swallowed while a binding owns this wheel, else to the page. */
+	if (priv->wheel_travel < 1.0)
+		return priv->wheel_handled;
+
+	priv->wheel_handled = FALSE;
+	priv->pointer_view = view;
+	while (priv->wheel_travel >= 1.0) {
+		priv->wheel_travel -= 1.0;
+		if (!gsurf_window_emit_button_press(self, button, state))
+			break;
+		priv->wheel_handled = TRUE;
+	}
+	priv->pointer_view = NULL;
+	/* An unbound wheel scrolls the page; nothing is owed towards it. */
+	if (!priv->wheel_handled)
+		priv->wheel_travel = 0.0;
+	return priv->wheel_handled;
+}
+
+GsurfView *
+gsurf_window_get_pointer_view(GsurfWindow *self)
+{
+	GsurfWindowPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_WINDOW(self), NULL);
+	priv = gsurf_window_get_instance_private(self);
+	return priv->pointer_view;
 }
 
 gboolean

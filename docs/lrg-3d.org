@@ -198,7 +198,7 @@ The pointer is ray-cast into the scene every frame. What it hits decides where a
 | Double click on a panel (same tab, within 450 ms and 8 px) | Reads that tab: it becomes the active one and the camera re-snaps head-on, full-frame (in the carousel the ring spins it to the front first), then hands over to the pixel-exact flat view. The first click did its usual thing (on the active tab it reached the page); the second is not delivered. Leave with =gf= or =Alt+Shift+r=. |
 | Right click | Goes to the page under the pointer (after mousebinds and modules). |
 | Wheel | Scrolls the tab under the pointer, a background tab too. |
-| =Ctrl+wheel= | Dollies the camera (0.9 of the distance per notch toward the scene). |
+| =Ctrl+wheel= | Dollies the camera (0.9 of the distance per notch toward the scene). In the flat reading view it zooms the page instead, as in 2D (the default =Ctrl+Button4= / =Ctrl+Button5= mousebinds). |
 | Middle drag | Orbits the camera round the room (0.4 degrees per pixel). |
 | Middle click (no drag) | Delivered after the drag check: first to mousebinds and modules (the default =Button2= is =open-new-view-background=, open the link in a background tab), else to the page as a middle press and release (X11 paste). |
 | =Ctrl+left drag= (or =Super+left drag=) | Turns the view in place (look around, 0.25 degrees per pixel). |

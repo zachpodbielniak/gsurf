@@ -68,6 +68,13 @@ parse_webkit_settings(GsurfSettings *s, YamlMapping *w)
 		gsurf_settings_set_default_charset(s, yaml_mapping_get_string_member(w, "default_charset"));
 }
 
+/* Whether a binding's action string unbinds it: "none" or empty. */
+static gboolean
+binding_is_unbind(const gchar *action_str)
+{
+	return *action_str == '\0' || g_ascii_strcasecmp(action_str, "none") == 0;
+}
+
 static void
 parse_keybinds(GsurfConfig *self, YamlMapping *kb)
 {
@@ -83,6 +90,15 @@ parse_keybinds(GsurfConfig *self, YamlMapping *kb)
 		if (action_str == NULL)
 			continue;
 
+		/* "none" (or "") removes a binding an earlier layer made (the
+		 * built-in defaults); any other unknown name is ignored. */
+		if (binding_is_unbind(action_str)) {
+			norm = gsurf_keys_normalize(keystr);
+			if (norm != NULL)
+				g_hash_table_remove(self->keybinds, norm);
+			g_free(norm);
+			continue;
+		}
 		action = gsurf_action_from_string(action_str);
 		if (action == GSURF_ACTION_NONE)
 			continue;
@@ -108,6 +124,15 @@ parse_mousebinds(GsurfConfig *self, YamlMapping *mb)
 
 		if (action_str == NULL)
 			continue;
+		/* "none" (or "") removes a default ("Ctrl+Button4": none turns
+		 * Ctrl+wheel zoom off). */
+		if (binding_is_unbind(action_str)) {
+			norm = gsurf_keys_normalize(keystr);
+			if (norm != NULL)
+				g_hash_table_remove(self->mousebinds, norm);
+			g_free(norm);
+			continue;
+		}
 		action = gsurf_action_from_string(action_str);
 		if (action == GSURF_ACTION_NONE)
 			continue;
