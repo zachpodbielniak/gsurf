@@ -41,6 +41,8 @@ static gboolean  opt_fullscreen = FALSE;
 static gboolean  opt_kiosk = FALSE;
 static gboolean  opt_pwa = FALSE;
 static gchar    *opt_pwa_name = NULL;
+static gboolean  opt_list_pwa = FALSE;
+static gchar    *opt_uninstall_pwa = NULL;
 
 /* --lrg[=MODE]: use the libregnum/raylib backend.  Bare --lrg means 2D
  * (matching `emacs --lrg').  Parsed by opt_lrg_cb so the value is optional. */
@@ -91,6 +93,11 @@ static const GOptionEntry entries[] = {
 	  "Install URI as a kiosk desktop app and exit", NULL },
 	{ "pwa-name", 0, 0, G_OPTION_ARG_STRING, &opt_pwa_name,
 	  "Desktop app name (default: site hostname; requires --pwa)", "NAME" },
+	{ "list-pwa", 0, 0, G_OPTION_ARG_NONE, &opt_list_pwa,
+	  "List installed PWAs (id, name, scope, URL) and exit", NULL },
+	{ "uninstall-pwa", 0, 0, G_OPTION_ARG_STRING, &opt_uninstall_pwa,
+	  "Uninstall a PWA by its --list-pwa id (or its exact name or URL) and exit",
+	  "ID" },
 	{ "fullscreen", 'f', 0, G_OPTION_ARG_NONE, &opt_fullscreen,
 	  "Start in fullscreen", NULL },
 	{ "lrg", 0, G_OPTION_FLAG_OPTIONAL_ARG, G_OPTION_ARG_CALLBACK,
@@ -688,6 +695,94 @@ resolve_cli_path(gchar **path)
 
 /* ===== main ===== */
 
+/* --- --list-pwa / --uninstall-pwa ------------------------------------- */
+
+/* The launcher directories --pwa installs into: per user, and system-wide
+ * (where root installs). */
+static gchar *
+pwa_user_dir(void)
+{
+	return g_build_filename(g_get_user_data_dir(), "applications", NULL);
+}
+
+#define PWA_SYSTEM_DIR "/usr/local/share/applications"
+
+/* Pad @text with spaces to @width display characters. */
+static void
+print_padded(const gchar *text, glong width)
+{
+	glong len = g_utf8_strlen(text, -1);
+
+	g_print("%s", text);
+	for (; len < width; len++)
+		g_print(" ");
+}
+
+/* --list-pwa: one row per launcher, the id first (what --uninstall-pwa
+ * takes), in aligned columns. */
+static int
+pwa_list_command(void)
+{
+	g_autofree gchar *user_dir = pwa_user_dir();
+	g_autoptr(GPtrArray) entries = gsurf_pwa_list(user_dir, PWA_SYSTEM_DIR);
+	glong w_id = 2, w_name = 4;
+	guint i;
+
+	if (entries->len == 0) {
+		g_print("No gsurf PWAs installed (install one with gsurf --pwa URL).\n");
+		return EXIT_SUCCESS;
+	}
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		w_id = MAX(w_id, g_utf8_strlen(e->id, -1));
+		w_name = MAX(w_name, g_utf8_strlen(e->name, -1));
+	}
+	print_padded("ID", w_id + 2);
+	print_padded("NAME", w_name + 2);
+	g_print("SCOPE   URL\n");
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		print_padded(e->id, w_id + 2);
+		print_padded(e->name, w_name + 2);
+		print_padded(e->system ? "system" : "user", 8);
+		g_print("%s\n", e->uri != NULL ? e->uri : "(unreadable launcher)");
+	}
+	g_print("\nUninstall one with: gsurf --uninstall-pwa ID\n");
+	return EXIT_SUCCESS;
+}
+
+/* --uninstall-pwa ID: find the launcher and remove it (to the trash when
+ * possible).  System launchers need root, as installing them does. */
+static int
+pwa_uninstall_command(const gchar *query)
+{
+	g_autofree gchar *user_dir = pwa_user_dir();
+	g_autoptr(GPtrArray) entries = gsurf_pwa_list(user_dir, PWA_SYSTEM_DIR);
+	g_autoptr(GError) error = NULL;
+	GsurfPwaEntry *entry;
+	gboolean trashed = FALSE;
+
+	entry = gsurf_pwa_find(entries, query, &error);
+	if (entry == NULL) {
+		g_printerr("gsurf: %s\n", error->message);
+		return EXIT_FAILURE;
+	}
+	if (entry->system && geteuid() != 0) {
+		g_printerr("gsurf: '%s' is installed system-wide (%s); run: "
+			"sudo gsurf --uninstall-pwa %s\n", entry->name, entry->path, entry->id);
+		return EXIT_FAILURE;
+	}
+	if (!gsurf_pwa_uninstall(entry, &trashed, &error)) {
+		g_printerr("gsurf: PWA uninstall failed: %s\n", error->message);
+		return EXIT_FAILURE;
+	}
+	g_print("Uninstalled %s (%s): %s %s\n", entry->name, entry->id, entry->path,
+		trashed ? "moved to the trash" : "deleted");
+	return EXIT_SUCCESS;
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -735,7 +830,10 @@ main(int argc, char *argv[])
 		"  gsurf --lrg=3d:grid:sky https://example.org\n"
 		"  gsurf --lrg=3d:stack:workshop\n"
 		"  gsurf --pwa --pwa-name Mail https://mail.example.org\n"
-		"  sudo gsurf --pwa https://example.org");
+		"  sudo gsurf --pwa https://example.org\n"
+		"  gsurf --list-pwa\n"
+		"  gsurf --uninstall-pwa mail\n"
+		"  sudo gsurf --uninstall-pwa example-org");
 	g_option_context_add_main_entries(context, entries, NULL);
 	if (!g_option_context_parse(context, &argc, &argv, &error)) {
 		g_printerr("gsurf: %s\n", error->message);
@@ -771,6 +869,17 @@ main(int argc, char *argv[])
 			"--pwa-name requires --pwa\n");
 		return EXIT_FAILURE;
 	}
+	/* Listing and uninstalling launchers: no URI, nothing else to do. */
+	if ((opt_list_pwa || opt_uninstall_pwa != NULL) &&
+	    (argc != 1 || opt_pwa || opt_kiosk || (opt_list_pwa && opt_uninstall_pwa != NULL))) {
+		g_printerr("gsurf: --list-pwa and --uninstall-pwa take no URI and "
+			"go alone\n");
+		return EXIT_FAILURE;
+	}
+	if (opt_list_pwa)
+		return pwa_list_command();
+	if (opt_uninstall_pwa != NULL)
+		return pwa_uninstall_command(opt_uninstall_pwa);
 	if (opt_pwa) {
 		g_autofree gchar *executable = NULL;
 		g_autofree gchar *directory = NULL;

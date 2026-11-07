@@ -33,7 +33,28 @@ An ordinary invocation writes to =$XDG_DATA_HOME/applications=, defaulting to =~
 
 The launcher runs the absolute gsurf executable path with =--kiosk -- SITE_URL=. AppImage launches retain the external =APPIMAGE= path rather than the temporary mounted executable. Keep that executable installed at the same path; do not install a launcher from a temporary build worktree. Executable paths containing a literal percent sign are rejected because GLib desktop launchers validate the executable before expanding percent escapes. Percent escapes in site URLs are supported.
 
-The filename is =gsurf-pwa-SHA256.desktop=, where SHA256 hashes the full input URI. Reinstalling an identical URI atomically replaces its launcher, including its display name. Distinct paths, queries, or fragments on one domain receive separate launchers. Names are display labels and cannot escape the destination directory. The command prints the installed path; remove that exact file to uninstall the launcher.
+The filename is =gsurf-pwa-SHA256.desktop=, where SHA256 hashes the full input URI. Reinstalling an identical URI atomically replaces its launcher, including its display name. Distinct paths, queries, or fragments on one domain receive separate launchers. Names are display labels and cannot escape the destination directory. The command prints the installed path. New launchers also record the site URL under =X-Gsurf-PWA-URI=, which =--list-pwa= reads (older launchers are read from their =Exec= line).
+
+* List and uninstall launchers
+
+#+begin_src bash
+gsurf --list-pwa
+gsurf --uninstall-pwa my-mail
+sudo gsurf --uninstall-pwa shared-dashboard
+#+end_src
+
+=--list-pwa= prints every gsurf launcher in both destinations, per user and system-wide, one per row, sorted by id:
+
+#+begin_example
+ID                  NAME       SCOPE   URL
+dashboard-a1695deb  Dashboard  user    https://dash.example.org/b
+dashboard-ee045c87  Dashboard  user    https://dash.example.org/a
+my-mail             My Mail    user    https://mail.example.org
+#+end_example
+
+The *ID* is what =--uninstall-pwa= takes. It is the display name as a slug: ASCII letters and digits lowercased, every other run of characters one =-= (=My Mail= becomes =my-mail=; a name with no Latin letters or digits becomes =pwa=). When two launchers would share a slug, both get the first eight hex digits of their URL hash appended, and if one URL is installed both per user and system-wide the scope is appended as well (=-user=, =-system=), so an id is always unique within a listing. Ids follow the names: uninstalling one of two same-named apps gives the other its plain slug back.
+
+=--uninstall-pwa= also accepts the exact display name (any case) or the exact URL when exactly one launcher matches; if several do, it refuses and prints their ids. It removes the launcher the same way installation chose its destination: a system-wide launcher needs root (the error prints the =sudo= command), a per-user one does not. The launcher is moved to the trash where its filesystem has one (restore it from there to undo), otherwise deleted, and the command says which. Both options take no URI and cannot be combined with =--pwa=, =--kiosk= or each other. Like =--pwa=, they run before GTK, configuration or modules.
 
 * Scope of PWA support
 
@@ -43,6 +64,6 @@ A PWA here means a desktop shortcut launching a site in gsurf's restricted appli
 
 Hosts can set =GsurfConfig.kiosk= on the default configuration before constructing windows/views. The shared view/window layer blocks additional views, popup dispatch, inspector dispatch, and added chrome widgets. Hosts must enforce their own action policy; the standalone CLI uses =gsurf_kiosk_allows_action()= and still loads modules unless =--no-modules= is given. This flag is selected by the host, not by a YAML key, and is not intended for live toggling of an existing window.
 
-=gsurf_pwa_install()= provides display-independent installation with an explicit executable and destination. =make test= (also =make tests=) covers the shared kiosk guards, chrome-widget omission with modules still dispatching, ordinary-session behavior, invalid inputs, idempotent installation, naming, distinct sites on one host, I/O failures, real desktop Exec parsing/launching with special characters, and headless CLI installation into a temporary XDG directory. Root test runs omit actual system installation. =make gir= validates introspection metadata; =make test-gui= needs =xvfb-run= (Fedora package =xorg-x11-server-Xvfb=).
+=gsurf_pwa_install()= provides display-independent installation with an explicit executable and destination; =gsurf_pwa_list()=, =gsurf_pwa_find()= and =gsurf_pwa_uninstall()= list, resolve and remove launchers in explicit directories (not introspected). =make test= (also =make tests=) covers the shared kiosk guards, chrome-widget omission with modules still dispatching, ordinary-session behavior, invalid inputs, idempotent installation, naming, distinct sites on one host, I/O failures, real desktop Exec parsing/launching with special characters, and headless CLI installation into a temporary XDG directory. Root test runs omit actual system installation. =make gir= validates introspection metadata; =make test-gui= needs =xvfb-run= (Fedora package =xorg-x11-server-Xvfb=).
 
 Desktop escaping follows the [[https://specifications.freedesktop.org/desktop-entry/latest-single/][freedesktop Desktop Entry specification]]; the executable-percent restriction reflects [[https://github.com/GNOME/glib/blob/main/gio/gdesktopappinfo.c][GLib's desktop launcher implementation]].

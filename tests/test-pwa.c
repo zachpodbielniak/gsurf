@@ -128,11 +128,167 @@ test_invalid_input(void)
 	g_assert_cmpint(g_rmdir(directory), ==, 0);
 }
 
+/* Find the entry with @id in a listing. */
+static GsurfPwaEntry *
+entry_by_id(GPtrArray *entries, const gchar *id)
+{
+	guint i;
+
+	for (i = 0; i < entries->len; i++) {
+		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
+
+		if (g_strcmp0(e->id, id) == 0)
+			return e;
+	}
+	return NULL;
+}
+
+static void
+test_list_find_uninstall(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *root = g_dir_make_tmp("gsurf-pwa-list-XXXXXX", &error);
+	g_autofree gchar *user = NULL;
+	g_autofree gchar *system = NULL;
+	g_autofree gchar *mail_user = NULL;
+	g_autofree gchar *mail_system = NULL;
+	g_autofree gchar *dash_a = NULL;
+	g_autofree gchar *dash_b = NULL;
+	g_autofree gchar *legacy = NULL;
+	g_autofree gchar *intl = NULL;
+	g_autofree gchar *stray = NULL;
+	g_autofree gchar *mail_hash = NULL;
+	g_autofree gchar *id = NULL;
+	g_autofree gchar *data = NULL;
+	g_autoptr(GKeyFile) desktop = g_key_file_new();
+	g_autoptr(GPtrArray) entries = NULL;
+	GsurfPwaEntry *e;
+	gboolean trashed = TRUE;
+	const gchar *nasty = "https://example.org/app%20one?q=$test&quote=\"x\"&tick=`id`#hash";
+	guint i;
+
+	g_assert_no_error(error);
+	user = g_build_filename(root, "user", NULL);
+	system = g_build_filename(root, "system", NULL);
+
+	/* An empty (missing) pair of directories lists nothing. */
+	entries = gsurf_pwa_list(user, system);
+	g_assert_cmpuint(entries->len, ==, 0);
+	g_clear_pointer(&entries, g_ptr_array_unref);
+
+	/* The same URL per user and system-wide, two apps sharing a name, a
+	 * launcher written before X-Gsurf-PWA-URI, and a non-Latin name. */
+	mail_user = gsurf_pwa_install("https://mail.example.org", "My Mail", "/bin/true",
+		user, &error);
+	g_assert_no_error(error);
+	mail_system = gsurf_pwa_install("https://mail.example.org", "My Mail", "/bin/true",
+		system, &error);
+	g_assert_no_error(error);
+	dash_a = gsurf_pwa_install("https://dash.example.org/a", "Dash", "/bin/true", user,
+		&error);
+	g_assert_no_error(error);
+	dash_b = gsurf_pwa_install("https://dash.example.org/b", "Dash", "/bin/true", user,
+		&error);
+	g_assert_no_error(error);
+	legacy = gsurf_pwa_install(nasty, NULL, "/bin/true", user, &error);
+	g_assert_no_error(error);
+	g_assert_true(g_key_file_load_from_file(desktop, legacy, G_KEY_FILE_NONE, &error));
+	g_assert_true(g_key_file_remove_key(desktop, "Desktop Entry", "X-Gsurf-PWA-URI",
+		&error));
+	data = g_key_file_to_data(desktop, NULL, NULL);
+	g_assert_true(g_file_set_contents(legacy, data, -1, &error));
+	g_assert_no_error(error);
+	intl = gsurf_pwa_install("https://example.jp", "日本", "/bin/true", user, &error);
+	g_assert_no_error(error);
+	/* Other desktop files are not ours. */
+	stray = g_build_filename(user, "gsurf-pwa-short.desktop", NULL);
+	g_assert_true(g_file_set_contents(stray, "[Desktop Entry]\nName=x\n", -1, &error));
+	g_assert_no_error(error);
+
+	entries = gsurf_pwa_list(user, system);
+	g_assert_cmpuint(entries->len, ==, 6);
+
+	/* Ids: unique, sorted, slugged; hash suffix for a shared slug, plus the
+	 * scope for one URL installed twice. */
+	for (i = 1; i < entries->len; i++)
+		g_assert_cmpint(g_strcmp0(
+			((GsurfPwaEntry *)g_ptr_array_index(entries, i - 1))->id,
+			((GsurfPwaEntry *)g_ptr_array_index(entries, i))->id), <, 0);
+	mail_hash = g_compute_checksum_for_string(G_CHECKSUM_SHA256,
+		"https://mail.example.org", -1);
+	id = g_strdup_printf("my-mail-%.8s-user", mail_hash);
+	e = entry_by_id(entries, id);
+	g_assert_nonnull(e);
+	g_assert_false(e->system);
+	g_assert_cmpstr(e->path, ==, mail_user);
+	g_clear_pointer(&id, g_free);
+	id = g_strdup_printf("my-mail-%.8s-system", mail_hash);
+	e = entry_by_id(entries, id);
+	g_assert_nonnull(e);
+	g_assert_true(e->system);
+	g_assert_cmpstr(e->uri, ==, "https://mail.example.org");
+
+	/* The legacy launcher's URL comes back intact from its Exec line. */
+	e = entry_by_id(entries, "example-org");
+	g_assert_nonnull(e);
+	g_assert_cmpstr(e->name, ==, "example.org");
+	g_assert_cmpstr(e->uri, ==, nasty);
+	g_assert_cmpstr(e->path, ==, legacy);
+	g_assert_nonnull(entry_by_id(entries, "pwa"));
+
+	/* Find: id, name in any case, URL; ambiguous and unknown queries fail. */
+	g_assert_true(gsurf_pwa_find(entries, "example-org", &error) == e);
+	g_assert_true(gsurf_pwa_find(entries, "EXAMPLE.ORG", &error) == e);
+	g_assert_true(gsurf_pwa_find(entries, nasty, &error) == e);
+	g_assert_no_error(error);
+	g_assert_null(gsurf_pwa_find(entries, "dash", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS);
+	g_assert_nonnull(strstr(error->message, "dash-"));
+	g_clear_error(&error);
+	g_assert_null(gsurf_pwa_find(entries, "https://mail.example.org", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_EXISTS);
+	g_clear_error(&error);
+	g_assert_null(gsurf_pwa_find(entries, "nope", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
+	g_clear_error(&error);
+	g_assert_null(gsurf_pwa_find(entries, "", &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_clear_error(&error);
+
+	/* Uninstall: the launcher is gone and the listing shrinks. */
+	g_assert_true(gsurf_pwa_uninstall(e, &trashed, &error));
+	g_assert_no_error(error);
+	g_assert_false(g_file_test(legacy, G_FILE_TEST_EXISTS));
+	g_clear_pointer(&entries, g_ptr_array_unref);
+	entries = gsurf_pwa_list(user, system);
+	g_assert_cmpuint(entries->len, ==, 5);
+	g_assert_null(entry_by_id(entries, "example-org"));
+	/* With one Dash left... */
+	e = gsurf_pwa_find(entries, "https://dash.example.org/a", &error);
+	g_assert_nonnull(e);
+	g_assert_true(gsurf_pwa_uninstall(e, NULL, &error));
+	g_clear_pointer(&entries, g_ptr_array_unref);
+	entries = gsurf_pwa_list(user, system);
+	/* ...its slug no longer clashes and loses the hash. */
+	e = entry_by_id(entries, "dash");
+	g_assert_nonnull(e);
+	g_assert_cmpstr(e->path, ==, dash_b);
+
+	/* Tidy up (whatever went to a trash is already out of the tree). */
+	for (i = 0; i < entries->len; i++)
+		g_unlink(((GsurfPwaEntry *)g_ptr_array_index(entries, i))->path);
+	g_unlink(stray);
+	g_rmdir(user);
+	g_rmdir(system);
+	g_assert_cmpint(g_rmdir(root), ==, 0);
+}
+
 int
 main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
 	g_test_add_func("/pwa/install-launch", test_install_and_launch);
 	g_test_add_func("/pwa/invalid-input", test_invalid_input);
+	g_test_add_func("/pwa/list-find-uninstall", test_list_find_uninstall);
 	return g_test_run();
 }
