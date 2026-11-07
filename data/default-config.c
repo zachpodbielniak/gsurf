@@ -50,6 +50,13 @@ gsurf_config_init(void)
 	/* config->control_enabled = FALSE; */
 	/* g_free(config->control_name); config->control_name = g_strdup("work"); */
 
+	/* --- 3D (--lrg=3d, docs/lrg-3d.org) --- */
+	/* g_free(config->lrg_arrangement); config->lrg_arrangement = g_strdup("grid"); */
+	/* g_free(config->lrg_environment); config->lrg_environment = g_strdup("sky"); */
+	/* config->lrg_background_fps = 4.0; */
+	/* config->lrg_history_depth = 8; */
+	/* config->lrg_reading_single_tab = FALSE; */
+
 	/* --- Web engine defaults (GsurfSettings) --- */
 	/* config->settings->javascript = TRUE; */
 	/* config->settings->webgl = FALSE; */
@@ -59,6 +66,7 @@ gsurf_config_init(void)
 	 *     to match runtime key lookups; pass GSURF_ACTION_NONE to remove) --- */
 	/* gsurf_config_set_keybind(config, "Ctrl+r", GSURF_ACTION_RELOAD); */
 	/* gsurf_config_set_keybind(config, "?", GSURF_ACTION_SHOW_KEYBINDS); */
+	/* gsurf_config_set_keybind(config, "Alt+Shift+a", GSURF_ACTION_LRG_CYCLE_ARRANGEMENT); */
 	/* gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK); */
 
 	/* --- Module options can be supplied as embedded YAML via

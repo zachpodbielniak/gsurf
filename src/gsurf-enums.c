@@ -231,6 +231,21 @@ GSURF_DEFINE_ENUM_TYPE(GsurfAction, gsurf_action, {
 	EV(GSURF_ACTION_PANE_SPLIT_RIGHT, "pane-split-right"),
 	EV(GSURF_ACTION_PANE_SPLIT_DOWN, "pane-split-down"),
 	EV(GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND, "open-new-view-background"),
+	EV(GSURF_ACTION_LRG_CYCLE_ARRANGEMENT, "lrg-cycle-arrangement"),
+	EV(GSURF_ACTION_LRG_CYCLE_ENVIRONMENT, "lrg-cycle-environment"),
+	EV(GSURF_ACTION_LRG_READING, "lrg-reading"),
+	EV(GSURF_ACTION_LRG_HISTORY, "lrg-history"),
+	EV(GSURF_ACTION_LRG_FOCUS, "lrg-focus"),
+	EV(GSURF_ACTION_LRG_PIN, "lrg-pin"),
+	EV(GSURF_ACTION_LRG_UNPIN_ALL, "lrg-unpin-all"),
+	EV(GSURF_ACTION_LRG_CAMERA_RESET, "lrg-camera-reset"),
+	EV(GSURF_ACTION_LRG_OVERVIEW, "lrg-overview"),
+	EV(GSURF_ACTION_LRG_ORBIT_LEFT, "lrg-orbit-left"),
+	EV(GSURF_ACTION_LRG_ORBIT_RIGHT, "lrg-orbit-right"),
+	EV(GSURF_ACTION_LRG_ORBIT_UP, "lrg-orbit-up"),
+	EV(GSURF_ACTION_LRG_ORBIT_DOWN, "lrg-orbit-down"),
+	EV(GSURF_ACTION_LRG_ZOOM_IN, "lrg-zoom-in"),
+	EV(GSURF_ACTION_LRG_ZOOM_OUT, "lrg-zoom-out"),
 	END_EV
 })
 
@@ -345,6 +360,21 @@ gsurf_action_get_description(GsurfAction action)
 	case GSURF_ACTION_PANE_SPLIT_DOWN: return "Split the pane, the new pane below";
 	case GSURF_ACTION_OPEN_NEW_VIEW_BACKGROUND:
 		return "Open in a new background tab";
+	case GSURF_ACTION_LRG_CYCLE_ARRANGEMENT: return "3D: switch to the next tab arrangement";
+	case GSURF_ACTION_LRG_CYCLE_ENVIRONMENT: return "3D: switch to the next environment";
+	case GSURF_ACTION_LRG_READING: return "3D: read the current tab flat (toggle)";
+	case GSURF_ACTION_LRG_HISTORY: return "3D: show the tab's history in depth (toggle)";
+	case GSURF_ACTION_LRG_FOCUS: return "3D: fly the camera to the current tab";
+	case GSURF_ACTION_LRG_PIN: return "3D: pin or unpin the current tab's panel";
+	case GSURF_ACTION_LRG_UNPIN_ALL: return "3D: unpin every panel";
+	case GSURF_ACTION_LRG_CAMERA_RESET: return "3D: reset the camera";
+	case GSURF_ACTION_LRG_OVERVIEW: return "3D: pull back until every tab is in view";
+	case GSURF_ACTION_LRG_ORBIT_LEFT: return "3D: orbit the camera left";
+	case GSURF_ACTION_LRG_ORBIT_RIGHT: return "3D: orbit the camera right";
+	case GSURF_ACTION_LRG_ORBIT_UP: return "3D: orbit the camera up";
+	case GSURF_ACTION_LRG_ORBIT_DOWN: return "3D: orbit the camera down";
+	case GSURF_ACTION_LRG_ZOOM_IN: return "3D: move the camera closer";
+	case GSURF_ACTION_LRG_ZOOM_OUT: return "3D: move the camera away";
 	case GSURF_ACTION_LAST:
 	default:                                return NULL;
 	}
@@ -404,6 +434,65 @@ gsurf_lrg_render_mode_to_string(GsurfLrgRenderMode mode)
 gboolean
 gsurf_lrg_render_mode_is_implemented(GsurfLrgRenderMode mode)
 {
-	/* Only 2D is implemented today; 3D / 3D-VR are reserved. */
-	return mode == GSURF_LRG_RENDER_MODE_2D;
+	/* 2D always; 3D when the libregnum scene is linked in; VR is reserved. */
+	if (mode == GSURF_LRG_RENDER_MODE_2D)
+		return TRUE;
+#ifdef GSURF_HAVE_LRG_3D
+	if (mode == GSURF_LRG_RENDER_MODE_3D)
+		return TRUE;
+#endif
+	return FALSE;
+}
+
+/* Environment ids a spec token may name (the rest are arrangements). */
+static const gchar *const lrg_spec_environments[] = {
+	"void", "workshop", "cockpit", "sky", "studio", NULL
+};
+
+gboolean
+gsurf_lrg_spec_parse(const gchar *spec, GsurfLrgRenderMode *out_mode,
+                     gchar **out_arrangement, gchar **out_environment)
+{
+	g_auto(GStrv) parts = NULL;
+	gchar *arrangement = NULL;
+	gchar *environment = NULL;
+	gboolean known;
+	guint i;
+
+	/* MODE is the first token; ',' separates like ':' (the mode parser on its
+	 * own only knows ':'). */
+	if (spec != NULL && *spec != '\0') {
+		parts = g_strsplit_set(spec, ":,", -1);
+		known = gsurf_lrg_render_mode_from_string(parts[0], out_mode);
+	} else {
+		known = gsurf_lrg_render_mode_from_string(spec, out_mode);
+	}
+
+	/* Tokens after MODE: environment if it is a known environment id,
+	 * arrangement otherwise; the last of each kind wins. */
+	if (parts != NULL) {
+		for (i = 1; parts[i] != NULL; i++) {
+			gchar *tok = g_ascii_strdown(g_strstrip(parts[i]), -1);
+
+			if (*tok == '\0') {
+				g_free(tok);
+			} else if (g_strv_contains(lrg_spec_environments, tok)) {
+				g_free(environment);
+				environment = tok;
+			} else {
+				g_free(arrangement);
+				arrangement = tok;
+			}
+		}
+	}
+
+	if (out_arrangement != NULL)
+		*out_arrangement = arrangement;
+	else
+		g_free(arrangement);
+	if (out_environment != NULL)
+		*out_environment = environment;
+	else
+		g_free(environment);
+	return known;
 }

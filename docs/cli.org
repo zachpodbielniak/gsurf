@@ -34,10 +34,36 @@ gsurf about:blank
 | =--pwa=                | Install the URI as a kiosk desktop app and exit       |
 | =--pwa-name NAME=      | App label; defaults to hostname; requires =--pwa=    |
 | =-f, --fullscreen=       | Start in fullscreen                                   |
+| =--lrg[=MODE]=          | Use the libregnum/raylib backend (=LRG_BACKEND=1= builds); see below |
 | =--generate-yaml-config= | Print the default YAML config and exit                |
 | =--generate-c-config=    | Print the default C config and exit                   |
 | =--list-modules=         | List available modules alphabetically and exit        |
 | =-v, --version=          | Print version (and active backend) and exit           |
+
+* The libregnum backend: =--lrg=
+
+#+begin_example
+gsurf --lrg[=MODE[:ARRANGEMENT][:ENVIRONMENT]] [URI]
+#+end_example
+
+=--lrg= opens the page in a raylib window rendered by libregnum instead of a GTK window. It needs a build with =LRG_BACKEND=1=; otherwise gsurf exits with =--lrg requested but this build has no libregnum backend=. The value is optional, so it must be attached with an equals sign (=--lrg 3d= is =--lrg= followed by a URI).
+
+| =MODE= | What opens |
+|--------+------------|
+| =2d= (default; a bare =--lrg=) | The flat libregnum window: the active tab drawn pixel-exact under a built-in address bar. |
+| =3d= | The 3D tab space: every tab a live panel in a scene. Needs =LRG_3D=1= (the default with =LRG_BACKEND=1=); an =LRG_3D=0= build exits with =--lrg=3d needs a build with the libregnum scene=. |
+| =3dvr= | Reserved: exits with =--lrg=3dvr is not implemented yet=. |
+
+In 3D up to two more tokens follow, separated by =:= or =,=, in any order: one that names an environment (=studio=, =sky=, =workshop=, =cockpit=, =void=) sets the environment, any other sets the arrangement (=carousel=, =grid=, =free=, =single-panel=, =stack=). They override the =lrg:= config block. An unknown mode is a command-line error.
+
+#+begin_example
+gsurf --lrg https://example.org
+gsurf --lrg=3d https://example.org
+gsurf --lrg=3d:grid:sky https://example.org
+gsurf --lrg=3d,sky,grid https://example.org
+#+end_example
+
+See [[file:lrg-3d.org][lrg-3d.org]] for the 3D tab space: arrangements, environments, reading mode, history depth, keys, the pointer and the =lrg.*= control methods.
 
 * Environment
 

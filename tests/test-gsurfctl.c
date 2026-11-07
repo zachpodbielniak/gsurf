@@ -163,7 +163,9 @@ test_offline(void)
 	static const gchar *const names[] = {
 		"list", "info", "open", "nav", "back", "forward", "reload", "stop", "tabs", "tab",
 		"close", "tree", "move", "collapse", "containers", "reopen", "title", "uri", "text",
-		"eval", "screenshot", "actions", "action", "mode", "panes", "windows", "wmux",
+		"eval", "screenshot", "3d", "3d-arrange", "3d-env", "3d-reading", "3d-history",
+		"3d-focus", "3d-pin", "3d-unpin-all", "3d-camera", "3d-shot",
+		"actions", "action", "mode", "panes", "windows", "wmux",
 		"select-window", "rename-window", "config", "modules", "module", "methods", "watch",
 		"call", "help", NULL
 	};

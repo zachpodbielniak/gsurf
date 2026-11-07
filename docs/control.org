@@ -58,7 +58,7 @@ One JSON value per line, in both directions (UTF-8, =\n=-terminated; lines up to
 | -32602 | =INVALID_PARAMS=                        | A parameter is missing or has the wrong type                    |
 | -32000 | =FAILED=                                | The method failed (the message says why)                        |
 | -32001 | =NOT_FOUND=                             | No such view, window, pane, container, module or key; no window |
-| -32002 | =UNSUPPORTED=                           | Needs something not there: wmux, the tabs module, modal          |
+| -32002 | =UNSUPPORTED=                           | Needs something not there: wmux, the tabs module, modal, a 3D window |
 | -32003 | =PERMISSION_DENIED=                     | Refused by kiosk mode                                           |
 | -32004 | =TIMEOUT= (client side)                 | No reply in time                                                |
 | -32005 | =CLOSED= (client side)                  | The connection closed                                           |
@@ -86,6 +86,16 @@ Views are addressed by =view= (the stable id =gsurf_view_get_id()=, as =views.li
 | =page.text=            | =view?/index?=                                                             | =document.body.innerText= |
 | =page.eval=            | =script=, =view?/index?=                                                   | the script's last value as JSON (statements allowed; =undefined= is null; DOM nodes and cycles become their string form). On a page whose CSP forbids =eval()= the script runs as it is and its value comes back as text. Kiosk: refused |
 | =page.screenshot=      | =path=, =view?/index?=                                                     | ={path, bytes}=: a PNG of the visible page, written 0600; relative paths resolve against gsurf's launch directory |
+| =lrg.state=            | —                                                                          | the 3D scene: ={mode, arrangement, environment, reading, history, animating, panels, background_fps, history_depth, pinned: [{view, placement}], bookmarks}= |
+| =lrg.arrange=          | =arrangement?= (=carousel=, =grid=, =free=, =single-panel=, =stack=, =per-window=) | the state; no id: the next one (carousel, grid, stack, free); leaves history depth. Unknown id: -32001 |
+| =lrg.environment=      | =environment?= (=studio=, =sky=, =workshop=, =cockpit=, =void=)            | the state; no id: the next one. Unknown id: -32001 |
+| =lrg.reading=          | =enabled?= (none: toggle)                                                  | the state: reading mode (fly head-on to the active tab, then pixel-exact 2D) |
+| =lrg.history=          | =enabled?= (none: toggle)                                                  | the state: history depth (the active tab's back/forward pages as a stack) |
+| =lrg.focus=            | =view?/index?=                                                             | the state; makes the view active and flies to it; -32001 while the view has no panel yet |
+| =lrg.pin=              | =enabled?= (default true), =placement?: "x y z yaw w h"=, =view?/index?=   | the state; pins where it is or at =placement= (applied when the panel appears); =enabled: false= unpins. Bad placement: -32602 |
+| =lrg.unpin_all=        | —                                                                          | the state |
+| =lrg.camera=           | =op= (=orbit= {=yaw=, =pitch=}, =zoom= {=factor= > 0}, =reset=, =overview=, =save= / =restore= {=name=}) | the state; an unknown bookmark: -32001; a bad =op=, =factor= or missing =name=: -32602 |
+| =lrg.screenshot=       | =path=                                                                     | ={path, bytes}= once the next frame (scene and chrome, as shown) is written as a PNG; relative paths resolve against gsurf's launch directory; -32000 if it could not be written |
 | =actions.list=         | —                                                                          | =[{name, allowed}]= (=allowed=: false where kiosk forbids it) |
 | =action.run=           | =name=, =view?/index?=                                                     | ={action, performed}=: exactly as its key binding would (=gsurf_module_manager_execute_action()=; kiosk refusals are -32003) |
 | =mode.get=             | —                                                                          | ={mode, label, passthrough, modal_active}= |
@@ -105,6 +115,8 @@ Views are addressed by =view= (the stable id =gsurf_view_get_id()=, as =views.li
 | =config.get=           | =key?=                                                                     | no key: the core keys as an object (=browser.homepage=, =window.width=, =tls.strict=, =kiosk=, =control.enabled=, =control.name=, ...); a core key: its value; =modules[.NAME[.KEY...]]=: that part of the YAML as JSON |
 | =modules.list=         | —                                                                          | =[{name, description, enabled, active, priority}]= |
 | =modules.toggle=       | =name=, =enabled?= (none: flip)                                            | the module; the providers are refreshed afterwards. Kiosk: refused |
+
+The =lrg.*= methods (since 0.6) drive the =gsurf --lrg=3d= tab space of the active window; every one except =lrg.screenshot= answers with the =lrg.state= object after its change, and every change emits the matching =lrg.*= event. In any other window they fail with -32002 (=this window is not a 3D scene (start gsurf with --lrg=3d)=), and in a build without the scene with -32002 too (=this build has no 3D scene (build with LRG_BACKEND=1 LRG_3D=1)=). =config.get= also knows =lrg.arrangement=, =lrg.environment=, =lrg.background-fps=, =lrg.history-depth= and =lrg.reading-single-tab= (the configured values). See [[file:lrg-3d.org][lrg-3d.org]].
 
 The =layout.*= methods go through the =GsurfWindowLayout= vfuncs (=describe=, =list_groups=, =list_panes=, =run_command=, =select_group=, =rename_group=, =show_view_at=), so wmux needed no new code and another layout implementing them is driven the same way. Without a layout they fail with -32002; in kiosk mode (which keeps wmux inactive) with -32003.
 
@@ -127,8 +139,9 @@ The =layout.*= methods go through the =GsurfWindowLayout= vfuncs (=describe=, =l
 | =mode=     | =mode=                                                          | =mode, label, passthrough=                   |
 | =layout=   | =layout.groups=, =layout.visible=                               | =what=                                       |
 | =download= | =download.started=                                              | =uri, suggested, destination= (null when the engine picks it) |
+| =lrg=      | =lrg.arrangement=, =lrg.environment=, =lrg.reading=, =lrg.history=, =lrg.focus=, =lrg.pin=, =lrg.camera= | =what, arrangement, environment, reading, history= |
 
-For one change the events come in the order the core emits its signals: a new foreground tab gives =view.added=, =view.active=, then =uri=, =load= and =title= as it loads. The download event comes from =GsurfModuleManager::download-started= (since 0.5), emitted once per download when its destination is decided; progress and completion are not reported. Modules may emit their own topics with =gsurf_control_server_emit_event()=.
+For one change the events come in the order the core emits its signals: a new foreground tab gives =view.added=, =view.active=, then =uri=, =load= and =title= as it loads. The download event comes from =GsurfModuleManager::download-started= (since 0.5), emitted once per download when its destination is decided; progress and completion are not reported. The =lrg= events (since 0.6) come from =GsurfLrgWindow::scene-changed= in a =--lrg=3d= window, whatever caused the change (a key, a pointer gesture, an =lrg.*= method, the end of the lone-tab reading mode when a second tab opens); =lrg.state= itself emits nothing. Modules may emit their own topics with =gsurf_control_server_emit_event()=.
 
 * Providers: methods from modules
 

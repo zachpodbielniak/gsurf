@@ -25,6 +25,7 @@ Sources: `docs/c-config.org`, `data/default-config.c`, `data/sensible-config.c`,
 | `settings->javascript`, `images`, `webgl`, `webaudio`, `media`, `media_stream`, `webrtc`, `plugins`, `smooth_scrolling`, `caret_browsing`, `dns_prefetch`, `hyperlink_auditing`, `site_quirks`, `developer_extras`, `js_can_open_windows`, `js_can_access_clipboard` | `gboolean` | `webkit.*` (note the `js_` prefix for the two `javascript_can_*` keys) |
 | `settings->default_font_size`, `default_monospace_font_size` | `guint` | `webkit.*` |
 | charset | `gsurf_settings_set_default_charset(settings, "UTF-8")` | `webkit.default_charset` |
+| `lrg_arrangement`, `lrg_environment`, `lrg_background_fps`, `lrg_history_depth`, `lrg_reading_single_tab` | `gchar *`, `gchar *`, `gdouble`, `gint`, `gboolean` | `lrg.*` (the `--lrg=3d` scene; not clamped in C) |
 
 Bindings: `gsurf_config_set_keybind(config, "Ctrl+r", GSURF_ACTION_RELOAD)` and `gsurf_config_set_mousebind(config, "Button8", GSURF_ACTION_BACK)` normalise the key string like the YAML loader; `GSURF_ACTION_NONE` removes a binding. Do not insert into `config->keybinds` directly: unnormalised keys never match. Action enums: `GSURF_ACTION_` + the action name in upper case with `_` ([keybindings-and-modes.md](keybindings-and-modes.md)).
 

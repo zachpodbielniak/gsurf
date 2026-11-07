@@ -1,14 +1,14 @@
 ---
 name: gsurf
 description: >
-  Drive a running gsurf browser with gsurfctl (tabs, panes, page text, modes, events);
-  configure it in YAML or config.c (all 33 modules, wmux, tree tabs, containers, keys);
-  write modules, embed libgsurf, build GTK3/GTK4/LRG, troubleshoot.
+  Drive a running gsurf browser with gsurfctl (tabs, panes, page text, events, 3D tabs via --lrg=3d);
+  configure it in YAML or config.c (33 modules, wmux, tree tabs, containers, keys);
+  write modules, embed libgsurf, build, troubleshoot.
 ---
 
 # Skill: gsurf
 
-gsurf is a library-first web browser written in C on GLib/GObject: a port of suckless surf where nearly everything lives in `libgsurf.so`, the `gsurf` binary is a thin `main.c`, and surf's patches are runtime-loaded `.so` modules (33 of them). A running gsurf is driven from outside with `gsurfctl` over a per-process control socket, or by AI agents over the optional MCP module. This skill covers using and scripting a running browser, writing YAML and C configs, picking and tuning modules, wmux panes, tree tabs and containers, writing new modules, embedding libgsurf, and building and testing the source tree.
+gsurf is a library-first web browser written in C on GLib/GObject: a port of suckless surf where nearly everything lives in `libgsurf.so`, the `gsurf` binary is a thin `main.c`, and surf's patches are runtime-loaded `.so` modules (33 of them). A running gsurf is driven from outside with `gsurfctl` over a per-process control socket, or by AI agents over the optional MCP module. This skill covers using and scripting a running browser, writing YAML and C configs, picking and tuning modules, wmux panes, tree tabs and containers, the `--lrg=3d` 3D tab space (every tab a live panel in a libregnum scene), writing new modules, embedding libgsurf, and building and testing the source tree.
 
 ## When to Use
 
@@ -17,6 +17,7 @@ gsurf is a library-first web browser written in C on GLib/GObject: a port of suc
 - Changing behaviour: a keybinding, a module option, search engines, adblock lists, dark mode, privacy hardening, containers for a site, the tab sidebar, wmux keys.
 - Writing a module (`modules/<name>/`), a hook interface implementation, or a host that embeds gsurf.
 - Building gsurf (GTK3, GTK4, LRG, `MCP=1`), running its tests, or diagnosing a crash, a warning or a module that does not load.
+- The 3D tab space: `gsurf --lrg=3d[:ARRANGEMENT][:ENVIRONMENT]`, the `gsurfctl 3d*` commands, the `lrg.*` methods and events, the `Alt+Shift` `lrg-*` keys, the `lrg:` config block, reading mode, history depth, pins and the camera.
 
 ## Prerequisites
 
@@ -39,6 +40,7 @@ gsurf is a library-first web browser written in C on GLib/GObject: a port of suc
    | Panes, tmux keys, layouts | `modules.wmux` | [references/wmux.md](references/wmux.md) |
    | Tab tree, sidebar, containers, sessions | `modules.tabs`, `containers`, `session` | [references/tabs-and-containers.md](references/tabs-and-containers.md) |
    | Keys, actions, vim NORMAL/INSERT | `keybinds:`, `modal` | [references/keybindings-and-modes.md](references/keybindings-and-modes.md) |
+| The `--lrg=3d` tab space (arrangements, reading, history, camera) | `gsurfctl 3d*`, `lrg.*`, `lrg:` | [references/keybindings-and-modes.md](references/keybindings-and-modes.md) (keys, pointer, config), [references/gsurfctl.md](references/gsurfctl.md), [references/control-protocol.md](references/control-protocol.md) |
    | An AI client over MCP | `modules.mcp`, `MCP=1` | [references/mcp.md](references/mcp.md) |
    | New behaviour as a module | `modules/<name>/` | [references/writing-modules.md](references/writing-modules.md) |
    | gsurf inside another program | libgsurf API | [references/embedding.md](references/embedding.md) |
@@ -58,6 +60,7 @@ gsurf is a library-first web browser written in C on GLib/GObject: a port of suc
    - Check the exit status: 0 ok, 1 the command failed, 2 usage error, 3 no instance or cannot connect, 4 refused by kiosk mode.
    - `gsurfctl open URL` adds a tab to a running gsurf; `gsurf URL` starts a new browser process. Use `open` unless the user wants a new process.
    - `wmux`, `panes`, `windows` need `modules.wmux.enabled: true`; `tree`, `move`, `collapse` need the `tabs` module; `mode` needs `modal`. The error says which module to enable.
+   - The `3d*` commands need a gsurf started with `--lrg=3d` (a `LRG_BACKEND=1` build); anywhere else they fail with `this window is not a 3D scene`. Check with `gsurfctl 3d` before scripting the scene.
    - Script a repeatable session from [templates/gsurfctl-session.sh.template](templates/gsurfctl-session.sh.template).
 
 3. **Configuring: find the user's config first.**

@@ -44,7 +44,7 @@ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"views.list"}' | socat -t 2 - "U
 | -32602 | `INVALID_PARAMS` | missing or mistyped parameter |
 | -32000 | `FAILED` | the method failed (message says why) |
 | -32001 | `NOT_FOUND` | no such view, window, pane, container, module or key |
-| -32002 | `UNSUPPORTED` | needs wmux, the tabs module or modal |
+| -32002 | `UNSUPPORTED` | needs wmux, the tabs module, modal, or a `--lrg=3d` window |
 | -32003 | `PERMISSION_DENIED` | refused by kiosk mode (gsurfctl exit 4) |
 | -32004, -32005 | `TIMEOUT`, `CLOSED` | client side: no reply in time, connection closed |
 
@@ -85,8 +85,18 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `config.get` | `key?` | no key: core keys as an object; a core key; `modules[.NAME[.KEY…]]` as JSON |
 | `modules.list` | | `[{name, description, enabled, active, priority}]` |
 | `modules.toggle` | `name`, `enabled?` (none: flip) | the module; kiosk refuses |
+| `lrg.state` | | the 3D scene: `{mode, arrangement, environment, reading, history, animating, panels, background_fps, history_depth, pinned: [{view, placement}], bookmarks}` |
+| `lrg.arrange` / `lrg.environment` | `arrangement?` / `environment?` (none: the next one) | the state; unknown id -32001 |
+| `lrg.reading` / `lrg.history` | `enabled?` (none: toggle) | the state |
+| `lrg.focus` | `view?`/`index?` | the state; makes it active and flies to it; -32001 while it has no panel yet |
+| `lrg.pin` | `enabled?` (default true), `placement?: "x y z yaw w h"`, `view?`/`index?` | the state; bad placement -32602 |
+| `lrg.unpin_all` | | the state |
+| `lrg.camera` | `op`: `orbit` {`yaw`, `pitch`}, `zoom` {`factor` > 0}, `reset`, `overview`, `save`/`restore` {`name`} | the state; unknown bookmark -32001, bad params -32602 |
+| `lrg.screenshot` | `path` | `{path, bytes}` once the next frame is written (relative to gsurf's launch directory) |
 
 `layout.*` go through the `GsurfWindowLayout` vfuncs: without a layout they fail -32002, in kiosk mode -32003.
+
+`lrg.*` (since 0.6) act on a `gsurf --lrg=3d` window; anywhere else, or in a build without the scene, they fail -32002. Every change also emits an `lrg.<what>` event. `config.get` knows `lrg.arrangement`, `lrg.environment`, `lrg.background-fps`, `lrg.history-depth`, `lrg.reading-single-tab`.
 
 ## Events
 
@@ -104,6 +114,7 @@ After `events.subscribe` each event is a notification line:
 | `mode` | `mode` | `mode, label, passthrough` |
 | `layout` | `layout.groups`, `layout.visible` | `what` |
 | `download` | `download.started` only (no progress or completion) | `uri, suggested, destination` |
+| `lrg` | `lrg.arrangement`, `lrg.environment`, `lrg.reading`, `lrg.history`, `lrg.focus`, `lrg.pin`, `lrg.camera` (from keys, the pointer, methods) | `what, arrangement, environment, reading, history` |
 
 `time` is the monotonic clock. Events follow signal order: a foreground tab gives `view.added`, `view.active`, then `uri`, `load`, `title`.
 

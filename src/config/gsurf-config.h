@@ -43,6 +43,16 @@ G_DECLARE_FINAL_TYPE(GsurfConfig, gsurf_config, GSURF, CONFIG, GObject)
  *   %TRUE; read by the gsurf binary, since 0.5)
  * @control_name: (nullable): the instance name the control socket
  *   registers (`control.name`, since 0.5)
+ * @lrg_arrangement: (nullable): `--lrg=3d` tab arrangement (`lrg.arrangement`;
+ *   %NULL: carousel; since 0.6)
+ * @lrg_environment: (nullable): `--lrg=3d` environment (`lrg.environment`;
+ *   %NULL: studio)
+ * @lrg_background_fps: refresh rate of visible background tabs in 3D
+ *   (`lrg.background-fps`, default 4)
+ * @lrg_history_depth: history entries shown per direction in 3D history
+ *   depth (`lrg.history-depth`, default 8)
+ * @lrg_reading_single_tab: open a lone tab in reading mode in 3D
+ *   (`lrg.reading-single-tab`, default %TRUE)
  * @keybinds: (element-type utf8 gint): normalized "Mods+Key" -> #GsurfAction
  *
  * Public configuration struct. Fields are read directly by the rest of
@@ -90,6 +100,14 @@ struct _GsurfConfig
 	 * starts it, and the instance name it registers (NULL: none). */
 	gboolean    control_enabled;
 	gchar      *control_name;
+
+	/* The --lrg=3d scene (`lrg:`, since 0.6; docs/lrg-3d.org).  The spec
+	 * tokens of --lrg=3d:ARRANGEMENT:ENVIRONMENT override the two ids. */
+	gchar      *lrg_arrangement;
+	gchar      *lrg_environment;
+	gdouble     lrg_background_fps;
+	gint        lrg_history_depth;
+	gboolean    lrg_reading_single_tab;
 };
 
 /**

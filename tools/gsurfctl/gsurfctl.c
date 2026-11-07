@@ -111,7 +111,7 @@ static const gchar help_description[] =
 	"  config [KEY], modules, module NAME [on|off]\n"
 	"  methods                    every method of the control socket\n"
 	"  watch [TOPIC...]           print events until interrupted (view, uri,\n"
-	"                             title, load, mode, layout, download)\n"
+	"                             title, load, mode, layout, download, lrg)\n"
 	"  call METHOD [JSON|K=V...]  a raw JSON-RPC call\n"
 	"  help [COMMAND|--names]     this list, one command, or the names\n"
 	"\n"
@@ -160,13 +160,13 @@ static const gchar bash_completion[] =
 	"\tif [[ \"${cur}\" == -* ]]; then\n"
 	"\t\tmapfile -t COMPREPLY < <(compgen -W \"-i --instance -S --socket -a --all -j --json -p --pretty "
 	"-T --timeout -q --quiet --completion -V --version --license -h --help --bg --container --child-of "
-	"--hard --view --parent --before --after --index --window --names\" -- \"${cur}\"); return\n"
+	"--hard --view --parent --before --after --index --window --placement --names\" -- \"${cur}\"); return\n"
 	"\tfi\n"
 	"\tcmd=\"\"\n"
 	"\tfor (( i = 1; i < cword; i++ )); do\n"
 	"\t\tcase \"${words[i]}\" in\n"
 	"\t\t\t-i|--instance|-S|--socket|-T|--timeout|--completion|--container|--child-of|--view|"
-	"--parent|--before|--after|--index|--window) (( i++ )) ;;\n"
+	"--parent|--before|--after|--index|--window|--placement) (( i++ )) ;;\n"
 	"\t\t\t-*) ;;\n"
 	"\t\t\t*) cmd=\"${words[i]}\"; break ;;\n"
 	"\t\tesac\n"
@@ -177,10 +177,14 @@ static const gchar bash_completion[] =
 	"\t\tmodule) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl modules --names 2>/dev/null) on off\" -- \"${cur}\") ;;\n"
 	"\t\tmode) mapfile -t COMPREPLY < <(compgen -W \"normal insert\" -- \"${cur}\") ;;\n"
 	"\t\tcollapse) mapfile -t COMPREPLY < <(compgen -W \"on off\" -- \"${cur}\") ;;\n"
-	"\t\twatch) mapfile -t COMPREPLY < <(compgen -W \"view uri title load mode layout download\" -- \"${cur}\") ;;\n"
+	"\t\twatch) mapfile -t COMPREPLY < <(compgen -W \"view uri title load mode layout download lrg\" -- \"${cur}\") ;;\n"
+	"\t\t3d-arrange) mapfile -t COMPREPLY < <(compgen -W \"carousel grid free single-panel stack\" -- \"${cur}\") ;;\n"
+	"\t\t3d-env) mapfile -t COMPREPLY < <(compgen -W \"studio sky workshop cockpit void\" -- \"${cur}\") ;;\n"
+	"\t\t3d-reading|3d-history|3d-pin) mapfile -t COMPREPLY < <(compgen -W \"on off\" -- \"${cur}\") ;;\n"
+	"\t\t3d-camera) mapfile -t COMPREPLY < <(compgen -W \"orbit zoom reset overview save restore\" -- \"${cur}\") ;;\n"
 	"\t\thelp) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl help --names 2>/dev/null) --names\" -- \"${cur}\") ;;\n"
 	"\t\tcall) mapfile -t COMPREPLY < <(compgen -W \"$(gsurfctl methods --names 2>/dev/null)\" -- \"${cur}\") ;;\n"
-	"\t\tscreenshot|open) mapfile -t COMPREPLY < <(compgen -f -- \"${cur}\") ;;\n"
+	"\t\tscreenshot|3d-shot|open) mapfile -t COMPREPLY < <(compgen -f -- \"${cur}\") ;;\n"
 	"\t\t*) COMPREPLY=() ;;\n"
 	"\tesac\n"
 	"}\n"
@@ -472,6 +476,22 @@ print_for(const gchar *name, JsonNode *result)
 		g_print("%s\n", str_member(object, "mode"));
 		return;
 	}
+	if (g_strcmp0(name, "3d-shot") == 0 && object != NULL) {
+		g_print("%s\n", str_member(object, "path"));
+		return;
+	}
+	if (g_str_has_prefix(name, "3d") && object != NULL
+	    && json_object_has_member(object, "arrangement")) {
+		g_print("%s  %s  %s%s%s  (%" G_GINT64_FORMAT " panels)\n",
+			str_member(object, "mode"),
+			bool_member(object, "history") ? "history"
+			                               : str_member(object, "arrangement"),
+			str_member(object, "environment"),
+			bool_member(object, "reading") ? "  reading" : "",
+			bool_member(object, "animating") ? "  moving" : "",
+			json_object_get_int_member(object, "panels"));
+		return;
+	}
 	if (g_strcmp0(name, "screenshot") == 0 && object != NULL) {
 		g_print("%s\n", str_member(object, "path"));
 		return;
@@ -529,7 +549,7 @@ typedef struct {
 /* Command flags that take a value. */
 static const gchar *const valued_flags[] = {
 	"container", "child-of", "view", "parent", "before", "after", "index", "window",
-	"zone", "target", "pane", NULL
+	"zone", "target", "pane", "placement", NULL
 };
 
 typedef gboolean (*BuildFunc) (Words *w, JsonObject *params, GError **error);
@@ -748,6 +768,112 @@ b_screenshot(Words *w, JsonObject *params, GError **error)
 	return add_view_flag(w, params, error);
 }
 
+/* --- the --lrg=3d scene ------------------------------------------------ */
+
+/* 3d-arrange [ID] / 3d-env [ID]: no ID steps to the next one. */
+static gboolean
+b_3d_arrange(Words *w, JsonObject *params, GError **error)
+{
+	(void)error;
+	if (w->args->len > 0)
+		json_object_set_string_member(params, "arrangement",
+			g_ptr_array_index(w->args, 0));
+	return TRUE;
+}
+
+static gboolean
+b_3d_env(Words *w, JsonObject *params, GError **error)
+{
+	(void)error;
+	if (w->args->len > 0)
+		json_object_set_string_member(params, "environment",
+			g_ptr_array_index(w->args, 0));
+	return TRUE;
+}
+
+/* 3d-reading / 3d-history [on|off]: no word toggles. */
+static gboolean
+b_3d_switch(Words *w, JsonObject *params, GError **error)
+{
+	gboolean on;
+
+	if (w->args->len == 0)
+		return TRUE;
+	if (!parse_switch(g_ptr_array_index(w->args, 0), &on, error))
+		return FALSE;
+	json_object_set_boolean_member(params, "enabled", on);
+	return TRUE;
+}
+
+/* 3d-pin [on|off] [--placement "X Y Z YAW W H"] [--view VIEW] */
+static gboolean
+b_3d_pin(Words *w, JsonObject *params, GError **error)
+{
+	const gchar *placement = g_hash_table_lookup(w->flags, "placement");
+
+	if (!b_3d_switch(w, params, error))
+		return FALSE;
+	if (placement != NULL)
+		json_object_set_string_member(params, "placement", placement);
+	return add_view_flag(w, params, error);
+}
+
+/* A number word for 3d-camera. */
+static gboolean
+set_number(JsonObject *params, const gchar *member, const gchar *text, GError **error)
+{
+	gchar *end = NULL;
+	gdouble value = g_ascii_strtod(text, &end);
+
+	if (*text == '\0' || end == NULL || *end != '\0')
+		return usage_error(error, "'%s' is not a number", text);
+	json_object_set_double_member(params, member, value);
+	return TRUE;
+}
+
+/* 3d-camera orbit YAW [PITCH] | zoom FACTOR | reset | overview |
+ *           save NAME | restore NAME */
+static gboolean
+b_3d_camera(Words *w, JsonObject *params, GError **error)
+{
+	const gchar *op = g_ptr_array_index(w->args, 0);
+	const gchar *a1 = w->args->len > 1 ? g_ptr_array_index(w->args, 1) : NULL;
+	const gchar *a2 = w->args->len > 2 ? g_ptr_array_index(w->args, 2) : NULL;
+
+	json_object_set_string_member(params, "op", op);
+	if (g_strcmp0(op, "orbit") == 0) {
+		if (a1 == NULL)
+			return usage_error(error, "3d-camera orbit YAW [PITCH] (degrees)");
+		return set_number(params, "yaw", a1, error)
+		    && (a2 == NULL || set_number(params, "pitch", a2, error));
+	}
+	if (g_strcmp0(op, "zoom") == 0) {
+		if (a1 == NULL)
+			return usage_error(error, "3d-camera zoom FACTOR (<1 closer, >1 away)");
+		return set_number(params, "factor", a1, error);
+	}
+	if (g_strcmp0(op, "save") == 0 || g_strcmp0(op, "restore") == 0) {
+		if (a1 == NULL)
+			return usage_error(error, "3d-camera %s NAME", op);
+		json_object_set_string_member(params, "name", a1);
+		return TRUE;
+	}
+	if (g_strcmp0(op, "reset") == 0 || g_strcmp0(op, "overview") == 0)
+		return TRUE;
+	return usage_error(error, "unknown camera op '%s' (orbit, zoom, reset, overview, save, "
+		"restore)", op);
+}
+
+static gboolean
+b_3d_shot(Words *w, JsonObject *params, GError **error)
+{
+	g_autofree gchar *path = g_canonicalize_filename(g_ptr_array_index(w->args, 0), NULL);
+
+	(void)error;
+	json_object_set_string_member(params, "path", path);
+	return TRUE;
+}
+
 static gboolean
 b_action(Words *w, JsonObject *params, GError **error)
 {
@@ -864,6 +990,28 @@ static const Command commands[] = {
 	  1, -1, TRUE, b_eval },
 	{ "screenshot", "page.screenshot", "screenshot FILE [--view VIEW]",
 	  "write a PNG of the visible page to FILE", 1, 1, FALSE, b_screenshot },
+	{ "3d", "lrg.state", "3d", "the --lrg=3d scene: arrangement, environment, reading, "
+	  "history, panels, pinned tabs, camera bookmarks", 0, 0, FALSE, NULL },
+	{ "3d-arrange", "lrg.arrange", "3d-arrange [ID]", "set the tab arrangement (carousel, "
+	  "grid, free, single-panel, stack); no ID: the next one", 0, 1, FALSE, b_3d_arrange },
+	{ "3d-env", "lrg.environment", "3d-env [ID]", "set the environment (studio, sky, "
+	  "workshop, cockpit, void); no ID: the next one", 0, 1, FALSE, b_3d_env },
+	{ "3d-reading", "lrg.reading", "3d-reading [on|off]", "read the active tab head-on, "
+	  "pixel-exact (no on/off: toggle)", 0, 1, FALSE, b_3d_switch },
+	{ "3d-history", "lrg.history", "3d-history [on|off]", "show the active tab's history "
+	  "as a stack of pages (no on/off: toggle)", 0, 1, FALSE, b_3d_switch },
+	{ "3d-focus", "lrg.focus", "3d-focus [VIEW]", "make VIEW active and fly the camera to "
+	  "it", 0, 1, FALSE, b_view_arg },
+	{ "3d-pin", "lrg.pin", "3d-pin [on|off] [--placement \"X Y Z YAW W H\"] [--view VIEW]",
+	  "pin a tab's panel where it is or at a placement (off: unpin)", 0, 1, FALSE,
+	  b_3d_pin },
+	{ "3d-unpin-all", "lrg.unpin_all", "3d-unpin-all", "unpin every panel", 0, 0, FALSE,
+	  NULL },
+	{ "3d-camera", "lrg.camera", "3d-camera orbit YAW [PITCH] | zoom FACTOR | reset | "
+	  "overview | save NAME | restore NAME", "move the camera, or save/restore a camera "
+	  "bookmark", 1, 3, FALSE, b_3d_camera },
+	{ "3d-shot", "lrg.screenshot", "3d-shot FILE", "write a PNG of the next 3D frame "
+	  "(scene and chrome, as shown) to FILE", 1, 1, FALSE, b_3d_shot },
 	{ "actions", "actions.list", "actions [--names]", "every action name", 0, 0, FALSE, NULL },
 	{ "action", "action.run", "action NAME [--view VIEW]",
 	  "run an action as its key binding would (zoom-in, tab-next, ...)", 1, 1, FALSE,
@@ -890,7 +1038,7 @@ static const Command commands[] = {
 	{ "methods", "methods.list", "methods [--names]", "every method of the control socket",
 	  0, 0, FALSE, NULL },
 	{ "watch", NULL, "watch [TOPIC...]",
-	  "print events until interrupted (view, uri, title, load, mode, layout, download)",
+	  "print events until interrupted (view, uri, title, load, mode, layout, download, lrg)",
 	  0, -1, FALSE, NULL },
 	{ "call", NULL, "call METHOD [JSON|K=V...]",
 	  "a raw call; K=V values are JSON when they parse (n=3, b=true), else strings",

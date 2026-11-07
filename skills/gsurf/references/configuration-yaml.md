@@ -39,6 +39,7 @@ leaves every other module without `enabled: true`, so modal, chromebar, search_e
 | `network` | `proxy: { mode: default\|none\|custom, uri: "socks5://127.0.0.1:9050" }`, `do_not_track` (enforced only by the hardening module) |
 | `window` | `title`, `geometry` (`WIDTHxHEIGHT`, both > 0) |
 | `control` | `enabled` (true: open the control socket `gsurfctl` uses), `name` (an instance name for `gsurfctl -i NAME`): see [control-protocol.md](control-protocol.md) |
+| `lrg` | `arrangement`, `environment`, `background-fps` (4), `history-depth` (8), `reading-single-tab` (true): the `--lrg=3d` scene, see [keybindings-and-modes.md](keybindings-and-modes.md) |
 | `keybinds`, `mousebinds` | `"Mods+Key": action`: see [keybindings-and-modes.md](keybindings-and-modes.md) |
 | `modules` | one mapping per module: see [modules-catalog.md](modules-catalog.md) |
 | `ignore_yaml` | root boolean: skip this document |

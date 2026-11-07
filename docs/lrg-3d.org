@@ -1,0 +1,452 @@
+#+TITLE: The 3D tab space (--lrg=3d)
+#+OPTIONS: toc:2 num:nil
+
+* Overview
+
+=gsurf --lrg=3d= opens the libregnum (LRG) window with every tab of the window standing in a 3D scene as a panel. The camera looks at the active tab; the others stand around it in an /arrangement/ (a carousel, a grid wall, a loose row, a Rolodex) inside an /environment/ (a studio, a sky, a workshop floor, a cockpit room, a plain void). Pages stay live: every panel shows its tab's real page, the active one at full frame rate, and the pointer is ray-cast onto the panels, so a background tab can be scrolled, hovered and clicked where it stands.
+
+The point is a /tab space/ rather than a tab strip: you see what is open, grouped by container, and switch by looking. Two modes keep it productive for actual reading:
+
+- *Reading mode* flies the camera head-on to the active tab and then hands the window back to the ordinary pixel-exact 2D path, so text is as sharp as in =--lrg= (2D) and input behaves exactly the same. A window that starts with a single tab starts in reading mode.
+- *History depth* shows the active tab's back/forward list as a stack of page thumbnails behind it; clicking one jumps there.
+
+It is the same 3D surface cmacs uses for =emacs --lrg=3d= (lrgterm): libregnum's =Lrg3DSurface= from its =term/= module. Everything here is available from the keyboard (=Alt+Shift+...=), the pointer, the control socket (=lrg.*= methods and events) and =gsurfctl 3d*=.
+
+=3d= is implemented since 0.6. =3dvr= (stereo for VR headsets) is still reserved: gsurf accepts the word and refuses to start with it.
+
+* Starting it
+
+** The =--lrg= spec
+
+#+begin_example
+gsurf --lrg[=MODE[:TOKEN[:TOKEN]]] [URI]
+#+end_example
+
+- =MODE= is =2d= (the default, also what a bare =--lrg= means), =3d= or =3dvr= (reserved), case-insensitive. Any other mode is a command-line error: =unknown --lrg mode '...' (use 2d, 3d, or 3dvr)=.
+- The value must be attached with an equals sign (=--lrg=3d=); =--lrg 3d= is =--lrg= (2D) followed by a URI =3d=, because the argument is optional.
+- After =MODE= come up to two tokens, separated by =:= or =,=. A token that names a built-in environment (=studio=, =sky=, =workshop=, =cockpit=, =void=) is the environment; any other token is the arrangement. So the order does not matter: =3d:grid:sky=, =3d:sky:grid= and =3d,sky,grid= are the same. Tokens are lower-cased and trimmed; empty ones are skipped; if two tokens of one kind are given, the last wins.
+- Arrangement tokens are not validated by the parser. An unknown one logs =gsurf LRG: unknown 3D arrangement '...'; using 'carousel'= when the window opens and falls back to the default.
+- In 2D the tokens are ignored.
+- The spec tokens override the =lrg:= config block (see [[*Configuration][Configuration]]); a spec without tokens uses the config, and an unset config uses the defaults (=carousel=, =studio=).
+
+** Examples
+
+#+begin_src sh
+gsurf --lrg=3d https://example.org                   # carousel in the studio (or the lrg: config)
+gsurf --lrg=3d:grid https://example.org             # a grid wall, environment from the config
+gsurf --lrg=3d:grid:sky https://example.org         # grid under the sky
+gsurf --lrg=3d:sky:grid https://example.org         # the same: tokens are order-free
+gsurf --lrg=3d,stack,void https://example.org       # ',' separates too
+gsurf --lrg=3d:free:workshop https://example.org    # a loose row to arrange by hand
+gsurf --lrg https://example.org                      # 2D, the flat libregnum window
+#+end_src
+
+** What can stop it
+
+| Message on stderr | Cause |
+|-------------------+-------|
+| =--lrg requested but this build has no libregnum backend (build with LRG_BACKEND=1)= | a build without =LRG_BACKEND=1= |
+| =--lrg=3d needs a build with the libregnum scene (LRG_BACKEND=1 LRG_3D=1)= | an =LRG_3D=0= build (graylib only) |
+| =--lrg=3dvr is not implemented yet; use 2d or 3d= | VR is reserved |
+| =gsurf LRG: failed to create a raylib window (no display?)= | no X11/Wayland display reachable |
+
+The first three exit with status 1 before any window opens.
+
+* Building
+
+** Make flags
+
+| Flag | Default | Effect |
+|------+---------+--------|
+| =LRG_BACKEND=1= | =0= | Adds the libregnum/raylib backend (=--lrg=) next to the GTK one. Required for anything here. |
+| =LRG_3D= | =1= | With =LRG_BACKEND=1=: compile =src/backend/lrg/gsurf-lrg-scene.c=, define =GSURF_HAVE_LRG_3D=, and link =liblibregnum.a= (which already contains graylib and raylib) instead of the two graylib archives. =LRG_3D=0= is the old graylib-only build: =--lrg=3d= then refuses to start and the =lrg.*= methods answer =UNSUPPORTED=. |
+| =LIBREGNUM_DIR= | =deps/libregnum= when it is checked out recursively, else =../libregnum= | The libregnum tree whose headers (=src/=) and graylib are used. |
+| =LRG_LIBREGNUM_LIB= | =$(LIBREGNUM_DIR)/build/release/lib/liblibregnum.a= | The archive a 3D build links. An embedder that builds libregnum itself (cmacs) points this at its own archive so only one libregnum, graylib and raylib end up in the process. |
+
+When =LRG_LIBREGNUM_LIB= (or graylib's archives) is missing, make builds the vendored libregnum once, /lean/: =make -C $(LIBREGNUM_DIR) all= with =LRG_LIBREGNUM_MAKEFLAGS= (=BUILDDIR=build/release DEBUG=0=, and the editor, GIR, tests, examples, docs, OpenXR, fribidi, crispy, ALSA and Steam turned off). One grouped rule produces =liblibregnum.a= and graylib's archives together, so a parallel build never runs two builds over the same graylib tree. =BUILDDIR= and =DEBUG= are pinned because gsurf's own command-line values reach the sub-make through =MAKEFLAGS= and would move the archive away from =LRG_LIBREGNUM_LIB=. An archive that already exists is never rebuilt by gsurf. The static link pulls in only the objects the scene reaches (the =term/= surface, graphics, VR stubs), which need nothing beyond GLib/GIO, json-glib and X11/GL.
+
+#+begin_src sh
+git submodule update --init --recursive                   # deps/libregnum and its nested graylib
+make LRG_BACKEND=1                                         # 2D and 3D (LRG_3D=1 is the default)
+make LRG_BACKEND=1 LRG_3D=0                                # graylib only: --lrg=3d refused
+make LRG_BACKEND=1 LIBREGNUM_DIR=../libregnum              # a sibling libregnum checkout
+make LRG_BACKEND=1 LIBREGNUM_DIR=/src/libregnum \
+     LRG_LIBREGNUM_LIB=/src/libregnum/build/debug/lib/liblibregnum.a   # an embedder's own archive
+make LRG_BACKEND=1 show-config                              # the resolved flags
+#+end_src
+
+Switching =LRG_3D= needs no =make clean=: the flag is part of the =build/<mode>/obj/.build-flags= stamp, so a change rebuilds once. =tests/test-build-config.sh= checks the single lean libregnum sub-make, the =LRG_3D= stamp and (pinned to =LRG_3D=0=) the graylib-only build order, against a stub libregnum, without compiling.
+
+** libregnum version
+
+The 3D tab space needs libregnum *0.8.2 or newer*: the /texture panels/ (=lrg_3d_surface_sync_texture_panel()= and friends, which let a panel borrow a host's own texture), panel slots, coverage, the carousel, grid and stack arrangements and the sky and studio environments arrived there. The vendored =deps/libregnum= is pinned at libregnum's v0.8.2 release. An embedder pointing =LIBREGNUM_DIR= at an older libregnum fails to compile =gsurf-lrg-scene.c=.
+
+** Fedora packages
+
+For the default GTK3 build with =LRG_BACKEND=1= (3D on):
+
+| Package | Why |
+|---------+-----|
+| =gtk3-devel=, =webkit2gtk4.1-devel= | the GTK3 backend; the LRG engine renders an offscreen WebKitGTK 4.1 view |
+| =json-glib-devel= | the control socket, and =libregnum.h= includes json-glib |
+| =mesa-libGL-devel=, =libX11-devel= | raylib's GL and X11 link (=-lGL -lX11=) |
+| =fontconfig-devel= | the LRG chrome font lookup |
+
+Building the vendored raylib and libregnum (the first =make LRG_BACKEND=1= on a fresh tree) also needs the X11 headers raylib compiles against (=libXrandr-devel=, =libXinerama-devel=, =libXcursor-devel=, =libXi-devel=; =wayland-devel= and =libxkbcommon-devel= for graylib's optional Wayland support) and what libregnum's own =config.mk= asks pkg-config for (=glib2-devel=, =libyaml-devel=, =libsoup3-devel=). On Immutablue / Hyacinth Macaw, layer these into the image build rather than installing them on the host.
+
+* Concepts
+
+** Panels
+
+Every tab of the window is a /panel/: a textured quad in the scene. The panel is a libregnum /texture panel/: it draws the tab's own page texture (the =GrlTexture= the LRG view already uploads for 2D) by reference. The scene therefore never reads the composited frame back from the GPU (=lrg_3d_surface_set_capture_enabled(surface, FALSE)=), never crops and never uploads a second copy. The page pixels themselves still come from WebKit's offscreen render, as in 2D. Mipmaps are regenerated whenever the texture changed since they were built (tracked by a per-view texture serial), so a distant panel never shows stale pixels.
+
+Every tab is laid out at the window's body size (the window minus the 28 px address bar), so a tab brought to the front or read flat is already pixel-exact and never needs a relayout. A tab that has not rendered its first frame has no texture yet and no panel; it appears as soon as it has one.
+
+Panels are drawn unlit on top of every environment, so the room never costs legibility.
+
+** Focus (depth of field)
+
+The active tab's panel is the /focused/ one. libregnum's depth-of-field is geometric and tonal, not a blur: the focused panel pops slightly toward the camera and shows its texture at full brightness, the others recede a little and are dimmed. There are no post-processing effects (no bloom, no blur, no vignette): libregnum's post processor is a stub.
+
+** The HUD
+
+The window's 2D chrome stays 2D: the address bar (or the URL editor) at the top, the load progress line under it and the hovered-link URL at the bottom left are drawn over the scene, in screen pixels, right before the buffer swap. Only the /active/ tab feeds the chrome: a background tab that loads, or a link hovered on a background panel, never repaints the address bar.
+
+A status line at the bottom right names the scene's state:
+
+#+begin_example
+3D  carousel | studio
+3D  grid | sky | reading
+3D  history | workshop
+#+end_example
+
+=history= replaces the arrangement while history depth is on. In kiosk mode the address bar, the hover URL and the status line are all omitted.
+
+** One raylib window
+
+raylib has one window per process. In 3D the scene's surface owns it and the =GsurfLrgWindow= borrows it for its chrome and input. The window is created when it is presented, not when it is constructed (the base class realizes from =constructed()=, before the host has set the default size or the render mode), so it opens at =window.geometry= and directly in 3D.
+
+* Arrangements
+
+An arrangement lays the panels out. Every tab gets a /slot/: a group and an ordinal.
+
+- The *ordinal* is the tab's index minus the active tab's index: the active tab is 0, the tabs before it negative, the tabs after it positive. Switching tabs changes every ordinal, which is what spins the carousel to the new active tab.
+- The *group* is the tab's container. Tabs in the default container, and tabs in /temporary/ containers (which isolate one tab each and would otherwise make every tab its own cluster), share group 0, sorted first. Each named, non-temporary container is its own group, so its tabs cluster together: the carousel leaves a gap between groups, the grid gives each group its own row band. See [[file:containers.org][containers.org]].
+
+| Id | In the cycle | Layout |
+|----+--------------+--------|
+| =carousel= (default) | yes | A ring curving round the viewer's side of the origin. The active tab stands in front at the origin, earlier tabs run to the left and later tabs to the right, like the tab strip. The ring grows with the tab count until it closes into a full circle. |
+| =grid= | yes | A wall of rows and columns in tab order, about square, centred on the origin and bent slightly round the viewer, one row band per container group. Tabs do not move when the active tab changes. Switching to it pulls the camera back until the whole wall is in view. |
+| =free= | yes | A loose horizontal row, each panel sized to its page. Only a starting point: grab panels (=Ctrl+middle-drag=) and drop them where you want; dropped panels stay pinned. |
+| =single-panel= | yes | One panel fills the view; the others are parked far behind, too small to see or pick. libregnum shows the scene's first panel, which is the first tab in tab order (not necessarily the active one); use reading mode to read the active tab full-frame. |
+| =stack= | yes | A Rolodex keyed by ordinal: the active tab in front, the others further back and dimmer at each step (to a 25 % brightness floor), positive ordinals receding left and negative ones right. History depth uses it for the back/forward list; as a tab arrangement it shows the tabs as a deck. |
+| =per-window= | no | libregnum's arrangement for cmacs, which splits one captured frame into its Emacs windows. Accepted for parity (=lrg.arrange=, the spec, the config), but a gsurf panel is a whole page, so every tab lands on the same full-size plane: not useful here. |
+
+=lrg-cycle-arrangement= (=Alt+Shift+a=), =lrg.arrange= without an id and =gsurfctl 3d-arrange= without an id step through =carousel=, =grid=, =stack=, =free= and back. =single-panel= and =per-window= are reached only by name. Choosing an arrangement leaves history depth and re-aims the camera at the new layout (see [[*Camera][Camera]]). Pinned panels keep their place in every arrangement.
+
+* Environments
+
+The environment is the room the panels stand in. It never changes how panels are drawn.
+
+| Id | Scene |
+|----+-------|
+| =studio= (default) | A neutral grey backdrop with a ringed floor. |
+| =sky= | A sky dome with a sun above a faint ground grid. gsurf does not drive the time of day, so the sky keeps libregnum's default. |
+| =workshop= | A grid floor. |
+| =cockpit= | An enclosed grid room. |
+| =void= | A plain solid colour, nothing else. |
+
+=lrg-cycle-environment= (=Alt+Shift+e=), =lrg.environment= without an id and =gsurfctl 3d-env= without an id step through them in that order. An unknown id in the config logs a warning and falls back to =studio=; through =lrg.environment= it is a =NOT_FOUND= error.
+
+* Reading mode
+
+Reading mode is for reading. Turning it on (=Alt+Shift+r=, =Ctrl+double-click= on a panel, =lrg.reading=, =gsurfctl 3d-reading on=):
+
+1. remembers the current camera pose;
+2. flies the camera so the active tab's panel fills the view head-on, edge to edge;
+3. once the camera has settled (nothing is animating any more), the window stops rendering the scene and draws the active tab with the flat 2D path: the page texture blitted 1:1 under the address bar, pixel-exact, with the 2D input path (keys, clicks and the wheel go straight to the page, as in =--lrg=).
+
+Reading mode follows the active tab: switching tabs while reading (=Ctrl+Tab=, =gt=, =gsurfctl tab=, =Ctrl+double-click=, =lrg.focus=) keeps it on; the camera flies head-on to the new tab, then hands back to the pixel-exact flat path. Reading mode and history depth exclude each other: turning one on turns the other off. Turning reading off (the same toggles) flies back to the remembered camera. =lrg-camera-reset= also ends reading, but without returning to the old pose; =lrg-overview= and restoring a camera bookmark end it too.
+
+History thumbnails keep being taken while you read flat, and screenshots (=lrg.screenshot=) capture the flat frame exactly as shown.
+
+** A lone tab starts in reading mode
+
+With =lrg.reading-single-tab: true= (the default), a window whose first frame has exactly one tab enters reading mode by itself, so =gsurf --lrg=3d URL= looks like an ordinary browser until there is something to arrange. This automatic reading mode lasts while the tab is alone: as soon as a second tab opens, the window leaves reading mode, aims the camera at the new layout and emits an =lrg.reading= event. A reading mode you turn on yourself is never ended that way. Leaving the automatic one by hand (=Alt+Shift+r=) makes it an ordinary choice: it will not be re-entered. Set =reading-single-tab: false= to always start in the space.
+
+* History depth
+
+History depth (=Alt+Shift+h=, =lrg.history=, =gsurfctl 3d-history on=) shows where the active tab has been and where it can go:
+
+- The arrangement switches to =stack= and the camera resets to the default view. Only the active tab is shown, in front; the other tabs drop out of the scene until history depth ends.
+- The tab's *back* list recedes to the left (one step back is nearest), its *forward* list to the right, each step further back and dimmer. =lrg.history-depth= (default 8, 1 to 32) limits the entries shown in each direction.
+- Each entry shows a *thumbnail* of the page: a half-size copy of the active tab's page, taken at most every 2 seconds while that page is the active one (in 3D frames and flat reading frames alike), stored by URI. An entry with no thumbnail yet gets a *title card*: the page title (or URI) and the URI on a dark card the size of a thumbnail. A title card is replaced by a real thumbnail once that page has been seen. The cache holds 64 entries (thumbnails and title cards), least recently used first out; it lives in memory only, for this run.
+- *Clicking* a thumbnail (plain left click) goes that many steps back or forward in the tab's history and leaves history depth.
+- Turning history depth off, or choosing an arrangement, restores the tab arrangement; the history panels drop out at the next frame.
+
+The status line reads =3D  history | ENVIRONMENT= meanwhile, and =lrg.state= reports =history: true= with the tab arrangement (the one that comes back) as =arrangement=.
+
+* Pointer
+
+The pointer is ray-cast into the scene every frame. What it hits decides where an event goes; the top 28 px strip (the address bar) keeps its 2D behaviour (a left click there opens the URL editor). A press with a navigation modifier waits until the pointer moves more than 3 px (summed horizontal and vertical distance) before it becomes a drag; released before that, it is a click.
+
+| Gesture | Effect |
+|---------+--------|
+| Move | Hover goes to the tab under the pointer, at the page pixel the ray hits (link hover, CSS =:hover=), background tabs included. |
+| Left click on the active tab | A normal click on the page at that pixel. Mousebinds and modules see the press first. |
+| Left click on a background tab | Makes that tab active (the carousel spins to it); the click itself is not delivered. Emits =lrg.focus=. |
+| Right click | Goes to the page under the pointer (after mousebinds and modules). |
+| Wheel | Scrolls the tab under the pointer, a background tab too. |
+| =Ctrl+wheel= | Dollies the camera (0.9 of the distance per notch toward the scene). |
+| Middle drag | Orbits the camera round the room (0.4 degrees per pixel). |
+| Middle click (no drag) | Delivered after the drag check: first to mousebinds and modules (the default =Button2= is =open-new-view-background=, open the link in a background tab), else to the page as a middle press and release (X11 paste). |
+| =Ctrl+left drag= (or =Super+left drag=) | Turns the view in place (look around, 0.25 degrees per pixel). |
+| =Ctrl+click= | Makes the tab active and flies the camera to frame it. |
+| =Ctrl+double-click= (same tab, within 450 ms) | Makes the tab active and enters reading mode. |
+| =Ctrl+middle drag= or =Super+middle drag= on a panel | Moves that panel under the pointer; dropping it pins it there. Started over empty space it orbits instead. |
+| Left click on a history thumbnail | Jumps there and leaves history depth. |
+
+A press goes to a page's tab together with its release: a release follows its press to the same tab, at the pixel under the pointer if it is still over that tab and at the press position otherwise, so drags inside a page (text selection) work.
+
+=Ctrl+left click= is the fly gesture in 3D, so the default =Ctrl+Button1= mousebind (=open-new-view-background=) does not fire there; use the middle button for links in background tabs. In reading mode (flat) the pointer works exactly as in 2D.
+
+* Keyboard
+
+Keys go to the active tab as in 2D. The scene's own actions are ordinary key-binding actions (since 0.6):
+
+| Default key | Action | Effect |
+|-------------+--------+--------|
+| =Alt+Shift+a= | =lrg-cycle-arrangement= | the next arrangement (carousel, grid, stack, free) |
+| =Alt+Shift+e= | =lrg-cycle-environment= | the next environment (studio, sky, workshop, cockpit, void) |
+| =Alt+Shift+r= | =lrg-reading= | reading mode on/off |
+| =Alt+Shift+h= | =lrg-history= | history depth on/off |
+| =Alt+Shift+f= | =lrg-focus= | fly the camera to the active tab |
+| =Alt+Shift+p= | =lrg-pin= | pin the active tab's panel where it is, or unpin it |
+| =Alt+Shift+u= | =lrg-unpin-all= | unpin every panel |
+| =Alt+Shift+c= | =lrg-camera-reset= | the default 3/4 view; ends reading mode |
+| =Alt+Shift+o= | =lrg-overview= | pull back and up until every tab is in view |
+| =Alt+Shift+Left= / =Right= | =lrg-orbit-left= / =lrg-orbit-right= | orbit 15 degrees, eased |
+| =Alt+Shift+Up= / =Down= | =lrg-orbit-up= / =lrg-orbit-down= | tilt the orbit 15 degrees, eased |
+| =Alt+Shift+z= / =x= | =lrg-zoom-in= / =lrg-zoom-out= | camera distance times 0.8 / 1.25, eased |
+
+The bindings are in the shipped =data/default-config.yaml= and the sensible configs (YAML and C). Outside a 3D window (GTK, =--lrg= in 2D, an =LRG_3D=0= build) the actions are unbound no-ops that report "not handled", so the key reaches the page: one config can bind them everywhere. They also run through =gsurfctl action lrg-overview= (=action.run=), which is a no-op outside 3D. Rebind them like any action; see [[file:keybindings.org][keybindings.org]].
+
+* Refresh throttling
+
+Capturing a page is the expensive part, so each tab's texture is refreshed only as often as it is seen. The interval is chosen per tab, per frame (=gsurf_lrg_scene_refresh_interval()=):
+
+| Tab | Refreshed |
+|-----+-----------|
+| the active tab | every frame (the window ticks every 16 ms) |
+| a visible background tab | =lrg.background-fps= times a second (default 4; clamped to 0.2 to 60) |
+| a visible background tab less than 120 px tall on screen | at half that rate (it shows no detail worth the capture) |
+| a hidden tab (behind the camera, outside the view) | every 3 seconds, so its panel is not stale when the camera swings round |
+| a tab with no panel yet | captured at once, then by the rules above |
+
+"Visible" and "tall" come from libregnum's coverage estimate: the panel's on-screen height in pixels, 0 when it is behind the camera or outside the field of view.
+
+* Camera
+
+| Operation | Key / gesture | Control | What it does |
+|-----------+---------------+---------+--------------|
+| orbit | =Alt+Shift+arrows=, middle drag | =lrg.camera {op: "orbit", yaw, pitch}= | keys and the socket orbit the camera's target, eased; a drag circles the whole room immediately |
+| look | =Ctrl+left drag= | — | turn the view in place |
+| zoom | =Alt+Shift+z/x=, =Ctrl+wheel= | =lrg.camera {op: "zoom", factor}= | distance times =factor= (<1 closer, >1 away); keys and the socket ease, the wheel is immediate |
+| focus | =Alt+Shift+f=, =Ctrl+click= | =lrg.focus= | fly to frame one tab head-on, with a margin |
+| overview | =Alt+Shift+o= | =lrg.camera {op: "overview"}= | fit the bounding sphere of every tab panel in the 45 degree view from a raised 3/4 direction; ends reading mode |
+| reset | =Alt+Shift+c= | =lrg.camera {op: "reset"}= | ease back to the default 3/4 view; ends reading mode |
+| bookmark | — | =lrg.camera {op: "save"/"restore", name}= | keep a named camera pose; restore eases to it and ends reading mode; =lrg.state= lists the names |
+
+*Automatic re-aim.* After an arrangement switch, and whenever the number of panels changes (a tab opened or closed), the scene aims the camera at the layout: an overview for the grid wall, the default view for the others (not while reading). It does so only until you move the camera yourself (orbit, look, zoom, focus, restore a bookmark); after that, tabs coming and going leave your camera alone. Choosing an arrangement or resetting the camera hands control back to the automatic aim.
+
+* Pins and placements
+
+A /pinned/ panel ignores the arrangement: it stays where it is through tab switches, arrangement switches and window resizes.
+
+- =Alt+Shift+p= (=lrg-pin=) pins the active tab's panel where it stands, or unpins it if it is pinned.
+- =Ctrl+middle drag= (or =Super+middle drag=) on a panel moves it in the camera plane; dropping it pins it there and emits =lrg.pin=.
+- =Alt+Shift+u= (=lrg-unpin-all=), =lrg.unpin_all= and =gsurfctl 3d-unpin-all= release every panel back to the arrangement.
+
+A pinned panel's /placement/ is a string of six numbers in the C locale:
+
+#+begin_example
+x y z yaw w h
+#+end_example
+
+=x y z= is the panel's centre in world units, =yaw= its rotation about the vertical axis in degrees, =w h= its size in world units (both must be positive). =lrg.state= reports every pinned tab with its placement, and =lrg.pin= with a =placement= pins a tab at one; if the tab has no panel yet, the placement is applied when the panel appears. Together they let a script save a layout and put it back:
+
+#+begin_src sh
+gsurfctl -j 3d | yq -p json '.pinned[] | (.view | tostring) + " " + .placement' > layout.txt
+while read -r view x y z yaw w h
+do
+	gsurfctl 3d-pin --view "${view}" --placement "${x} ${y} ${z} ${yaw} ${w} ${h}"
+done < layout.txt
+#+end_src
+
+View ids are only stable within one run, so a saved layout applies to the same session.
+
+* Control socket, gsurfctl and events
+
+Every =lrg.*= method acts on the application's active window. Outside a 3D window it fails with =UNSUPPORTED= (-32002) and the message =this window is not a 3D scene (start gsurf with --lrg=3d)=; in a build without the scene, =this build has no 3D scene (build with LRG_BACKEND=1 LRG_3D=1)=. gsurfctl exits 1 on either.
+
+** Methods
+
+Every method except =lrg.screenshot= answers with the scene's state (the reply of =lrg.state=), after the change:
+
+#+begin_example
+{"mode":"3d","arrangement":"grid","environment":"sky","reading":false,"history":false,
+ "animating":true,"panels":5,"background_fps":4.0,"history_depth":8,
+ "pinned":[{"view":7,"placement":"1.5 0 -0.4 -20 4.2 3.1"}],"bookmarks":["desk"]}
+#+end_example
+
+| Method | Params | Effect / errors |
+|--------+--------+-----------------|
+| =lrg.state= | — | the state above; =arrangement= is the tab arrangement (the one restored after history depth); =animating= while the camera or a panel still moves; =panels= counts history thumbnails too while history depth is on |
+| =lrg.arrange= | =arrangement?= | set it by id (=carousel=, =grid=, =free=, =single-panel=, =stack=, =per-window=); none: the next one in the cycle. Leaves history depth. Unknown id: =NOT_FOUND= |
+| =lrg.environment= | =environment?= | set it (=studio=, =sky=, =workshop=, =cockpit=, =void=); none: the next one. Unknown id: =NOT_FOUND= |
+| =lrg.reading= | =enabled?: bool= | reading mode on/off; none: toggle |
+| =lrg.history= | =enabled?: bool= | history depth on/off; none: toggle |
+| =lrg.focus= | =view?=, =index?= (default the active view) | makes the view active and flies to it. A view without a panel yet (first frame still rendering): =NOT_FOUND= (the view has been made active anyway) |
+| =lrg.pin= | =enabled?: bool= (default true), =placement?: string=, =view?=, =index?= | pin where it is, or at =placement=; =enabled: false= unpins. A malformed placement: =INVALID_PARAMS= (=six numbers: x y z yaw width height=); pinning in place a view without a panel: =NOT_FOUND= |
+| =lrg.unpin_all= | — | unpin every panel |
+| =lrg.camera= | =op=, =yaw?=, =pitch?=, =factor?=, =name?= | =op= is =orbit= (=yaw=, =pitch= in degrees, default 0), =zoom= (=factor= > 0, else =INVALID_PARAMS=), =reset=, =overview=, =save= / =restore= (=name= required, =INVALID_PARAMS= without; restoring an unknown one: =NOT_FOUND=). Any other =op=: =INVALID_PARAMS=; a non-numeric =yaw=/=pitch=/=factor=: =INVALID_PARAMS= |
+| =lrg.screenshot= | =path= | writes the next presented frame (scene and chrome, or the flat reading frame, exactly as shown) as a PNG; answers ={path, bytes}= once it is written, =FAILED= if it could not be. Relative paths resolve against gsurf's launch directory. Missing =path=: =INVALID_PARAMS= |
+
+=config.get= also reports the =lrg:= keys: =lrg.arrangement=, =lrg.environment=, =lrg.background-fps=, =lrg.history-depth=, =lrg.reading-single-tab= (the configured values, not the live scene).
+
+** gsurfctl
+
+| Command | Method | Does |
+|---------+--------+------|
+| =3d= | =lrg.state= | prints =3d  ARRANGEMENT  ENVIRONMENT  [reading]  [moving]  (N panels)= (=history= instead of the arrangement in history depth) |
+| =3d-arrange [ID]= | =lrg.arrange= | set the arrangement; no ID: the next one |
+| =3d-env [ID]= | =lrg.environment= | set the environment; no ID: the next one |
+| =3d-reading [on/off]= | =lrg.reading= | reading mode; no word: toggle |
+| =3d-history [on/off]= | =lrg.history= | history depth; no word: toggle |
+| =3d-focus [VIEW]= | =lrg.focus= | make VIEW (default the active one) active and fly to it |
+| =3d-pin [on/off] [--placement "X Y Z YAW W H"] [--view VIEW]= | =lrg.pin= | pin where it is or at a placement; =off= unpins |
+| =3d-unpin-all= | =lrg.unpin_all= | unpin every panel |
+| =3d-camera orbit YAW [PITCH]= / =zoom FACTOR= / =reset= / =overview= / =save NAME= / =restore NAME= | =lrg.camera= | move the camera, or save/restore a bookmark |
+| =3d-shot FILE= | =lrg.screenshot= | a PNG of the next frame; FILE is relative to your shell's directory; prints the path |
+
+Every =3d*= command except =3d-shot= prints the state line of =3d= afterwards; =-j= gives the full JSON. Completion knows the arrangement and environment ids, =on=/=off=, the camera operations, =--placement= and the =lrg= topic.
+
+#+begin_src sh
+gsurfctl 3d                                   # 3d  carousel  studio  (4 panels)
+gsurfctl 3d-arrange grid                      # a wall; the camera pulls back to show it
+gsurfctl 3d-env sky
+gsurfctl 3d-focus 7                           # tab 7 active, camera on it
+gsurfctl 3d-reading on                        # read it flat
+gsurfctl 3d-reading off
+gsurfctl 3d-history on                        # its back/forward pages in depth
+gsurfctl 3d-camera orbit 30 -10               # 30 degrees right, 10 down
+gsurfctl 3d-camera zoom 0.8                   # closer
+gsurfctl 3d-camera save desk                  # a camera bookmark
+gsurfctl 3d-camera restore desk
+gsurfctl 3d-pin --view 7                      # pin tab 7 where it stands
+gsurfctl 3d-pin --view 7 --placement "1.5 0 -0.4 -20 4.2 3.1"
+gsurfctl 3d-pin off --view 7
+gsurfctl 3d-unpin-all
+gsurfctl 3d-shot space.png                    # the window as shown
+gsurfctl -j 3d | yq -p json '.arrangement'
+gsurfctl action lrg-overview                  # any lrg-* action by name
+gsurfctl call lrg.camera op=orbit yaw=-45
+#+end_src
+
+** Events
+
+Scene changes are events on the =lrg= topic, named =lrg.<what>=, whatever caused them (a key, a pointer gesture, a control method, the end of the lone-tab reading mode). =data= carries the scene's modes, so a subscriber needs no follow-up =lrg.state=:
+
+| Event | When |
+|-------+------|
+| =lrg.arrangement= | the arrangement changed |
+| =lrg.environment= | the environment changed |
+| =lrg.reading= | reading mode toggled (including the automatic exit when a second tab opens) |
+| =lrg.history= | history depth toggled, or a history thumbnail was clicked |
+| =lrg.focus= | the camera flew to a tab, or a click brought a background tab forward |
+| =lrg.pin= | a pin, unpin, unpin-all or a dropped panel |
+| =lrg.camera= | orbit, look, zoom, reset, overview, a bookmark, or the end of a camera drag |
+
+#+begin_example
+{"jsonrpc":"2.0","method":"event","params":{"topic":"lrg","event":"lrg.arrangement","time":123456789,
+ "data":{"what":"arrangement","arrangement":"grid","environment":"sky","reading":false,"history":false}}}
+#+end_example
+
+#+begin_src sh
+gsurfctl watch lrg                            # [lrg] lrg.reading what: reading ...
+gsurfctl -j watch lrg | while read -r line; do yq -p json '.event + " " + .data.arrangement' <<< "${line}"; done
+#+end_src
+
+=lrg.state= and the automatic reading mode at start-up emit nothing.
+
+* Configuration
+
+** YAML
+
+#+begin_src yaml
+lrg:
+  arrangement: carousel            # carousel | grid | free | single-panel | stack (| per-window)
+  environment: studio              # studio | sky | workshop | cockpit | void
+  background-fps: 4                # refresh rate of visible background tabs (0.2-60)
+  history-depth: 8                 # back/forward pages shown per direction (1-32)
+  reading-single-tab: true         # a lone tab opens in reading mode
+#+end_src
+
+| Key | Default | Notes |
+|-----+---------+-------|
+| =arrangement= | unset (=carousel=) | The starting arrangement. =--lrg=3d:ID= overrides it. An empty string means unset; an unknown id warns at start and uses =carousel=. |
+| =environment= | unset (=studio=) | The starting environment. =--lrg=3d:ID= overrides it. Empty means unset; unknown warns and uses =studio=. |
+| =background-fps= | =4= | Clamped to 0.2 to 60. |
+| =history-depth= | =8= | Clamped to 1 to 32. |
+| =reading-single-tab= | =true= | See [[*A lone tab starts in reading mode][A lone tab starts in reading mode]]. |
+
+=lrg:= is a core section: later config files override it key by key. It is read only when =--lrg= is given and only matters in 3D; the settings are applied when the window opens (a running scene changes through the actions and =lrg.*= methods, not by reloading the config).
+
+** C config
+
+#+begin_src c
+g_free(config->lrg_arrangement);
+config->lrg_arrangement = g_strdup("grid");
+g_free(config->lrg_environment);
+config->lrg_environment = g_strdup("sky");
+config->lrg_background_fps = 2.0;
+config->lrg_history_depth = 12;
+config->lrg_reading_single_tab = FALSE;
+
+gsurf_config_set_keybind(config, "Alt+Shift+a", GSURF_ACTION_LRG_CYCLE_ARRANGEMENT);
+#+end_src
+
+The C fields are not clamped: keep them in the YAML ranges (the scene clamps =background_fps= and =history_depth= again when it applies them). =gsurf --generate-c-config= shows the block commented out.
+
+** Embedders
+
+A host that drives =GsurfLrgWindow= itself sets the render mode and the scene settings before presenting the window: =gsurf_lrg_window_set_render_mode(win, GSURF_LRG_RENDER_MODE_3D)= and =gsurf_lrg_window_set_scene_options(win, &opts)= with a =GsurfLrgSceneOptions= (=arrangement=, =environment=, =background_fps=, =history_limit=, =reading_single_tab=). =gsurf_lrg_window_get_scene()= returns the =GsurfLrgScene= once presented; =gsurf_lrg_window_run_scene_action()= runs an =lrg-*= action; the =GsurfLrgWindow::scene-changed= signal (=what=: =arrangement=, =environment=, =reading=, =history=, =focus=, =pin=, =camera=) is what the control server turns into events. =gsurf_lrg_spec_parse()= parses an =--lrg= spec. cmacs does not use =GsurfLrgWindow=: it composites =GsurfLrgView= textures in its own lrgterm.
+
+* Limitations and roadmap
+
+- *=3dvr= is reserved.* libregnum's surface has a headset present path, but gsurf does not attach a VR service yet; =--lrg=3dvr= refuses to start.
+- *No post effects.* libregnum's =LrgPostProcessor= is a stub: no bloom, blur or other screen-space effects. Depth of field is the panel pop-and-dim described above.
+- *Nothing is persisted across restarts yet.* Pins, placements and camera bookmarks live in the running scene only. They are reachable through =lrg.state=, =lrg.pin= (with =placement=) and =lrg.camera= (=save= / =restore=), and libregnum can serialise a camera pose (=lrg_3d_surface_get_view_string()= / =set_view_string()=), but gsurf does not store any of it in its session file: after a restart every tab is back in its arrangement and the bookmark list is empty. Scripts can save a layout through =lrg.state= (see [[*Pins and placements][Pins and placements]]), within one run, since view ids change across runs.
+- *History thumbnails are per run.* The thumbnail cache is in memory; after a restart history entries start as title cards.
+- *GTK3 only.* The LRG engine renders an offscreen WebKitGTK 4.1 view; its GTK4 / WebKitGTK 6.0 path is not implemented (the engine fails to compile with =GTK_BACKEND=gtk4=), so there is no =--lrg= at all in a GTK4 build. The WPE engine (a GTK-free build) is reserved.
+- *One window.* The LRG backend has one raylib window per process, and the scene shows the tabs of that window.
+- *No wmux.* The LRG window cannot host a window layout, so wmux stays inactive under =--lrg= (logged once), in 2D and 3D alike.
+- *=single-panel= and =per-window=* do not follow the active tab (see [[*Arrangements][Arrangements]]).
+
+* Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------+-------+-----|
+| =--lrg=3d needs a build with the libregnum scene= | built with =LRG_3D=0=, or an =LRG_BACKEND=0= build | =make LRG_BACKEND=1= (=LRG_3D=1= is the default) |
+| =gsurf --lrg 3d URL= opens a flat window and tries to load =3d= | the mode was given as a separate word | =--lrg=3d= |
+| The window opens flat with one tab and a status line saying =reading= | the lone-tab reading mode | open a second tab, or =Alt+Shift+r=; =lrg.reading-single-tab: false= to start in the space |
+| =unknown 3D arrangement '...'= at start | a misspelt arrangement token or =lrg.arrangement= (any token that is not an environment counts as an arrangement) | check the id against [[*Arrangements][Arrangements]] |
+| =Alt+Shift+...= keys do nothing | not a 3D window (the keys then go to the page), a config that rebinds them, or a module that consumes them first | =gsurfctl 3d= (=UNSUPPORTED= outside 3D); press =?= to see who owns the key |
+| =Ctrl+click= on a link flies instead of opening a background tab | =Ctrl+left= is the fly gesture in 3D | middle-click the link, or read the tab (=Alt+Shift+r=), where the 2D mousebinds apply |
+| Background panels update slowly | the refresh throttling | raise =lrg.background-fps= (costs CPU: every refresh is a page capture) |
+| A panel never appears for a new tab | its first frame has not rendered yet (no texture, no panel); =lrg.focus= / =lrg.pin= answer =NOT_FOUND= meanwhile | wait for the page to paint |
+| The camera stopped re-aiming when tabs open or close | you moved it, which turns the automatic aim off | =Alt+Shift+c= (reset) or choose an arrangement |
+| History depth shows title cards instead of pages | those pages were not viewed in this run (thumbnails are taken from the active page) | visit them; the card turns into a thumbnail |
+| Compile errors in =gsurf-lrg-scene.c= about =lrg_3d_surface_*= | =LIBREGNUM_DIR= points at a libregnum older than 0.8.2 | update it, or use the vendored =deps/libregnum= |
+| =gsurf LRG: failed to create a raylib window (no display?)= | no X11/Wayland display | run it in a graphical session |
+| =test-backend-lrg= skips the live scene | the live test is display-gated (=DISPLAY= / =WAYLAND_DISPLAY=) | run it under =make test-gui= (xvfb-run) or on a display |

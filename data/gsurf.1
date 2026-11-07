@@ -1,4 +1,4 @@
-.TH GSURF 1 "2026" "gsurf 0.5.0" "User Commands"
+.TH GSURF 1 "2026" "gsurf 0.5.1" "User Commands"
 .SH NAME
 gsurf \- GObject Surf, a minimal modular web browser
 .SH SYNOPSIS
@@ -69,6 +69,20 @@ List the available modules in alphabetical order and exit.
 .TP
 .BR \-f ", " \-\-fullscreen
 Start in fullscreen mode.
+.TP
+.BR \-\-lrg [=\fIMODE\fR]
+Use the libregnum/raylib backend in a raylib window (builds with
+LRG_BACKEND=1).
+.I MODE
+is
+.B 2d
+(the default: the active tab, flat) or
+.BR 3d [:\fIARRANGEMENT\fR][:\fIENVIRONMENT\fR],
+every tab as a panel in a 3D scene: arrangement carousel, grid, stack or
+free; environment studio, sky, workshop, cockpit or void, in either order
+(e.g. \-\-lrg=3d:grid:sky).
+.B 3dvr
+is reserved. See docs/lrg-3d.org and gsurfctl(1) for the 3d commands.
 .TP
 .BR \-v ", " \-\-version
 Print the version (and active backend) and exit.
