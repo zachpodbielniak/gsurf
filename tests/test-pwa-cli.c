@@ -115,6 +115,12 @@ test_cli(void)
 			const gchar *with_uri[] = { binary, "--list-pwa", "https://example.org", NULL };
 			const gchar *with_pwa[] = { binary, "--pwa", "--uninstall-pwa", "x",
 				"https://example.org", NULL };
+			const gchar *orphan_container[] = { binary, "--pwa-container", "work",
+				"https://example.org", NULL };
+			const gchar *container_pwa[] = { binary, "--pwa", "--container", "work",
+				"https://example.org", NULL };
+			const gchar *pinned[] = { binary, "--pwa", "--pwa-name", "Pinned",
+				"--pwa-container", "work", "https://pinned.example.org", NULL };
 			g_autofree gchar *out = NULL;
 			g_autofree gchar *trash = g_build_filename(root, "Trash", NULL);
 			gboolean ok = FALSE;
@@ -144,6 +150,29 @@ test_cli(void)
 			g_clear_pointer(&out, g_free);
 			out = run_capture(launcher, &ok, with_pwa);
 			g_assert_false(ok);
+			g_clear_pointer(&out, g_free);
+			/* --pwa-container needs --pwa; --container is not for --pwa. */
+			out = run_capture(launcher, &ok, orphan_container);
+			g_assert_false(ok);
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, container_pwa);
+			g_assert_false(ok);
+			g_clear_pointer(&out, g_free);
+			/* A pinned app lists its container; the others show '-'. */
+			out = run_capture(launcher, &ok, pinned);
+			g_assert_true(ok);
+			g_clear_pointer(&out, g_free);
+			out = run_capture(launcher, &ok, list);
+			g_assert_true(ok);
+			g_assert_nonnull(strstr(out, "CONTAINER"));
+			g_assert_nonnull(strstr(out, "pinned  Pinned  work"));
+			g_clear_pointer(&out, g_free);
+			{
+				const gchar *drop[] = { binary, "--uninstall-pwa", "pinned", NULL };
+
+				out = run_capture(launcher, &ok, drop);
+				g_assert_true(ok);
+			}
 			/* XDG_DATA_HOME points into the test tree, so the trash does. */
 			remove_tree(trash);
 		}

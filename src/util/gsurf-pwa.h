@@ -24,6 +24,27 @@ gchar *gsurf_pwa_install(const gchar *uri, const gchar *name,
 	const gchar *executable, const gchar *applications_dir, GError **error);
 
 /**
+ * gsurf_pwa_install_full:
+ * @uri: absolute HTTP or HTTPS site URI
+ * @name: (nullable): display name, or %NULL to use the hostname
+ * @container: (nullable): the container the app always opens in (an id, a
+ *   container name, "temporary" or "default"), or %NULL to place it by the
+ *   container rules like any startup tab
+ * @executable: absolute path to the installed gsurf executable or AppImage
+ * @applications_dir: absolute destination applications directory
+ * @error: (out) (optional): return location for an error
+ *
+ * gsurf_pwa_install() with a pinned container: the launcher runs
+ * `gsurf --kiosk --container CONTAINER -- URI`.  The container is resolved
+ * when the app starts (its config may change after installing).
+ *
+ * Returns: (transfer full): installed path, or %NULL on failure
+ */
+gchar *gsurf_pwa_install_full(const gchar *uri, const gchar *name,
+	const gchar *container, const gchar *executable,
+	const gchar *applications_dir, GError **error);
+
+/**
  * GsurfPwaEntry:
  * @id: the indexable id: a slug of @name ("My Mail" -> "my-mail"), with the
  *   first 8 hex digits of the launcher's URL hash appended when two apps
@@ -33,6 +54,8 @@ gchar *gsurf_pwa_install(const gchar *uri, const gchar *name,
  * @uri: (nullable): the site URL, or %NULL if the launcher could not be read
  * @path: the launcher file
  * @system: %TRUE for a system-wide launcher, %FALSE for a per-user one
+ * @container: (nullable): the pinned container (--pwa-container), or %NULL
+ *   when the app is placed by the container rules
  *
  * One installed PWA launcher, as listed by gsurf_pwa_list().
  */
@@ -42,6 +65,7 @@ typedef struct {
 	gchar    *uri;
 	gchar    *path;
 	gboolean  system;
+	gchar    *container;
 } GsurfPwaEntry;
 
 /**

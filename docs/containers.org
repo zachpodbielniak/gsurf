@@ -86,7 +86,7 @@ The module installs the registry's resolver, which places every new tab when it 
 
 Popups (=window.open=, =target=_blank= links that WebKit opens as related views) never reach the policy: WebKit requires a popup to share its opener's session, so a popup is always in its opener's container. This keeps =window.opener= and login popups (OAuth) working.
 
-The very first tab at startup is placed the same way (with the startup URL as its hint), so with the default =new_tab: temporary= gsurf starts in a temporary container.
+The very first tab at startup is placed the same way (with the startup URL as its hint), so with the default =new_tab: temporary= gsurf starts in a temporary container. =gsurf --container ID URL= (since 0.5.4) makes that an explicit request instead: a container id, a container name in any case, =temporary= or =default=; an unknown one is reported and the rules place the tab. PWA launchers use it when installed with =--pwa-container= ([[file:kiosk-pwa.org][kiosk-pwa.org]]).
 
 * Host assignment
 

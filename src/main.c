@@ -42,6 +42,8 @@ static gboolean  opt_kiosk = FALSE;
 static gboolean  opt_pwa = FALSE;
 static gchar    *opt_pwa_name = NULL;
 static gboolean  opt_list_pwa = FALSE;
+static gchar    *opt_pwa_container = NULL;
+static gchar    *opt_container = NULL;
 static gchar    *opt_uninstall_pwa = NULL;
 
 /* --lrg[=MODE]: use the libregnum/raylib backend.  Bare --lrg means 2D
@@ -93,8 +95,14 @@ static const GOptionEntry entries[] = {
 	  "Install URI as a kiosk desktop app and exit", NULL },
 	{ "pwa-name", 0, 0, G_OPTION_ARG_STRING, &opt_pwa_name,
 	  "Desktop app name (default: site hostname; requires --pwa)", "NAME" },
+	{ "pwa-container", 0, 0, G_OPTION_ARG_STRING, &opt_pwa_container,
+	  "Always open the app in this container (id or name; default: your "
+	  "container rules place it; requires --pwa)", "ID" },
+	{ "container", 0, 0, G_OPTION_ARG_STRING, &opt_container,
+	  "Open the startup page in this container (id or name, temporary or "
+	  "default) instead of where the container rules would put it", "ID" },
 	{ "list-pwa", 0, 0, G_OPTION_ARG_NONE, &opt_list_pwa,
-	  "List installed PWAs (id, name, scope, URL) and exit", NULL },
+	  "List installed PWAs (id, name, container, scope, URL) and exit", NULL },
 	{ "uninstall-pwa", 0, 0, G_OPTION_ARG_STRING, &opt_uninstall_pwa,
 	  "Uninstall a PWA by its --list-pwa id (or its exact name or URL) and exit",
 	  "ID" },
@@ -695,6 +703,43 @@ resolve_cli_path(gchar **path)
 
 /* ===== main ===== */
 
+/* --container: the container id to request for the startup tab.  Accepts a
+ * container id, a container name (any case), "temporary" or "default".  An
+ * unknown one is reported and the tab is placed by the container rules, as
+ * without the option.  Needs the containers module loaded (it defines the
+ * persistent containers). */
+static gchar *
+startup_container(const gchar *requested)
+{
+	GsurfContainerRegistry *registry = gsurf_container_registry_get_default();
+	g_autoptr(GPtrArray) all = NULL;
+	g_autofree gchar *folded = NULL;
+	guint i;
+
+	if (requested == NULL)
+		return NULL;
+	if (g_ascii_strcasecmp(requested, GSURF_CONTAINER_TEMPORARY) == 0)
+		return g_strdup(GSURF_CONTAINER_TEMPORARY);
+	if (g_ascii_strcasecmp(requested, GSURF_CONTAINER_DEFAULT) == 0)
+		return g_strdup(GSURF_CONTAINER_DEFAULT);
+	if (gsurf_container_registry_lookup(registry, requested) != NULL)
+		return g_strdup(requested);
+
+	folded = g_utf8_casefold(requested, -1);
+	all = gsurf_container_registry_list(registry);
+	for (i = 0; i < all->len; i++) {
+		GsurfContainer *c = g_ptr_array_index(all, i);
+		g_autofree gchar *name = gsurf_container_get_name(c) != NULL
+			? g_utf8_casefold(gsurf_container_get_name(c), -1) : NULL;
+
+		if (g_strcmp0(name, folded) == 0)
+			return g_strdup(gsurf_container_get_id(c));
+	}
+	g_printerr("gsurf: no container '%s' (is the containers module enabled?); "
+		"placing the page by the container rules\n", requested);
+	return NULL;
+}
+
 /* --- --list-pwa / --uninstall-pwa ------------------------------------- */
 
 /* The launcher directories --pwa installs into: per user, and system-wide
@@ -725,7 +770,7 @@ pwa_list_command(void)
 {
 	g_autofree gchar *user_dir = pwa_user_dir();
 	g_autoptr(GPtrArray) entries = gsurf_pwa_list(user_dir, PWA_SYSTEM_DIR);
-	glong w_id = 2, w_name = 4;
+	glong w_id = 2, w_name = 4, w_container = 9;
 	guint i;
 
 	if (entries->len == 0) {
@@ -737,19 +782,25 @@ pwa_list_command(void)
 
 		w_id = MAX(w_id, g_utf8_strlen(e->id, -1));
 		w_name = MAX(w_name, g_utf8_strlen(e->name, -1));
+		if (e->container != NULL)
+			w_container = MAX(w_container, g_utf8_strlen(e->container, -1));
 	}
 	print_padded("ID", w_id + 2);
 	print_padded("NAME", w_name + 2);
+	print_padded("CONTAINER", w_container + 2);
 	g_print("SCOPE   URL\n");
 	for (i = 0; i < entries->len; i++) {
 		GsurfPwaEntry *e = g_ptr_array_index(entries, i);
 
 		print_padded(e->id, w_id + 2);
 		print_padded(e->name, w_name + 2);
+		/* "-": not pinned, the container rules place it. */
+		print_padded(e->container != NULL ? e->container : "-", w_container + 2);
 		print_padded(e->system ? "system" : "user", 8);
 		g_print("%s\n", e->uri != NULL ? e->uri : "(unreadable launcher)");
 	}
-	g_print("\nUninstall one with: gsurf --uninstall-pwa ID\n");
+	g_print("\nCONTAINER '-': placed by your container rules.  "
+		"Uninstall one with: gsurf --uninstall-pwa ID\n");
 	return EXIT_SUCCESS;
 }
 
@@ -831,6 +882,8 @@ main(int argc, char *argv[])
 		"  gsurf --lrg=3d:stack:workshop\n"
 		"  gsurf --pwa --pwa-name Mail https://mail.example.org\n"
 		"  sudo gsurf --pwa https://example.org\n"
+		"  gsurf --pwa --pwa-name Gmail --pwa-container personal https://mail.google.com\n"
+		"  gsurf --container work https://example.org\n"
 		"  gsurf --list-pwa\n"
 		"  gsurf --uninstall-pwa mail\n"
 		"  sudo gsurf --uninstall-pwa example-org");
@@ -863,10 +916,18 @@ main(int argc, char *argv[])
 
 	/* Installation runs before GTK, configuration code, or modules. Root
 	 * installs only a system launcher and never starts a privileged browser. */
-	if ((opt_pwa_name != NULL && !opt_pwa) ||
+	if (((opt_pwa_name != NULL || opt_pwa_container != NULL) && !opt_pwa) ||
 	    ((opt_pwa || opt_kiosk) && argc != 2)) {
 		g_printerr("gsurf: --pwa/--kiosk require exactly one URI; "
-			"--pwa-name requires --pwa\n");
+			"--pwa-name and --pwa-container require --pwa\n");
+		return EXIT_FAILURE;
+	}
+	/* --container places the startup page of a browser session; installing
+	 * a launcher pins one with --pwa-container instead. */
+	if (opt_container != NULL &&
+	    (opt_pwa || opt_list_pwa || opt_uninstall_pwa != NULL || *opt_container == '\0')) {
+		g_printerr("gsurf: --container needs a container id or name and opens a "
+			"browser (use --pwa-container with --pwa)\n");
 		return EXIT_FAILURE;
 	}
 	/* Listing and uninstalling launchers: no URI, nothing else to do. */
@@ -893,8 +954,8 @@ main(int argc, char *argv[])
 			? g_strdup("/usr/local/share/applications")
 			: g_build_filename(g_get_user_data_dir(), "applications", NULL);
 		if (executable != NULL)
-			installed = gsurf_pwa_install(argv[1], opt_pwa_name,
-				executable, directory, &error);
+			installed = gsurf_pwa_install_full(argv[1], opt_pwa_name,
+				opt_pwa_container, executable, directory, &error);
 		if (installed == NULL) {
 			g_printerr("gsurf: PWA installation failed: %s\n",
 				error != NULL ? error->message : "cannot resolve executable");
@@ -1070,7 +1131,13 @@ main(int argc, char *argv[])
 
 	/* The startup URI doubles as the container placement hint, so a
 	 * containers host rule applies to the very first page too. */
-	view = gsurf_view_new_full(NULL, NULL, (argc > 1) ? argv[1] : NULL, FALSE);
+	/* --container is an explicit placement request, which outranks the
+	 * container rules; without it the startup tab is placed by them. */
+	{
+		g_autofree gchar *container = startup_container(opt_container);
+
+		view = gsurf_view_new_full(NULL, container, (argc > 1) ? argv[1] : NULL, FALSE);
+	}
 	gsurf_view_apply_settings(view, config->settings);
 	gsurf_window_add_view(window, view);          /* fires "view-added" -> setup_view */
 

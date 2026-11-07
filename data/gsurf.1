@@ -104,11 +104,25 @@ Desktop launcher display name. Defaults to the site's hostname. Requires
 \-\-pwa. Launchers use the gsurf icon and ordinary browser storage; this does
 not install a web manifest, offline bundle, or separate profile.
 .TP
+.BR \-\-pwa\-container =\fIID\fR
+Always open the installed app in this container: the launcher runs
+gsurf \-\-kiosk \-\-container \fIID\fR. Without it the app is placed by the
+container rules like any startup tab. Requires \-\-pwa.
+.TP
+.BR \-\-container =\fIID\fR
+Open the startup page in this container (an id, a container name in any case,
+.B temporary
+or
+.BR default )
+instead of where the container rules would place it. An unknown container is
+reported and the rules decide.
+.TP
 .B \-\-list\-pwa
 List the installed PWA launchers, per user and system-wide: an
 .I ID
 (a slug of the name, e.g. "my-mail"; a short URL hash is added when two apps
-share a name), the name, the scope (user or system) and the URL. Then exit.
+share a name), the name, the pinned container (\- when the container rules
+place it), the scope (user or system) and the URL. Then exit.
 .TP
 .BR \-\-uninstall\-pwa =\fIID\fR
 Uninstall the PWA with that
@@ -164,6 +178,7 @@ gsurf file:///tmp/page.html#section
 gsurf \-\-kiosk https://example.org
 gsurf \-\-pwa \-\-pwa\-name 'My Mail' https://mail.example.org
 sudo gsurf \-\-pwa https://dashboard.example.org
+gsurf \-\-pwa \-\-pwa\-container personal https://mail.google.com
 gsurf \-\-list\-pwa
 gsurf \-\-uninstall\-pwa my\-mail
 .fi

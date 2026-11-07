@@ -283,6 +283,93 @@ test_list_find_uninstall(void)
 	g_assert_cmpint(g_rmdir(root), ==, 0);
 }
 
+/* A pinned container reaches gsurf as `--container NAME` before `--`, through
+ * the same GLib launcher desktop environments use, and lists back. */
+static void
+test_container(void)
+{
+	g_autoptr(GError) error = NULL;
+	g_autoptr(GDesktopAppInfo) app = NULL;
+	g_autoptr(GAppLaunchContext) context = g_app_launch_context_new();
+	g_autoptr(GKeyFile) desktop = g_key_file_new();
+	g_autoptr(GPtrArray) entries = NULL;
+	g_autofree gchar *directory = g_dir_make_tmp("gsurf-pwa-container-XXXXXX", &error);
+	g_autofree gchar *executable = NULL;
+	g_autofree gchar *output = NULL;
+	g_autofree gchar *path = NULL;
+	g_autofree gchar *contents = NULL;
+	g_autofree gchar *expected = NULL;
+	g_autofree gchar *data = NULL;
+	const gchar *container = "Work $tuff \"x\" 50%";
+	const gchar *uri = "https://mail.example.org/";
+	GsurfPwaEntry *e;
+	gint64 deadline;
+
+	g_assert_no_error(error);
+	executable = g_build_filename(directory, "gsurf", NULL);
+	output = g_build_filename(directory, "arguments", NULL);
+	g_assert_true(g_file_set_contents(executable,
+		"#!/bin/bash\nprintf '%s\\n' \"$@\" > \"$GSURF_TEST_OUTPUT\"\n", -1, &error));
+	g_assert_no_error(error);
+	g_assert_cmpint(g_chmod(executable, 0700), ==, 0);
+
+	/* An empty container is refused like an empty name. */
+	g_assert_null(gsurf_pwa_install_full(uri, NULL, "", executable, directory, &error));
+	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT);
+	g_clear_error(&error);
+
+	path = gsurf_pwa_install_full(uri, "Mail", container, executable, directory, &error);
+	g_assert_no_error(error);
+	app = g_desktop_app_info_new_from_filename(path);
+	g_assert_nonnull(app);
+	g_app_launch_context_setenv(context, "GSURF_TEST_OUTPUT", output);
+	g_assert_true(g_app_info_launch(G_APP_INFO(app), NULL, context, &error));
+	g_assert_no_error(error);
+	expected = g_strdup_printf("--kiosk\n--container\n%s\n--\n%s\n", container, uri);
+	deadline = g_get_monotonic_time() + 5 * G_TIME_SPAN_SECOND;
+	do {
+		g_clear_pointer(&contents, g_free);
+		if (g_file_get_contents(output, &contents, NULL, NULL) &&
+		    g_strcmp0(contents, expected) == 0)
+			break;
+		g_usleep(10000);
+	} while (g_get_monotonic_time() < deadline);
+	g_assert_cmpstr(contents, ==, expected);
+
+	/* Listed with its container; without the key it comes from Exec. */
+	entries = gsurf_pwa_list(directory, NULL);
+	g_assert_cmpuint(entries->len, ==, 1);
+	e = g_ptr_array_index(entries, 0);
+	g_assert_cmpstr(e->container, ==, container);
+	g_assert_cmpstr(e->uri, ==, uri);
+	g_clear_pointer(&entries, g_ptr_array_unref);
+	g_assert_true(g_key_file_load_from_file(desktop, path, G_KEY_FILE_NONE, &error));
+	g_assert_true(g_key_file_remove_key(desktop, "Desktop Entry", "X-Gsurf-PWA-Container",
+		&error));
+	g_assert_true(g_key_file_remove_key(desktop, "Desktop Entry", "X-Gsurf-PWA-URI",
+		&error));
+	data = g_key_file_to_data(desktop, NULL, NULL);
+	g_assert_true(g_file_set_contents(path, data, -1, &error));
+	g_assert_no_error(error);
+	entries = gsurf_pwa_list(directory, NULL);
+	e = g_ptr_array_index(entries, 0);
+	g_assert_cmpstr(e->container, ==, container);
+	g_assert_cmpstr(e->uri, ==, uri);
+	g_clear_pointer(&entries, g_ptr_array_unref);
+
+	/* Reinstalling the URL without a container unpins it. */
+	g_free(gsurf_pwa_install_full(uri, "Mail", NULL, executable, directory, &error));
+	g_assert_no_error(error);
+	entries = gsurf_pwa_list(directory, NULL);
+	g_assert_cmpuint(entries->len, ==, 1);
+	g_assert_null(((GsurfPwaEntry *)g_ptr_array_index(entries, 0))->container);
+
+	g_assert_cmpint(g_unlink(path), ==, 0);
+	g_assert_cmpint(g_unlink(executable), ==, 0);
+	g_assert_cmpint(g_unlink(output), ==, 0);
+	g_assert_cmpint(g_rmdir(directory), ==, 0);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -290,5 +377,6 @@ main(int argc, char **argv)
 	g_test_add_func("/pwa/install-launch", test_install_and_launch);
 	g_test_add_func("/pwa/invalid-input", test_invalid_input);
 	g_test_add_func("/pwa/list-find-uninstall", test_list_find_uninstall);
+	g_test_add_func("/pwa/container", test_container);
 	return g_test_run();
 }

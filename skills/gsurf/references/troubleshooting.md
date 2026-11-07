@@ -23,7 +23,7 @@ Start with evidence: gsurf logs to stderr. `G_MESSAGES_DEBUG=all gsurf … 2>&1 
 - **Bare letters typed into a page trigger commands**: the field is inside a closed shadow root that the focus tracker cannot see. Press `i` first (INSERT), `Escape` to leave.
 - **`Ctrl+Shift+period` binding never fires**: write it as GDK reports it, or let the normaliser do it: `Ctrl+Shift+.`, `Ctrl+Shift+period` and `Ctrl+Shift+greater` are the same binding. Without `Shift`, `Ctrl+.` is the unshifted key.
 - **Kiosk mode refuses an action**: by design (`gsurf --kiosk`): URL entry, new views, popups, the inspector and the context menu are off whatever is bound. gsurfctl exits 4.
-- **Remove a PWA launcher** (`gsurf --pwa` installs them): `gsurf --list-pwa` shows each one with an ID, name, scope and URL; `gsurf --uninstall-pwa ID` removes it (to the trash where possible). System-wide launchers need `sudo`; a name shared by two apps is refused, so use the ID.
+- **Remove a PWA launcher** (`gsurf --pwa` installs them): `gsurf --list-pwa` shows each one with an ID, name, scope and URL; `gsurf --uninstall-pwa ID` removes it (to the trash where possible). System-wide launchers need `sudo`; a name shared by two apps is refused, so use the ID. A PWA logged out on every launch is in a temporary container (its URL matches no `containers` host rule with `new_tab: temporary`): add a rule, or reinstall with `--pwa-container ID` to pin it.
 
 ## gsurfctl
 
