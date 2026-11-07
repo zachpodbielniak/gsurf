@@ -245,10 +245,12 @@ LRG_3D ?= 1
 LRG_LIBREGNUM_LIB ?= $(LIBREGNUM_DIR)/build/release/lib/liblibregnum.a
 # How gsurf builds its vendored libregnum when the archive is missing: only the
 # library, without the optional pieces the scene never touches (editor, GIR,
-# tests, examples, OpenXR, fribidi, crispy, ALSA, Steam).  BUILDDIR and DEBUG
-# are pinned because gsurf's own command-line values reach the sub-make via
-# MAKEFLAGS and would move the archive away from LRG_LIBREGNUM_LIB.
-LRG_LIBREGNUM_MAKEFLAGS := BUILDDIR=build/release DEBUG=0 SANITIZE=0 ASAN=0 \
+# tests, examples, OpenXR, fribidi, crispy, ALSA, Steam).  DEBUG is pinned so
+# libregnum and its own vendored deps all build into build/release.  BUILDDIR
+# must NOT be passed: a command-line BUILDDIR reaches every nested make, and
+# libregnum's yaml-glib would then build into build/release/release (the
+# Makefile strips a gsurf BUILDDIR from that recipe's MAKEOVERRIDES instead).
+LRG_LIBREGNUM_MAKEFLAGS := DEBUG=0 SANITIZE=0 ASAN=0 \
 	BUILD_SHARED=0 BUILD_GIR=0 BUILD_TESTS=0 BUILD_EXAMPLES=0 BUILD_DOCS=0 \
 	BUILD_EDITOR=0 BUILD_EDITOR_UI=0 OPENXR=0 FRIBIDI=0 CRISPY=0 ALSA=0 STEAM=0
 

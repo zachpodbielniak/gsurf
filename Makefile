@@ -102,7 +102,19 @@ endif
 # produces graylib at the same paths -- so ONE grouped rule builds all three,
 # rather than two rules racing over the same graylib tree.
 ifeq ($(LRG_3D),1)
-$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) &:
+# The BUNDLED copy also rebuilds when its config.mk (which carries the
+# version, and which a submodule checkout rewrites) is newer than the
+# archive: otherwise a checkout that built an older libregnum keeps linking
+# it after a submodule bump and fails with undefined lrg_* symbols.  An
+# embedder's copy (any other LIBREGNUM_DIR) is still never rebuilt here.
+ifeq ($(abspath $(LIBREGNUM_DIR)),$(abspath $(CURDIR)/deps/libregnum))
+LRG_LIBREGNUM_STAMP := $(LIBREGNUM_DIR)/config.mk
+endif
+# gsurf's own BUILDDIR (if given on the command line) must not reach
+# libregnum or its nested deps: drop it from this recipe's MAKEOVERRIDES.
+$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB): \
+	MAKEOVERRIDES := $(filter-out BUILDDIR=%,$(MAKEOVERRIDES))
+$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB) &: $(LRG_LIBREGNUM_STAMP)
 	$(MAKE) -C $(LIBREGNUM_DIR) all $(LRG_LIBREGNUM_MAKEFLAGS)
 $(OUTDIR)/$(LIB_STATIC) $(OUTDIR)/$(LIB_SHARED_FULL): \
 	$(LRG_LIBREGNUM_LIB) $(LRG_GRAYLIB_LIB) $(LRG_RAYLIB_LIB)

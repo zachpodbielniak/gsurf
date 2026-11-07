@@ -21,7 +21,8 @@
 #      $(OBJDIR)/.build-flags stamp), and an unchanged configuration does not.
 #   5. With LRG_3D=1 (the --lrg=3d scene, the default) ONE libregnum sub-make
 #      builds liblibregnum.a and graylib's archives, lean (no editor, GIR,
-#      tests, OpenXR, ...) and with BUILDDIR/DEBUG pinned, before the LRG
+#      tests, OpenXR, ...), with DEBUG pinned and gsurf's BUILDDIR kept out
+#      (it would reach libregnum's nested yaml-glib build), before the LRG
 #      objects compile; and the stamp records LRG_3D.
 #
 # Checks 1-4 cover the graylib-only build, so they pass LRG_3D=0.
@@ -229,7 +230,7 @@ else
 		fail "${name}" "libregnum build (${lrg_line:-none}) not before the compile (${cc_line:-none})"
 	else
 		missing=''
-		for want in BUILDDIR=build/release DEBUG=0 BUILD_GIR=0 BUILD_SHARED=0 \
+		for want in DEBUG=0 BUILD_GIR=0 BUILD_SHARED=0 \
 			BUILD_TESTS=0 BUILD_EDITOR=0 BUILD_EDITOR_UI=0 OPENXR=0
 		do
 			grep -q -- "${want}" "${stub}/lrg-calls" || missing="${missing} ${want}"
@@ -237,6 +238,9 @@ else
 		if [[ -n "${missing}" ]]
 		then
 			fail "${name}" "missing${missing}: $(cat "${stub}/lrg-calls")"
+		elif grep -q -- 'BUILDDIR=' "${stub}/lrg-calls"
+		then
+			fail "${name}" "gsurf's BUILDDIR leaked into libregnum: $(cat "${stub}/lrg-calls")"
 		else
 			pass "${name}"
 		fi
