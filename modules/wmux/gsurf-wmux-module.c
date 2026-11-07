@@ -49,7 +49,7 @@ G_DEFINE_FINAL_TYPE_WITH_CODE(GsurfWmuxModule, gsurf_wmux_module,
 static const gchar *const known_keys[] = {
 	"enabled", "prefix", "prefix_timeout", "repeat_time", "display_panes_time",
 	"bindings", "root_bindings", "repeatable", "split_ratio", "on_pane_kill",
-	"on_tab_close", "confirm_kill", "mouse", "remember_layout", "min_pane_pct", "gap",
+	"on_tab_close", "select_background", "confirm_kill", "mouse", "remember_layout", "min_pane_pct", "gap",
 	"border_width", "active_border_width", "border_color", "active_border_color",
 	"container_colors", "inactive_opacity", "active_brighten", "status",
 	"status_position", "status_bg", "status_fg", "status_current_fg",
@@ -233,6 +233,27 @@ gsurf_wmux_run(GsurfWmuxModule *self, const GsurfWmuxCommand *cmd, GError **erro
 		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
 			"wmux is not attached to a window");
 		return FALSE;
+	}
+	/* From the solo view, a command that works on panes or windows first
+	 * returns to the tmux window, so it acts on (and shows) the panes the
+	 * user knows.  break-pane turns the solo tab into a window of its own;
+	 * the prompts, the chooser, renaming and listing leave the view. */
+	if (self->solo_active) {
+		switch (cmd->id) {
+		case GSURF_WMUX_CMD_BREAK_PANE:
+		case GSURF_WMUX_CMD_RENAME_WINDOW:
+		case GSURF_WMUX_CMD_COMMAND_PROMPT:
+		case GSURF_WMUX_CMD_CONFIRM_BEFORE:
+		case GSURF_WMUX_CMD_SEND_PREFIX:
+		case GSURF_WMUX_CMD_CHOOSE_TREE:
+		case GSURF_WMUX_CMD_LIST_KEYS:
+			break;
+		default:
+			gsurf_wmux_leave_solo(self);
+			gsurf_wmux_show_active(self);
+			win = gsurf_wmux_current(self);
+			break;
+		}
 	}
 	active = gsurf_wmux_layout_get_active(win->layout);
 
@@ -1084,6 +1105,7 @@ reset_config(GsurfWmuxModule *self)
 	self->split_ratio = GSURF_WMUX_DEFAULT_SPLIT_RATIO;
 	self->keep_tab = FALSE;
 	self->keep_pane = FALSE;
+	self->select_active_pane = FALSE;
 	self->confirm_kill = TRUE;
 	self->mouse = TRUE;
 	self->remember_layout = TRUE;
@@ -1165,6 +1187,7 @@ gsurf_wmux_configure(GsurfModule *module, gpointer config_ptr)
 	read_int(m, "split_ratio", 1, 99, &self->split_ratio);
 	read_choice(m, "on_pane_kill", "close_tab", "keep_tab", &self->keep_tab);
 	read_choice(m, "on_tab_close", "close_pane", "keep_pane", &self->keep_pane);
+	read_choice(m, "select_background", "solo", "active_pane", &self->select_active_pane);
 	read_bool(m, "confirm_kill", &self->confirm_kill);
 	read_bool(m, "mouse", &self->mouse);
 	read_bool(m, "remember_layout", &self->remember_layout);

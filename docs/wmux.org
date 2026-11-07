@@ -12,7 +12,7 @@ wmux is tmux for the web, inside one gsurf window. It is a module (=modules/wmux
 | pane                 | a viewport showing one tab |
 | a program in a pane  | the tab (a web view) the pane shows |
 
-Every pane shows one tab of the browser window. The tabs that no pane shows are *background tabs*: they stay open, stay in the tab strip and the tree sidebar, and keep their pages; selecting one (a sidebar click, =Ctrl+Tab=, =gt=) shows it in the active pane, and the tab shown there before becomes a background tab. The tabs shown by the panes of another tmux window are background tabs of the screen too: selecting one switches to that tmux window. The *active pane* is the one with the keyboard focus; its tab is the window's active tab, so everything that acts on "the current tab" (the address bar, =o=, reload, find, hints, the core keybinds) acts on the active pane.
+Every pane shows one tab of the browser window. The tabs that no pane shows are *background tabs*: they stay open, stay in the tab strip and the tree sidebar, and keep their pages; selecting one (a sidebar click, =Ctrl+Tab=, =gt=) shows it on its own over the whole area, the *solo view*, and leaves the panes as they were (=select_background: active_pane= shows it in the active pane instead; see "Selecting a tab"). The tabs shown by the panes of another tmux window are background tabs of the screen too: selecting one switches to that tmux window. The *active pane* is the one with the keyboard focus; its tab is the window's active tab, so everything that acts on "the current tab" (the address bar, =o=, reload, find, hints, the core keybinds) acts on the active pane.
 
 A three-pane tmux window next to the tab tree (=C-b %= on the first tab, then =C-b "= on the new one):
 
@@ -82,7 +82,7 @@ What changes with wmux on:
 - =C-h/j/k/l= always move between panes. =C-l= no longer opens the address bar: use =o= (modal) or rebind (see the cookbook).
 - =o= (the open prompt) and the address bar load into the active pane.
 - A click in a pane makes it the active pane.
-- The sidebar and the strip still list every tab. Selecting a tab shown in a pane focuses that pane; selecting a background tab shows it in the active pane. Tabs shown in a pane are highlighted (=gsurf-tab-row-visible=), and the tab menu offers *Open in Split Right* and *Open in Split Below*.
+- The sidebar and the strip still list every tab. Selecting a tab shown in a pane focuses that pane; selecting a background tab shows it in the solo view (or, with =select_background: active_pane=, in the active pane). Tabs shown in a pane are highlighted (=gsurf-tab-row-visible=), and the tab menu offers *Open in Split Right* and *Open in Split Below*.
 - =Ctrl+t=, a link opened in a new tab and a popup open in the active pane (the tab there becomes a background tab). =C-b %= opens one in a new pane instead.
 
 * How panes, tabs and windows behave
@@ -97,7 +97,23 @@ When the window makes a tab active (the sidebar, =gt=, =Ctrl+Tab=, a new tab, a 
 
 - a pane of the current tmux window shows it: that pane becomes active;
 - a pane of another tmux window shows it: wmux switches to that window and that pane;
-- no pane shows it: the active pane shows it, and the tab shown there before becomes a background tab.
+- no pane shows it, and it is a tab just opened and selected at once (=Ctrl+t=, a link or popup opened in the foreground), or the active pane is empty: the active pane shows it, and the tab shown there before becomes a background tab;
+- no pane shows it otherwise (a sidebar click, =gt=, =Ctrl+Tab= onto a background tab): it is shown in the *solo view* (below).
+
+*** The solo view
+
+With =select_background: solo= (the default) a background tab you select is shown on its own, over the whole pane area, as if it had *detached* from wmux; the panes of the tmux window keep their tabs and their layout. There is one solo view: selecting another background tab replaces the tab it shows. The status line marks the current window with =+= instead of =*=, adds the solo tab as =[title]= after the window entries, and shows =solo= on the right.
+
+The panes come back when you:
+
+- select a tab a pane shows (the sidebar, =gt=, a click on its row): that pane becomes active;
+- select a tmux window (=C-b 0= ... =9=, =n=, =p=, =l=, a click on a window entry), the current one included;
+- run a wmux command that acts on the panes (=C-b o=, =C-b %=, =C-b x=, =C-b z=, a layout preset, ...). =split-window= from the solo view splits the active pane of the tmux window;
+- close the solo tab: the tmux window's active pane, and its tab, become active again.
+
+=C-b != (=break-pane=) in the solo view puts the solo tab in a new tmux window of its own, so a tab you looked at on its own can become part of the layout. =rename-window=, the command prompt and =choose-tree= keep the solo view.
+
+=select_background: active_pane= keeps the behaviour from before the solo view: a selected background tab is shown in the active pane, and the tab shown there before becomes a background tab.
 
 ** Closing
 
@@ -116,7 +132,7 @@ When the window makes a tab active (the sidebar, =gt=, =Ctrl+Tab=, a new tab, a 
 
 ** The status line
 
-The status line sits under the panes (=status_position: top= puts it above): =[gsurf]=, one entry per tmux window (=0:GitHub*=, =1:docs-=, =2:mail=), and the active pane's number and the pane count on the right (=2/3=, plus =Z= while zoomed), preceded by the vim mode the =modal= module publishes (=-- NORMAL --=, =-- INSERT --=, =-- FOLLOW --=; =mode_indicator=, =mode_hide_normal= and the =mode_*_color= keys below; see "Mode indicator" in =keybindings.org=). =*= marks the current window and =-= the last one. A window is named after the page title of its active pane (cut to =window_name_max= characters) until it is renamed (=C-b ,=, =rename-window=, =new-window -n=); renaming it to nothing goes back to automatic naming. Clicking an entry selects that window.
+The status line sits under the panes (=status_position: top= puts it above): =[gsurf]=, one entry per tmux window (=0:GitHub*=, =1:docs-=, =2:mail=), and the active pane's number and the pane count on the right (=2/3=, plus =Z= while zoomed), preceded by the vim mode the =modal= module publishes (=-- NORMAL --=, =-- INSERT --=, =-- FOLLOW --=; =mode_indicator=, =mode_hide_normal= and the =mode_*_color= keys below; see "Mode indicator" in =keybindings.org=). =*= marks the current window (=+= while the solo view is shown, followed by the solo tab as =[title]= and =solo= on the right) and =-= the last one. A window is named after the page title of its active pane (cut to =window_name_max= characters) until it is renamed (=C-b ,=, =rename-window=, =new-window -n=); renaming it to nothing goes back to automatic naming. Clicking an entry selects that window.
 
 The status line also hosts the prompts: =C-b := (any command), =C-b ,= (rename, starting with the current name), and the =y=/=n= question of =confirm-before= (=C-b x=, =C-b &=). Enter runs, Escape cancels; for a question =y= runs and =n=, Escape or Enter cancel. A command that does not parse, or a refused split, shows its error there for a moment (it is also logged).
 
@@ -795,6 +811,7 @@ Everything lives under =modules.wmux= and is optional. =configure()= starts from
 | =split_ratio=         | =50=        | 1-99 %          | The new pane's share of the split pane (=split-window -p= overrides it). |
 | =on_pane_kill=        | =close_tab= | =close_tab=, =keep_tab= | What kill-pane and kill-window do with the tabs of the panes. |
 | =on_tab_close=        | =close_pane= | =close_pane=, =keep_pane= | What happens to a pane whose tab closes. |
+| =select_background=   | =solo=       | =solo=, =active_pane=     | Where a selected background tab is shown: the solo view, or the active pane (see "Selecting a tab"). |
 | =confirm_kill=        | =true=      | boolean         | =confirm-before= asks before =kill-pane= and =kill-window=; =false= runs them directly. |
 | =mouse=               | =true=      | boolean         | Drag the gaps between panes to resize, and drop tabs dragged from the =tabs= sidebar onto panes (clicking a pane always focuses it). |
 | =remember_layout=     | =true=      | boolean         | Let the session module save the tmux windows and layouts. |

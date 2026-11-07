@@ -31,6 +31,7 @@
 #include "gsurf-wmux-private.h"
 
 static void on_view_title_changed(GsurfView *view, const gchar *title, gpointer user_data);
+static gboolean clear_fresh(gpointer user_data);
 
 /* ------------------------------------------------------------------ */
 /* Windows and lookups                                                 */
@@ -63,7 +64,42 @@ gsurf_wmux_current(GsurfWmuxModule *self)
 {
 	if (self->wins == NULL || self->current >= self->wins->len)
 		return NULL;
+	if (self->solo_active && self->solo != NULL)
+		return self->solo;
 	return g_ptr_array_index(self->wins, self->current);
+}
+
+guint64
+gsurf_wmux_solo_id(GsurfWmuxModule *self)
+{
+	if (!self->solo_active || self->solo == NULL)
+		return 0;
+	return gsurf_wmux_layout_get_payload(self->solo->layout,
+		gsurf_wmux_layout_get_active(self->solo->layout));
+}
+
+gboolean
+gsurf_wmux_leave_solo(GsurfWmuxModule *self)
+{
+	if (!self->solo_active)
+		return FALSE;
+	self->solo_active = FALSE;
+	if (self->solo != NULL)
+		gsurf_wmux_layout_set_payload(self->solo->layout,
+			gsurf_wmux_layout_get_active(self->solo->layout), 0);
+	return TRUE;
+}
+
+/* Show view @id solo (see the module struct): the tmux windows stay as
+ * they are; the grid shows only @id until the solo view is left. */
+static void
+enter_solo(GsurfWmuxModule *self, guint64 id)
+{
+	if (self->solo == NULL)
+		self->solo = gsurf_wmux_win_new(self, NULL);
+	gsurf_wmux_layout_set_payload(self->solo->layout,
+		gsurf_wmux_layout_get_active(self->solo->layout), id);
+	self->solo_active = TRUE;
 }
 
 /* The view with @id while it belongs to the tracked window, else NULL. */
@@ -118,6 +154,9 @@ gsurf_wmux_view_visible(GsurfWmuxModule *self, GsurfView *view)
 	guint p;
 	guint zoomed;
 
+	/* While a solo view is shown, it is all that is on screen. */
+	if (self->solo_active)
+		return view != NULL && gsurf_view_get_id(view) == gsurf_wmux_solo_id(self);
 	if (view == NULL || !gsurf_wmux_find_view(self, gsurf_view_get_id(view), &w, &p) ||
 	    w != self->current)
 		return FALSE;
@@ -310,7 +349,11 @@ gsurf_wmux_show_active(GsurfWmuxModule *self)
 void
 gsurf_wmux_select_pane(GsurfWmuxModule *self, guint pane)
 {
-	GsurfWmuxWin *win = gsurf_wmux_current(self);
+	GsurfWmuxWin *win;
+
+	/* @pane is a pane of the tmux window, never of the solo view. */
+	gsurf_wmux_leave_solo(self);
+	win = gsurf_wmux_current(self);
 
 	if (win == NULL || !gsurf_wmux_layout_set_active(win->layout, pane))
 		return;
@@ -320,10 +363,18 @@ gsurf_wmux_select_pane(GsurfWmuxModule *self, guint pane)
 void
 gsurf_wmux_select_window(GsurfWmuxModule *self, guint index)
 {
-	if (self->wins == NULL || index >= self->wins->len || index == self->current)
+	gboolean left;
+
+	if (self->wins == NULL || index >= self->wins->len)
 		return;
-	self->last_win = (gint)self->current;
-	self->current = index;
+	/* Selecting the current window from the solo view goes back to it. */
+	left = gsurf_wmux_leave_solo(self);
+	if (index == self->current && !left)
+		return;
+	if (index != self->current) {
+		self->last_win = (gint)self->current;
+		self->current = index;
+	}
 	gsurf_wmux_show_active(self);
 }
 
@@ -349,17 +400,24 @@ gsurf_wmux_split(GsurfWmuxModule *self, guint pane, GsurfWmuxSplit split, gboole
                  gboolean keep_active, guint pct, gboolean duplicate, const gchar *uri,
                  GsurfView *existing, GError **error)
 {
-	GsurfWmuxWin *win = gsurf_wmux_current(self);
+	GsurfWmuxWin *win;
+	gboolean from_solo = gsurf_wmux_leave_solo(self);
 	g_autoptr(GError) local = NULL;
 	g_autofree gchar *load = NULL;
 	g_autoptr(GsurfView) view = NULL;
 	guint new_pane;
 
+	win = gsurf_wmux_current(self);
 	if (win == NULL || self->window == NULL) {
 		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
 			"wmux is not attached to a window");
 		return FALSE;
 	}
+	/* Asked from the solo view (its one pane is not a pane of the tmux
+	 * window): split the tmux window's active pane, which brings a solo
+	 * tab given as @existing into the layout. */
+	if (from_solo && !gsurf_wmux_layout_has_pane(win->layout, pane))
+		pane = gsurf_wmux_layout_get_active(win->layout);
 
 	/* 1. A view shown elsewhere leaves its old pane first. */
 	if (existing != NULL)
@@ -410,6 +468,7 @@ gsurf_wmux_kill_window(GsurfWmuxModule *self, guint index)
 	GsurfWmuxWin *win;
 	guint i;
 
+	gsurf_wmux_leave_solo(self);
 	if (self->wins == NULL || index >= self->wins->len || self->window == NULL)
 		return;
 
@@ -458,6 +517,7 @@ gsurf_wmux_kill_pane(GsurfWmuxModule *self, guint index, guint pane)
 	GsurfWmuxWin *win;
 	GsurfView *view;
 
+	gsurf_wmux_leave_solo(self);
 	if (self->wins == NULL || index >= self->wins->len || self->window == NULL)
 		return;
 	win = g_ptr_array_index(self->wins, index);
@@ -500,6 +560,7 @@ gsurf_wmux_new_window(GsurfWmuxModule *self, const gchar *name, const gchar *uri
 	g_autofree gchar *load = NULL;
 	g_autoptr(GsurfView) view = NULL;
 
+	gsurf_wmux_leave_solo(self);
 	if (self->wins == NULL || self->window == NULL)
 		return;
 	win = gsurf_wmux_win_new(self, name);
@@ -527,6 +588,23 @@ gsurf_wmux_break_pane(GsurfWmuxModule *self, GError **error)
 	GsurfWmuxWin *fresh;
 	guint pane;
 	guint64 id;
+
+	/* From the solo view, break-pane makes the solo tab a tmux window of
+	 * its own (it joins the layouts). */
+	if (self->solo_active) {
+		id = gsurf_wmux_solo_id(self);
+		gsurf_wmux_leave_solo(self);
+		if (id == 0)
+			return TRUE;
+		fresh = gsurf_wmux_win_new(self, NULL);
+		gsurf_wmux_layout_set_payload(fresh->layout,
+			gsurf_wmux_layout_get_active(fresh->layout), id);
+		g_ptr_array_add(self->wins, fresh);
+		self->last_win = (gint)self->current;
+		self->current = self->wins->len - 1;
+		gsurf_wmux_show_active(self);
+		return TRUE;
+	}
 
 	if (win == NULL) {
 		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
@@ -578,6 +656,10 @@ gsurf_wmux_show_view_at(GsurfWmuxModule *self, GsurfView *view, GsurfView *targe
 {
 	GsurfWmuxWin *win = gsurf_wmux_current(self);
 	guint64 id;
+
+	/* No panes are on screen while a solo view is: nothing to drop on. */
+	if (self->solo_active)
+		return FALSE;
 	guint64 target_id;
 	guint tw;
 	guint tp;
@@ -735,6 +817,10 @@ gsurf_wmux_session_clear(GsurfWmuxModule *self)
 			unwatch_view(self, g_ptr_array_index(views, i));
 	}
 	g_clear_pointer(&self->wins, g_ptr_array_unref);
+	g_clear_pointer(&self->solo, gsurf_wmux_win_free);
+	self->solo_active = FALSE;
+	self->fresh_view = 0;
+	g_clear_handle_id(&self->fresh_id, g_source_remove);
 	self->current = 0;
 	self->last_win = -1;
 	self->in_activate = 0;
@@ -803,6 +889,14 @@ wmux_add_view(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view)
 	if (!self->attached || window != self->window)
 		return;
 	watch_view(self, view);
+	/* A tab opened now and activated in this main loop turn (Ctrl+t, a
+	 * link opened in a new tab) keeps the active-pane rule; a background
+	 * tab selected later goes solo. */
+	if (!gsurf_wmux_find_view(self, gsurf_view_get_id(view), NULL, NULL)) {
+		self->fresh_view = gsurf_view_get_id(view);
+		if (self->fresh_id == 0)
+			self->fresh_id = g_idle_add(clear_fresh, self);
+	}
 	gsurf_wmux_ui_sync(self);
 }
 
@@ -830,7 +924,24 @@ wmux_remove_view(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view
 	 * until this returns). */
 	gsurf_wmux_ui_drop_frame(self, id);
 	self->removing = id;
+	if (self->fresh_view == id)
+		self->fresh_view = 0;
 	if (!gsurf_wmux_find_view(self, id, &w, &p)) {
+		/* The solo tab closes: back to the tmux window, whose active
+		 * pane's view takes over (not the window's list neighbour). */
+		if (self->solo_active && gsurf_wmux_solo_id(self) == id) {
+			was_active = (gsurf_window_get_active_view(window) == view);
+			gsurf_wmux_leave_solo(self);
+			gsurf_wmux_ui_sync(self);
+			win = gsurf_wmux_current(self);
+			next = win != NULL
+				? gsurf_wmux_pane_view(self, win, gsurf_wmux_layout_get_active(win->layout))
+				: NULL;
+			if (was_active && next != NULL && next != view)
+				gsurf_window_set_active_view(window, next);
+			self->removing = 0;
+			return;
+		}
 		gsurf_wmux_ui_sync(self);
 		self->removing = 0;
 		return;
@@ -866,11 +977,40 @@ wmux_remove_view(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view
 	self->removing = 0;
 }
 
+/* Whether the tmux window's active pane shows a tab.  An empty one (wmux
+ * just attached, or keep_pane left one) is filled by the next selected
+ * tab instead of going solo. */
+static gboolean
+active_pane_filled(GsurfWmuxModule *self)
+{
+	GsurfWmuxWin *win;
+
+	if (self->wins == NULL || self->current >= self->wins->len)
+		return FALSE;
+	win = g_ptr_array_index(self->wins, self->current);
+	return gsurf_wmux_pane_view(self, win, gsurf_wmux_layout_get_active(win->layout)) != NULL;
+}
+
+/* The fresh-tab window closes after the main loop turn that added it. */
+static gboolean
+clear_fresh(gpointer user_data)
+{
+	GsurfWmuxModule *self = GSURF_WMUX_MODULE(user_data);
+
+	self->fresh_view = 0;
+	self->fresh_id = 0;
+	return G_SOURCE_REMOVE;
+}
+
 /* The window made @view active (a tab was selected, a new tab, a popup,
  * focus followed a click): a pane of the current window that shows it
- * becomes active; a pane of another window switches to that window;
- * otherwise the active pane shows it and its old view becomes a
- * background tab. */
+ * becomes active; a pane of another window switches to that window.
+ * A tab no pane shows:
+ *   - select_background: solo (the default): shown alone, full-window,
+ *     outside every tmux window, which stay as they were;
+ *   - select_background: active_pane, and a tab just opened (Ctrl+t, a
+ *     link opened in a new tab) in either mode: the active pane shows it
+ *     and its old view becomes a background tab. */
 static void
 wmux_activate_view(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *view)
 {
@@ -888,17 +1028,27 @@ wmux_activate_view(GsurfWindowLayout *layout, GsurfWindow *window, GsurfView *vi
 		return;
 
 	self->in_activate++;
-	if (gsurf_wmux_find_view(self, gsurf_view_get_id(view), &w, &p)) {
-		if (w != self->current) {
-			self->last_win = (gint)self->current;
-			self->current = w;
+	{
+		guint64 id = gsurf_view_get_id(view);
+		gboolean fresh = (id == self->fresh_view);
+
+		self->fresh_view = 0;
+		if (gsurf_wmux_find_view(self, id, &w, &p)) {
+			gsurf_wmux_leave_solo(self);
+			if (w != self->current) {
+				self->last_win = (gint)self->current;
+				self->current = w;
+			}
+			win = gsurf_wmux_current(self);
+			gsurf_wmux_layout_set_active(win->layout, p);
+		} else if (!self->select_active_pane && !fresh && active_pane_filled(self)) {
+			enter_solo(self, id);
+		} else {
+			gsurf_wmux_leave_solo(self);
+			win = gsurf_wmux_current(self);
+			gsurf_wmux_layout_set_payload(win->layout,
+				gsurf_wmux_layout_get_active(win->layout), id);
 		}
-		win = gsurf_wmux_current(self);
-		gsurf_wmux_layout_set_active(win->layout, p);
-	} else {
-		win = gsurf_wmux_current(self);
-		gsurf_wmux_layout_set_payload(win->layout, gsurf_wmux_layout_get_active(win->layout),
-			gsurf_view_get_id(view));
 	}
 	gsurf_wmux_ui_sync(self);
 	gsurf_view_focus(view);
@@ -1040,6 +1190,8 @@ wmux_restore(GsurfWindowLayout *layout, GsurfWindow *window, const gchar *text,
 	self->current = (guint)CLAMP(state->current, 0, (gint)self->wins->len - 1);
 	self->last_win = state->last >= 0 && state->last < (gint)self->wins->len &&
 		state->last != (gint)self->current ? state->last : -1;
+	/* The restored layout wins over a tab the restore activated first. */
+	gsurf_wmux_leave_solo(self);
 	gsurf_wmux_show_active(self);
 	return TRUE;
 }

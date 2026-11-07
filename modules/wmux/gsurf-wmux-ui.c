@@ -449,7 +449,7 @@ gsurf_wmux_ui_set_drag(GsurfWmuxModule *self, GsurfView *view)
 			g_object_set_data_full(G_OBJECT(f->zone), CTR_CLASS_DATA, g_strdup(want), g_free);
 		}
 		frame_show_zone(self, f, -1);
-		gtk_widget_set_visible(f->drop, self->drag_view != 0 &&
+		gtk_widget_set_visible(f->drop, self->drag_view != 0 && !self->solo_active &&
 			gsurf_wmux_grid_get_pane(f->frame) != GSURF_WMUX_GRID_PARKED);
 	}
 }
@@ -537,7 +537,7 @@ frame_new(GsurfWmuxModule *self, GsurfView *view)
 #endif
 	gtk_widget_set_visible(f->number, FALSE);
 	gtk_widget_set_visible(f->zone, FALSE);
-	gtk_widget_set_visible(f->drop, self->drag_view != 0);
+	gtk_widget_set_visible(f->drop, self->drag_view != 0 && !self->solo_active);
 	return f;
 }
 
@@ -624,7 +624,8 @@ visible_signature(GsurfWmuxModule *self)
 	}
 	/* The arrangement too (layouts, active and zoomed panes, names, the
 	 * current window): the session module saves on every change. */
-	g_string_append_printf(sig, "|%u|%d", self->current, self->last_win);
+	g_string_append_printf(sig, "|%u|%d|%" G_GUINT64_FORMAT, self->current, self->last_win,
+		gsurf_wmux_solo_id(self));
 	for (i = 0; self->wins != NULL && i < self->wins->len; i++) {
 		GsurfWmuxWin *win = g_ptr_array_index(self->wins, i);
 		g_autofree gchar *layout = gsurf_wmux_layout_serialize(win->layout, TRUE);
@@ -723,7 +724,7 @@ gsurf_wmux_ui_sync(GsurfWmuxModule *self)
 		}
 		gtk_widget_set_visible(f->number, self->displaying);
 		/* A pane that appears mid-drag (a drop split one) gets a target. */
-		gtk_widget_set_visible(f->drop, self->drag_view != 0);
+		gtk_widget_set_visible(f->drop, self->drag_view != 0 && !self->solo_active);
 	}
 	gsurf_wmux_grid_relayout(self->grid);
 
@@ -760,7 +761,9 @@ on_window_button_clicked(GtkButton *button, gpointer user_data)
 		gsurf_wmux_select_window(GSURF_WMUX_MODULE(user_data), tag - 1);
 }
 
-/* "0:name*" for the current window, "1:name-" for the last one. */
+/* "0:name*" for the current window, "1:name-" for the last one.  While a
+ * solo view is shown no window is on screen: the current one is marked
+ * "+" (where the panes come back). */
 static gchar *
 window_entry_text(GsurfWmuxModule *self, guint index)
 {
@@ -768,14 +771,32 @@ window_entry_text(GsurfWmuxModule *self, guint index)
 	const gchar *mark = "";
 
 	if (index == self->current)
-		mark = "*";
+		mark = self->solo_active ? "+" : "*";
 	else if ((gint)index == self->last_win)
 		mark = "-";
 	return g_strdup_printf("%u:%s%s", index, name, mark);
 }
 
+/* The solo tab as the status line shows it: "[title]" (else its address),
+ * cut to window_name_max. */
+static gchar *
+solo_entry_text(GsurfWmuxModule *self)
+{
+	GsurfView *view = gsurf_view_lookup(gsurf_wmux_solo_id(self));
+	const gchar *name = view != NULL ? gsurf_view_get_title(view) : NULL;
+	glong max = MAX(self->window_name_max, 1);
+	g_autofree gchar *cut = NULL;
+
+	if ((name == NULL || *name == '\0') && view != NULL)
+		name = gsurf_view_get_uri(view);
+	if (name == NULL || *name == '\0' || !g_utf8_validate(name, -1, NULL))
+		name = "-";
+	cut = g_utf8_strlen(name, -1) <= max ? g_strdup(name) : g_utf8_substring(name, 0, max);
+	return g_strdup_printf("[%s]", cut);
+}
+
 /* "2/3", plus " Z" while zoomed: the active pane's number (from 1) and
- * the number of panes. */
+ * the number of panes; "solo" while a solo view is shown. */
 static gchar *
 right_text(GsurfWmuxModule *self)
 {
@@ -784,6 +805,8 @@ right_text(GsurfWmuxModule *self)
 
 	if (win == NULL)
 		return g_strdup("");
+	if (self->solo_active)
+		return g_strdup("solo");
 	index = gsurf_wmux_layout_get_pane_index(win->layout, gsurf_wmux_layout_get_active(win->layout));
 	return g_strdup_printf("%d/%u%s", index + 1, gsurf_wmux_layout_get_n_panes(win->layout),
 		gsurf_wmux_layout_get_zoomed(win->layout) != GSURF_WMUX_PANE_NONE ? " Z" : "");
@@ -843,6 +866,18 @@ gsurf_wmux_ui_update_status(GsurfWmuxModule *self)
 		box_append(self->status_windows, button, FALSE);
 		gsurf_chrome_widget_show_all(button);
 	}
+	/* The solo tab, after the windows (clicking a window goes back).  A
+	 * flat button like the window entries, so it lines up with them; it
+	 * has no action of its own. */
+	if (self->solo_active) {
+		g_autofree gchar *text = solo_entry_text(self);
+		GtkWidget *button = gsurf_chrome_button_new_flat(text);
+
+		gsurf_chrome_widget_add_class(button, GSURF_WMUX_STATUS_WINDOW_CLASS);
+		gsurf_chrome_widget_add_class(button, GSURF_WMUX_STATUS_CURRENT_CLASS);
+		box_append(self->status_windows, button, FALSE);
+		gsurf_chrome_widget_show_all(button);
+	}
 	right = right_text(self);
 	gtk_label_set_text(GTK_LABEL(self->status_right), right);
 }
@@ -858,6 +893,11 @@ gsurf_wmux_ui_status_text(GsurfWmuxModule *self)
 		return g_string_free(out, FALSE);
 	for (i = 0; i < self->wins->len; i++) {
 		g_autofree gchar *text = window_entry_text(self, i);
+
+		g_string_append_printf(out, " %s", text);
+	}
+	if (self->solo_active) {
+		g_autofree gchar *text = solo_entry_text(self);
 
 		g_string_append_printf(out, " %s", text);
 	}

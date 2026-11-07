@@ -9,7 +9,7 @@
 | pane | a viewport showing one tab |
 | program in a pane | the tab (web view) |
 
-Tabs no pane shows are *background tabs*: still open, still in the strip and sidebar. Selecting one (sidebar click, `Ctrl+Tab`, `gt`) shows it in the active pane. Selecting a tab that another tmux window shows switches to that window.
+Tabs no pane shows are *background tabs*: still open, still in the strip and sidebar. Selecting one (sidebar click, `Ctrl+Tab`, `gt`) shows it alone in the *solo view*, panes untouched; the status line shows `[title]` and `solo`. Selecting a pane's tab, a tmux window or a pane command brings the panes back; `C-b !` moves the solo tab into a new window. `Ctrl+t` and foreground links still go into the active pane. `select_background: active_pane` restores the old behaviour (shown in the active pane). Selecting a tab that another tmux window shows switches to that window.
 
 ## Enable
 
@@ -71,7 +71,7 @@ Bindings take tmux notation or gsurf notation; both normalise to tmux's canonica
 
 ## Configuration (all under `modules.wmux`)
 
-`prefix` (`C-b`), `prefix_timeout` (0 = wait forever; 0-60000 ms), `repeat_time` (500; 0-10000), `display_panes_time` (1000; 100-60000), `bindings` / `root_bindings` (mapping `key: command`, merged over the defaults; `""` or `null` unbinds), `repeatable` (more repeatable prefix keys), `split_ratio` (50; 1-99), `on_pane_kill` (`close_tab` | `keep_tab`), `on_tab_close` (`close_pane` | `keep_pane`), `confirm_kill` (true), `mouse` (true: drag gaps to resize, drop sidebar tabs on panes), `remember_layout` (true: the session module saves layouts), `min_pane_pct` (10; 0-50), `gap` (2 px), `border_width` (1), `active_border_width` (2), `border_color` (`#45475a`), `active_border_color` (`#89b4fa`), `container_colors` (true), `inactive_opacity` (0.55), `active_brighten` (0.25), `status` (true), `status_position` (`bottom` | `top`), `status_bg` (`#181825`), `status_fg` (`#cdd6f4`), `status_current_fg` (`#89b4fa`), `window_name_max` (20; 1-200), `mode_indicator` (true), `mode_hide_normal` (false), `mode_normal_color`, `mode_insert_color`, `mode_follow_color`.
+`prefix` (`C-b`), `prefix_timeout` (0 = wait forever; 0-60000 ms), `repeat_time` (500; 0-10000), `display_panes_time` (1000; 100-60000), `bindings` / `root_bindings` (mapping `key: command`, merged over the defaults; `""` or `null` unbinds), `repeatable` (more repeatable prefix keys), `split_ratio` (50; 1-99), `on_pane_kill` (`close_tab` | `keep_tab`), `on_tab_close` (`close_pane` | `keep_pane`), `select_background` (`solo` | `active_pane`), `confirm_kill` (true), `mouse` (true: drag gaps to resize, drop sidebar tabs on panes), `remember_layout` (true: the session module saves layouts), `min_pane_pct` (10; 0-50), `gap` (2 px), `border_width` (1), `active_border_width` (2), `border_color` (`#45475a`), `active_border_color` (`#89b4fa`), `container_colors` (true), `inactive_opacity` (0.55), `active_brighten` (0.25), `status` (true), `status_position` (`bottom` | `top`), `status_bg` (`#181825`), `status_fg` (`#cdd6f4`), `status_current_fg` (`#89b4fa`), `window_name_max` (20; 1-200), `mode_indicator` (true), `mode_hide_normal` (false), `mode_normal_color`, `mode_insert_color`, `mode_follow_color`.
 
 Every configure starts from the defaults; a bad value warns and keeps the default; a binding that does not parse warns and is skipped. Booleans accept `yes`/`no`, `on`/`off`.
 
