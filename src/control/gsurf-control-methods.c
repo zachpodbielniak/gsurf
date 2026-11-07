@@ -1062,6 +1062,16 @@ modal_active(void)
 	return modal != NULL && gsurf_module_is_active(modal);
 }
 
+/* Whether the active window is typing: a focused field in its active
+ * view's page, or a focused chrome entry (why NORMAL reads INSERT). */
+static gboolean
+window_typing(GsurfModuleManager *mgr)
+{
+	GsurfWindow *window = gsurf_module_manager_get_active_window(mgr);
+
+	return window != NULL && gsurf_window_get_typing(window);
+}
+
 static JsonNode *
 mode_node(void)
 {
@@ -1078,6 +1088,10 @@ mode_node(void)
 	json_builder_add_string_value(b, gsurf_mode_policy_get_label(mode));
 	json_builder_set_member_name(b, "passthrough");
 	json_builder_add_boolean_value(b, gsurf_module_manager_get_input_passthrough(mgr));
+	/* Why NORMAL reads INSERT: the active window is typing into a page
+	 * field or a chrome entry. */
+	json_builder_set_member_name(b, "typing");
+	json_builder_add_boolean_value(b, window_typing(mgr));
 	json_builder_set_member_name(b, "modal_active");
 	json_builder_add_boolean_value(b, modal_active());
 	json_builder_end_object(b);

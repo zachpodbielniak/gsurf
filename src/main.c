@@ -370,16 +370,15 @@ on_key_press(GsurfWindow *window, guint keyval, guint keycode, guint state,
 	GsurfAction action;
 	gboolean typing;
 
-	/* While the user is typing — a DOM editable element is focused, or the
-	 * modal module is in INSERT passthrough — bare keys must reach the page
-	 * and not be consumed by any module (e.g. find-bar's n/N) or core
-	 * keybind. Modified keys and Escape still pass through (shortcuts; exit
-	 * insert / blur). A key grab (a module waiting for the key after its
-	 * prefix, e.g. wmux's C-b) lets the modules see the key first: that key
-	 * is a command. */
-	typing = (gsurf_module_manager_get_input_passthrough(mgr) ||
-	          (view != NULL && gsurf_view_get_editing(view))) &&
-	         !has_mod && !is_escape;
+	/* While the user is typing — a DOM editable element is focused in
+	 * NORMAL, or the modal module is in INSERT passthrough — bare keys must
+	 * reach the page and not be consumed by any module (e.g. find-bar's
+	 * n/N) or core keybind. A mode that owns the keys (FOLLOW: the hint
+	 * labels) keeps them even over a focused field. Modified keys and
+	 * Escape still pass through (shortcuts; exit insert / blur). A key grab
+	 * (a module waiting for the key after its prefix, e.g. wmux's C-b) lets
+	 * the modules see the key first: that key is a command. */
+	typing = gsurf_module_manager_is_typing(mgr, view) && !has_mod && !is_escape;
 	if (typing && !gsurf_window_get_key_grab(window))
 		return FALSE;
 

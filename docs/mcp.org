@@ -246,13 +246,15 @@ error: view 7 has no children to collapse
 | =run_action= | =action=, =view?= | ={"action": <name>, "performed": true}= |
 | =list_actions= | — | array of ={name, allowed}= |
 
-The mode object: =mode= (=normal=, =insert=, =follow=, =find=, =passthrough=; the nick of =GsurfModePolicy=), =label= (=NORMAL=, ...), =passthrough= (bare keys go to the page) and =modal_active= (the =modal= module owns the modes; without it the mode stays =normal=).
+The mode object: =mode= (=normal=, =insert=, =follow=, =find=, =passthrough=; the nick of =GsurfModePolicy=; the mode in effect, so =insert= while you type into a page field or the address bar, see "Modal / vim navigation" in =keybindings.org=), =label= (=NORMAL=, ...), =passthrough= (=modal='s explicit INSERT: every bare key goes to the page), =typing= (since 0.5.9: a page field or a chrome entry has the keys, which is why NORMAL reads INSERT) and =modal_active= (the =modal= module owns the modes; without it only =typing= turns =normal= into =insert=).
 
 #+begin_src json
 // set_mode {"mode": "insert"}
-{"mode":"insert","label":"INSERT","passthrough":true,"modal_active":true}
+{"mode":"insert","label":"INSERT","passthrough":true,"typing":false,"modal_active":true}
 // follow_hints {}
-{"mode":"follow","label":"FOLLOW","passthrough":false,"modal_active":true}
+{"mode":"follow","label":"FOLLOW","passthrough":false,"typing":false,"modal_active":true}
+// get_mode {} while typing into a search box (modal itself in NORMAL)
+{"mode":"insert","label":"INSERT","passthrough":false,"typing":true,"modal_active":true}
 #+end_src
 
 =set_mode= performs =enter-normal-mode= / =enter-insert-mode= and checks that the mode changed. =follow_hints= performs =follow-hints= (or =follow-hints-new-view=): the page shows link hints and waits for the user's keys; =set_mode normal= cancels them.

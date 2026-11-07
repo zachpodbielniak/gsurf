@@ -201,6 +201,48 @@ void        gsurf_window_set_key_grab(GsurfWindow *self, gboolean grab);
  */
 gboolean    gsurf_window_get_key_grab(GsurfWindow *self);
 
+/**
+ * gsurf_window_set_entry_focus:
+ * @self: a #GsurfWindow
+ * @focused: whether a chrome text entry has keyboard focus
+ *
+ * Records whether a text entry of the window's own chrome (the address
+ * bar, the find box, a prompt, the LRG URL editor) holds keyboard focus,
+ * so bare keys type into it. The backends call it whenever the focus
+ * moves; it feeds #GsurfWindow:typing. Not normally called otherwise.
+ *
+ * Since: 0.5.9
+ */
+void        gsurf_window_set_entry_focus(GsurfWindow *self, gboolean focused);
+
+/**
+ * gsurf_window_get_entry_focus:
+ * @self: a #GsurfWindow
+ *
+ * Returns: whether a chrome text entry has keyboard focus
+ *   (#GsurfWindow:entry-focus)
+ *
+ * Since: 0.5.9
+ */
+gboolean    gsurf_window_get_entry_focus(GsurfWindow *self);
+
+/**
+ * gsurf_window_get_typing:
+ * @self: a #GsurfWindow
+ *
+ * Whether bare keys pressed in this window type text: a chrome text
+ * entry has keyboard focus (gsurf_window_get_entry_focus()), or the
+ * active view has a focused page field (gsurf_view_get_editing()). It
+ * follows the active view as it changes. The published input mode
+ * (gsurf_module_manager_get_mode()) reads INSERT while it is set and
+ * the mode is otherwise NORMAL.
+ *
+ * Returns: the #GsurfWindow:typing state
+ *
+ * Since: 0.5.9
+ */
+gboolean    gsurf_window_get_typing(GsurfWindow *self);
+
 /* --- Native operations --- */
 void        gsurf_window_present(GsurfWindow *self);
 void        gsurf_window_set_title(GsurfWindow *self, const gchar *title);

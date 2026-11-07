@@ -22,7 +22,12 @@
  * anything inside role=textbox/searchbox/combobox. Reports on focusin,
  * on focusout (once the focus has settled), at start (top frame always,
  * resetting the state for a new page; a subframe only when it starts
- * with a focused field) and when a frame goes away while focused.
+ * with a focused field), when a frame goes away while focused, and when
+ * a page comes back from the back/forward cache (no new start then).
+ * While a field has the focus, a MutationObserver on its document (and
+ * its shadow root) notices the field being removed or replaced, which
+ * moves the focus without any focusout (single-page apps re-rendering a
+ * search box, a closing dialog): the report then says the focus is gone.
  */
 const gchar gsurf_webkit_focus_tracker_js[] =
 	"(function(){if(window.__gsurfFT)return;window.__gsurfFT=1;"
@@ -37,11 +42,19 @@ const gchar gsurf_webkit_focus_tracker_js[] =
 	"try{if(e.closest('[role=textbox],[role=searchbox],[role=combobox]'))return true;}catch(x){}"
 	"return false;}"
 	"function post(v){try{window.webkit.messageHandlers.gsurfFocus.postMessage({f:id,t:top,e:v});}catch(x){}}"
-	"function snd(){var a=deep();if(a&&(a.tagName==='IFRAME'||a.tagName==='FRAME'))return;post(ed(a));}"
+	"var cur=null,mo=null;"
+	"function watch(e){if(mo){mo.disconnect();mo=null;}cur=e;"
+	"if(!e||typeof MutationObserver!=='function')return;"
+	"mo=new MutationObserver(function(){if(cur&&(!cur.isConnected||deep()!==cur))snd();});"
+	"var o={childList:true,subtree:true};mo.observe(document,o);"
+	"var r=e.getRootNode?e.getRootNode():null;if(r&&r!==document&&r.nodeType===11)mo.observe(r,o);}"
+	"function snd(){var a=deep();if(a&&(a.tagName==='IFRAME'||a.tagName==='FRAME')){watch(null);return;}"
+	"var v=ed(a);watch(v?a:null);post(v);}"
 	"document.addEventListener('focusin',snd,true);"
 	"document.addEventListener('focusout',function(){setTimeout(snd,0);},true);"
 	"window.addEventListener('pagehide',function(){if(!top)post(false);},true);"
-	"if(top)snd();else if(ed(deep()))post(true);})()";
+	"window.addEventListener('pageshow',function(ev){if(ev.persisted)snd();},true);"
+	"if(top)snd();else{var a0=deep();if(ed(a0)){watch(a0);post(true);}}})()";
 
 #define EDITING_FRAME_KEY "gsurf-editing-frame"
 

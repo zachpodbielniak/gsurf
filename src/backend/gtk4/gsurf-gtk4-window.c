@@ -71,6 +71,21 @@ on_key_pressed(GtkEventControllerKey *ctrl, guint keyval, guint keycode,
 	return gsurf_window_emit_key_press(GSURF_WINDOW(self), keyval, keycode, mods);
 }
 
+/* The toplevel's focus widget moved: a chrome text entry (address bar,
+ * find box, prompt; GTK4 focuses the GtkText inside a GtkEntry) takes
+ * bare keys as text, so the window is typing (the indicator reads
+ * INSERT). */
+static void
+on_focus_widget(GObject *toplevel, GParamSpec *pspec, gpointer user_data)
+{
+	GsurfGtk4Window *self = user_data;
+	GtkWidget *focus = gtk_root_get_focus(GTK_ROOT(toplevel));
+
+	(void)pspec;
+	gsurf_window_set_entry_focus(GSURF_WINDOW(self), focus != NULL &&
+		(GTK_IS_EDITABLE(focus) || GTK_IS_TEXT_VIEW(focus)));
+}
+
 static gboolean
 on_close_request(GtkWindow *window, gpointer user_data)
 {
@@ -106,6 +121,8 @@ gsurf_gtk4_window_realize(GsurfWindow *window)
 
 	g_signal_connect(self->window, "close-request",
 		G_CALLBACK(on_close_request), self);
+	g_signal_connect(self->window, "notify::focus-widget",
+		G_CALLBACK(on_focus_widget), self);
 }
 
 /* A mouse button pressed on a view widget (capture phase, so it runs
@@ -626,6 +643,8 @@ gsurf_gtk4_window_dispose(GObject *object)
 	/* A layout leaves first, while its root and the stack still exist. */
 	gsurf_window_set_layout(GSURF_WINDOW(self), NULL);
 	if (self->window != NULL) {
+		/* Teardown moves the focus: no typing reports from a dying window. */
+		g_signal_handlers_disconnect_by_func(self->window, on_focus_widget, self);
 		gtk_window_destroy(GTK_WINDOW(self->window));
 		self->window = NULL;
 		self->content = NULL;

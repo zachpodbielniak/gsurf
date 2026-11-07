@@ -96,11 +96,13 @@ gboolean           gsurf_module_manager_get_input_passthrough(GsurfModuleManager
  * Publishes the input mode of the module that owns the keyboard modes
  * (the modal module: NORMAL, INSERT, FOLLOW while hints are up), so chrome
  * can show it (the chromebar's and wmux's "-- INSERT --" indicators).
- * Emits #GsurfModuleManager::mode-changed and notifies
- * #GsurfModuleManager:mode when the mode changes; setting the current
- * mode again does nothing. It does not change the input passthrough
- * (gsurf_module_manager_set_input_passthrough()), which stays the
- * modal module's separate decision.
+ * The mode in effect (gsurf_module_manager_get_mode()) is this mode,
+ * except that NORMAL reads INSERT while the user is typing into a text
+ * field of the active window. Emits #GsurfModuleManager::mode-changed
+ * and notifies #GsurfModuleManager:mode when the mode in effect changes;
+ * setting the current mode again does nothing. It does not change the
+ * input passthrough (gsurf_module_manager_set_input_passthrough()),
+ * which stays the modal module's separate decision.
  *
  * Since: 0.4.2
  */
@@ -110,12 +112,40 @@ void               gsurf_module_manager_set_mode(GsurfModuleManager *self, Gsurf
  * gsurf_module_manager_get_mode:
  * @self: a #GsurfModuleManager
  *
- * Returns: the input mode last published with
- *   gsurf_module_manager_set_mode(); %GSURF_MODE_NORMAL until then
+ * The input mode in effect: what a bare key does right now. It is the
+ * mode last published with gsurf_module_manager_set_mode()
+ * (%GSURF_MODE_NORMAL until then), except that NORMAL reads
+ * %GSURF_MODE_INSERT while the active window is typing
+ * (gsurf_window_get_typing(): a focused field in the active view's page,
+ * or a focused chrome entry such as the address bar), since those keys
+ * go to the field as text. It follows focus, the active view and the
+ * active window as they change; the mode indicators and the control
+ * protocol's mode report show it.
+ *
+ * Returns: the input mode in effect
  *
  * Since: 0.4.2
  */
 GsurfModePolicy    gsurf_module_manager_get_mode(GsurfModuleManager *self);
+
+/**
+ * gsurf_module_manager_is_typing:
+ * @self: a #GsurfModuleManager
+ * @view: (nullable): the view a key press is for (the window's active view)
+ *
+ * Whether a bare key pressed for @view is text for the page rather than a
+ * command, which is how the gsurf binary routes keys: the mode owner passes
+ * keys through (INSERT; gsurf_module_manager_set_input_passthrough()), or
+ * @view has a focused page field (gsurf_view_get_editing()) while the mode
+ * is NORMAL. A mode that owns the keys itself, such as FOLLOW while link
+ * hints are up, keeps them even over a focused field. Modified keys,
+ * Escape and key grabs are the host's own decision.
+ *
+ * Returns: %TRUE if bare keys should go to the page
+ *
+ * Since: 0.5.9
+ */
+gboolean           gsurf_module_manager_is_typing(GsurfModuleManager *self, GsurfView *view);
 
 /* --- Module search paths (for embedders / non-CLI hosts) ---
  *
