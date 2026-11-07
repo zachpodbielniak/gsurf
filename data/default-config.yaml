@@ -579,6 +579,8 @@ modules:
     split_ratio: 50                # % of the old pane a new pane gets (1-99)
     on_pane_kill: close_tab        # close_tab | keep_tab
     on_tab_close: close_pane       # close_pane | keep_pane
+    select_background: solo        # solo | active_pane: a selected background tab
+                                   # shows on its own, or in the active pane
     confirm_kill: true             # x and & ask y/n first
     mouse: true                    # drag the gaps between panes to resize
     remember_layout: true          # the session module saves the layout

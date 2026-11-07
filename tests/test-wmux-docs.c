@@ -214,7 +214,7 @@ test_default_config_block(void)
 	g_assert_cmpuint(listed->len, ==, documented->len);
 	for (i = 0; i < listed->len; i++)
 		g_assert_cmpstr(g_ptr_array_index(listed, i), ==, g_ptr_array_index(documented, i));
-	g_assert_cmpuint(listed->len, ==, 34);
+	g_assert_cmpuint(listed->len, ==, 35);
 
 	/* 3. Its two commented binding examples are valid bindings. */
 	g_assert_cmpuint(commented_bindings, ==, 2);

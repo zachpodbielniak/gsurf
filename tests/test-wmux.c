@@ -122,6 +122,7 @@ assert_defaults(GsurfModule *module)
 	g_assert_cmpint(w->split_ratio, ==, 50);
 	g_assert_false(w->keep_tab);
 	g_assert_false(w->keep_pane);
+	g_assert_false(w->select_active_pane);
 	g_assert_true(w->confirm_kill);
 	g_assert_true(w->mouse);
 	g_assert_true(w->remember_layout);
@@ -214,6 +215,7 @@ static const gchar *every_key_yaml =
 	"    split_ratio: 30\n"
 	"    on_pane_kill: keep_tab\n"
 	"    on_tab_close: keep_pane\n"
+	"    select_background: active_pane\n"
 	"    confirm_kill: false\n"
 	"    mouse: off\n"
 	"    remember_layout: no\n"
@@ -261,6 +263,7 @@ test_every_key(void)
 	g_assert_cmpint(w->split_ratio, ==, 30);
 	g_assert_true(w->keep_tab);
 	g_assert_true(w->keep_pane);
+	g_assert_true(w->select_active_pane);
 	g_assert_false(w->confirm_kill);
 	g_assert_false(w->mouse);
 	g_assert_false(w->remember_layout);
@@ -306,6 +309,7 @@ test_invalid_values(void)
 		{ "split_ratio: 100", "*wmux.split_ratio must be an integer from 1 to 99*" },
 		{ "on_pane_kill: explode", "*wmux.on_pane_kill must be 'close_tab' or 'keep_tab'*" },
 		{ "on_tab_close: 3", "*wmux.on_tab_close must be 'close_pane' or 'keep_pane'*" },
+		{ "select_background: pane", "*wmux.select_background must be 'solo' or 'active_pane'*" },
 		{ "confirm_kill: maybe", "*wmux.confirm_kill must be true or false*" },
 		{ "mouse: [1]", "*wmux.mouse must be true or false*" },
 		{ "remember_layout: 2", "*wmux.remember_layout must be true or false*" },

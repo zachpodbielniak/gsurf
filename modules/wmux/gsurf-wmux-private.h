@@ -173,6 +173,7 @@ struct _GsurfWmuxModule
 	gint               split_ratio;       /* % for a new pane */
 	gboolean           keep_tab;          /* on_pane_kill: keep_tab */
 	gboolean           keep_pane;         /* on_tab_close: keep_pane */
+	gboolean           select_active_pane;/* select_background: active_pane */
 	gboolean           confirm_kill;
 	gboolean           mouse;
 	gboolean           remember_layout;
@@ -211,6 +212,19 @@ struct _GsurfWmuxModule
 	gchar             *visible_sig;       /* the visible views at the last sync */
 	gchar             *groups_sig;        /* the groups at the last notification */
 	guint64            drag_view;         /* the tab being dragged in, or 0 */
+
+	/* Solo view (select_background: solo): a background tab that was
+	 * selected is shown alone, full-window, outside every tmux window,
+	 * which stay as they were.  @solo is a one-pane window that is not in
+	 * @wins; while @solo_active, gsurf_wmux_current() returns it, so the
+	 * grid shows it.  Any wmux command, selecting a tab a pane shows, or
+	 * closing the solo tab leaves it. */
+	GsurfWmuxWin      *solo;
+	gboolean           solo_active;
+	guint64            fresh_view;        /* a tab just added (Ctrl+t, a link
+	                                       * opened in a new tab): its first
+	                                       * activation keeps the old rule */
+	guint              fresh_id;          /* idle clearing @fresh_view */
 
 	/* Keys. */
 	gboolean           prefix_active;     /* the next key is a prefix command */
@@ -268,8 +282,14 @@ G_GNUC_INTERNAL void     gsurf_wmux_update_grab(GsurfWmuxModule *self);
 G_GNUC_INTERNAL void          gsurf_wmux_layout_iface_init(GsurfWindowLayoutInterface *iface);
 G_GNUC_INTERNAL GsurfWmuxWin *gsurf_wmux_win_new(GsurfWmuxModule *self, const gchar *name);
 G_GNUC_INTERNAL void          gsurf_wmux_win_free(GsurfWmuxWin *win);
-/* The current tmux window (NULL when not attached). */
+/* The window on screen: the solo view's while one is shown, else the
+ * current tmux window (NULL when not attached). */
 G_GNUC_INTERNAL GsurfWmuxWin *gsurf_wmux_current(GsurfWmuxModule *self);
+/* Stop showing the solo view, if one is shown (the current tmux window
+ * is on screen again after the next sync).  Returns whether it was. */
+G_GNUC_INTERNAL gboolean      gsurf_wmux_leave_solo(GsurfWmuxModule *self);
+/* The solo view's id while one is shown, else 0. */
+G_GNUC_INTERNAL guint64       gsurf_wmux_solo_id(GsurfWmuxModule *self);
 /* The live view a pane of @win shows, or NULL. */
 G_GNUC_INTERNAL GsurfView    *gsurf_wmux_pane_view(GsurfWmuxModule *self, GsurfWmuxWin *win,
                                                    guint pane);

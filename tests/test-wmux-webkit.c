@@ -580,7 +580,8 @@ check_invariants(H *h)
 	GPtrArray *views = gsurf_window_get_views(h->window);
 	g_autoptr(GHashTable) seen = g_hash_table_new_full(g_int64_hash, g_int64_equal, g_free, NULL);
 	g_autoptr(GPtrArray) children = grid_children(h);
-	GsurfWmuxLayout *layout = cur(h)->layout;
+	/* While a solo view is shown, its own one-pane layout is on screen. */
+	GsurfWmuxLayout *layout = w->solo_active ? w->solo->layout : cur(h)->layout;
 	guint shown = 0;
 	guint i;
 	guint j;
@@ -604,9 +605,17 @@ check_invariants(H *h)
 			g_assert_cmpint(gsurf_window_get_view_index(h->window, view), >=, 0);
 			g_assert_false(g_hash_table_contains(seen, &id));
 			g_hash_table_add(seen, g_memdup2(&id, sizeof(id)));
-			if (i == w->current)
+			if (i == w->current && !w->solo_active)
 				shown++;
 		}
+	}
+	if (w->solo_active) {
+		guint64 solo = gsurf_wmux_layout_get_payload(layout, gsurf_wmux_layout_get_active(layout));
+
+		/* The solo tab is in no pane of any window. */
+		g_assert_cmpuint(gsurf_wmux_layout_get_n_panes(layout), ==, 1);
+		g_assert_false(g_hash_table_contains(seen, &solo));
+		shown = 1;
 	}
 
 	/* 2. Grid children = every frame; the ones tagged with a pane are
@@ -658,8 +667,11 @@ check_invariants(H *h)
 			g_assert_cmpuint(child_pane(f->frame), ==, pane);
 	}
 
-	/* 4. The active view is the active pane's. */
-	if (active_pane_view(h) != NULL)
+	/* 4. The active view is the active pane's (the solo one's). */
+	if (w->solo_active)
+		g_assert_true(gsurf_view_get_id(active_view(h)) ==
+			gsurf_wmux_layout_get_payload(layout, gsurf_wmux_layout_get_active(layout)));
+	else if (active_pane_view(h) != NULL)
 		g_assert_true(active_view(h) == active_pane_view(h));
 }
 
@@ -2287,8 +2299,11 @@ test_grouped_tree(void)
 	GsurfView *a, *b, *child, *grand, *d, *m;
 	GsurfModule *tabs;
 
+	/* select_background: active_pane, so a selected background tab takes
+	 * the active pane (test_solo covers the default). */
 	if (!gsurf_webkit_test_init() ||
-	    !h_init(&h, NULL, "  tabs:\n    enabled: true\n    sidebar: true\n"
+	    !h_init(&h, "    select_background: active_pane\n",
+			"  tabs:\n    enabled: true\n    sidebar: true\n"
 			"    background_label: Hidden\n", modules))
 		return;
 	tabs = gsurf_module_manager_get_module(h.mgr, "tabs");
@@ -2372,6 +2387,138 @@ test_grouped_tree(void)
 	}
 	(void)grand;
 	(void)d;
+	h_free(&h);
+}
+
+/* The tab the solo view shows, or NULL when the panes are on screen. */
+static GsurfView *
+solo_view(H *h)
+{
+	if (!h->w->solo_active)
+		return NULL;
+	return gsurf_view_lookup(gsurf_wmux_layout_get_payload(h->w->solo->layout,
+		gsurf_wmux_layout_get_active(h->w->solo->layout)));
+}
+
+/* Feature: selecting a tab no pane shows detaches to a solo view; the
+ * panes stay as they were and come back on the next pane or window
+ * selection.  select_background: active_pane keeps the old behaviour. */
+static void
+test_solo(void)
+{
+	H h;
+	GsurfView *a, *b, *bg, *bg2, *fresh;
+	g_autofree gchar *status = NULL;
+	g_autofree gchar *fresh_uri = page("fresh");
+	g_autofree gchar *layout_before = NULL;
+	g_autofree gchar *layout_now = NULL;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h, "    confirm_kill: false\n", NULL, NULL))
+		return;
+	a = h.first;
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(a), "first") == 0);
+	cmd(&h, GDK_KEY_percent, SHIFT);
+	b = active_view(&h);
+	bg = background_tab(&h, NULL, "bg");
+	bg2 = background_tab(&h, NULL, "bg2");
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(bg), "bg") == 0);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(bg2), "bg2") == 0);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(b), "new") == 0);
+	layout_before = gsurf_wmux_layout_serialize(cur(&h)->layout, TRUE);
+	check_invariants(&h);
+
+	/* 1. Selecting a background tab shows it solo; the panes keep their
+	 *    tabs; the status line marks the window "+" and shows the tab. */
+	gsurf_window_set_active_view(h.window, bg);
+	g_assert_true(solo_view(&h) == bg);
+	g_assert_true(active_view(&h) == bg);
+	g_assert_true(gsurf_window_get_view_visible(h.window, bg));
+	g_assert_false(gsurf_window_get_view_visible(h.window, a));
+	g_assert_false(gsurf_window_get_view_visible(h.window, b));
+	g_assert_true(active_pane_view(&h) == b);
+	layout_now = gsurf_wmux_layout_serialize(cur(&h)->layout, TRUE);
+	g_assert_cmpstr(layout_now, ==, layout_before);
+	g_clear_pointer(&layout_now, g_free);
+	settle();
+	check_invariants(&h);
+	status = status_text(&h);
+	g_assert_cmpstr(status, ==, "[gsurf] 0:new+ [bg]  solo");
+	g_clear_pointer(&status, g_free);
+
+	/* 2. Another background tab replaces it: one solo view, reused. */
+	gsurf_window_set_active_view(h.window, bg2);
+	g_assert_true(solo_view(&h) == bg2);
+	g_assert_false(gsurf_window_get_view_visible(h.window, bg));
+	settle();
+	check_invariants(&h);
+
+	/* 3. Selecting a tab a pane shows brings the layout back, that pane
+	 *    active. */
+	gsurf_window_set_active_view(h.window, a);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_pane_view(&h) == a);
+	g_assert_true(gsurf_window_get_view_visible(h.window, b));
+	g_assert_false(gsurf_window_get_view_visible(h.window, bg2));
+	settle();
+	check_invariants(&h);
+	status = status_text(&h);
+	g_assert_cmpstr(status, ==, "[gsurf] 0:first*  1/2");
+	g_clear_pointer(&status, g_free);
+
+	/* 4. A pane command (select-pane) leaves solo too. */
+	gsurf_window_set_active_view(h.window, bg);
+	g_assert_true(solo_view(&h) == bg);
+	cmd(&h, GDK_KEY_o, 0);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_view(&h) == b);
+	check_invariants(&h);
+
+	/* 5. Selecting the current window leaves solo. */
+	gsurf_window_set_active_view(h.window, bg);
+	cmd(&h, GDK_KEY_0, 0);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_view(&h) == b);
+	check_invariants(&h);
+
+	/* 6. break-pane from solo: the solo tab gets a window of its own. */
+	gsurf_window_set_active_view(h.window, bg);
+	cmd(&h, GDK_KEY_exclam, SHIFT);
+	g_assert_null(solo_view(&h));
+	g_assert_cmpuint(h.w->wins->len, ==, 2);
+	g_assert_cmpuint(h.w->current, ==, 1);
+	g_assert_true(active_pane_view(&h) == bg);
+	g_assert_cmpuint(n_panes(&h), ==, 1);
+	settle();
+	check_invariants(&h);
+	cmd(&h, GDK_KEY_0, 0);
+
+	/* 7. Closing the solo tab returns to the layout. */
+	gsurf_window_set_active_view(h.window, bg2);
+	g_assert_true(solo_view(&h) == bg2);
+	gsurf_window_remove_view(h.window, bg2);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_view(&h) == b);
+	settle();
+	check_invariants(&h);
+
+	/* 8. A new tab opened and selected at once (Ctrl+t) still goes into
+	 *    the active pane; b becomes a background tab. */
+	fresh = gsurf_view_new_full(NULL, NULL, fresh_uri, FALSE);
+	gsurf_window_add_view(h.window, fresh);
+	gsurf_window_set_active_view(h.window, fresh);
+	g_object_unref(fresh);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_pane_view(&h) == fresh);
+	settle();
+	check_invariants(&h);
+
+	/* 9. select_background: active_pane: the old behaviour. */
+	h.w->select_active_pane = TRUE;
+	gsurf_window_set_active_view(h.window, b);
+	g_assert_null(solo_view(&h));
+	g_assert_true(active_pane_view(&h) == b);
+	g_assert_false(gsurf_window_get_view_visible(h.window, fresh));
+	check_invariants(&h);
 	h_free(&h);
 }
 
@@ -2867,6 +3014,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/wmux/webkit/opened-children", test_opened_children);
 	g_test_add_func("/gsurf/wmux/webkit/mode-indicator", test_mode_indicator);
 	g_test_add_func("/gsurf/wmux/webkit/group-rename", test_group_rename);
+	g_test_add_func("/gsurf/wmux/webkit/solo", test_solo);
 
 	ret = g_test_run();
 	g_clear_object(&server);
