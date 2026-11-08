@@ -15,17 +15,81 @@
 #include <gsurf.h>
 #include <gtk/gtk.h>
 #include <libsoup/soup.h>
+#include <string.h>
 #ifdef GSURF_BACKEND_GTK4
 #include <webkit/webkit.h>
 #else
 #include <webkit2/webkit2.h>
 #endif
 
+#ifdef GSURF_BACKEND_GTK4
+/* The one toolkit diagnostic gsurf_webkit_test_init() tolerates. */
+#define GSURF_WEBKIT_TEST_FRAME_TIMINGS "Duplicate call to gdk_frame_timings_presented()"
+
+/*
+ * gsurf_webkit_test_field_is:
+ * Whether log field @field is @key and its value starts with @prefix
+ * (values are NUL-terminated when length < 0, else @length bytes).
+ */
+static inline gboolean
+gsurf_webkit_test_field_is(const GLogField *field, const gchar *key, const gchar *prefix)
+{
+	gsize n = strlen(prefix);
+
+	if (!g_str_equal(field->key, key))
+		return FALSE;
+	if (field->length >= 0 && (gsize)field->length < n)
+		return FALSE;
+	return strncmp((const gchar *)field->value, prefix, n) == 0;
+}
+
+/*
+ * gsurf_webkit_test_log_writer:
+ * GTK 4 logs a Gdk-WARNING "Duplicate call to gdk_frame_timings_presented()
+ * with different values" when a compositor's presentation feedback for a
+ * frame disagrees with an earlier one -- seen under headless mutter's
+ * virtual monitor (the Wayland stand-in for xvfb-run). It is the
+ * toolkit's frame-clock bookkeeping, outside anything gsurf does, yet
+ * g_test_init() makes it fatal and it aborts whichever test happens to
+ * spin the main loop then. Drop exactly that message (Gdk domain plus
+ * message prefix); every other log keeps the default, fatal handling.
+ */
+static inline GLogWriterOutput
+gsurf_webkit_test_log_writer(GLogLevelFlags log_level, const GLogField *fields,
+                             gsize n_fields, gpointer user_data)
+{
+	gboolean gdk = FALSE;
+	gboolean timings = FALSE;
+	gsize i;
+
+	if ((log_level & G_LOG_LEVEL_WARNING) != 0) {
+		for (i = 0; i < n_fields; i++) {
+			/* The domain exactly "Gdk" (not "GdkPixbuf"). */
+			if (gsurf_webkit_test_field_is(&fields[i], "GLIB_DOMAIN", "Gdk") &&
+			    (fields[i].length < 0
+			     ? ((const gchar *)fields[i].value)[3] == '\0'
+			     : fields[i].length == 3))
+				gdk = TRUE;
+			else if (gsurf_webkit_test_field_is(&fields[i], "MESSAGE",
+					GSURF_WEBKIT_TEST_FRAME_TIMINGS))
+				timings = TRUE;
+		}
+		if (gdk && timings) {
+			g_test_message("ignored a GTK frame-timing warning (compositor feedback)");
+			return G_LOG_WRITER_HANDLED;
+		}
+	}
+	return g_log_writer_default(log_level, fields, n_fields, user_data);
+}
+#endif
+
 /*
  * gsurf_webkit_test_init:
  *
  * Returns %FALSE (after marking the test skipped) unless GSURF_TEST_GUI is
- * set; otherwise initializes GTK for the compiled backend.
+ * set; otherwise initializes GTK for the compiled backend. Under GTK 4 it
+ * first installs gsurf_webkit_test_log_writer() (once per process: GLib
+ * allows a single writer).
  */
 static inline gboolean
 gsurf_webkit_test_init(void)
@@ -37,6 +101,14 @@ gsurf_webkit_test_init(void)
 #ifdef GSURF_BACKEND_GTK3
 	g_assert_true(gtk_init_check(NULL, NULL));
 #else
+	{
+		static gsize writer_set = 0;
+
+		if (g_once_init_enter(&writer_set)) {
+			g_log_set_writer_func(gsurf_webkit_test_log_writer, NULL, NULL);
+			g_once_init_leave(&writer_set, 1);
+		}
+	}
 	g_assert_true(gtk_init_check());
 #endif
 	return TRUE;
