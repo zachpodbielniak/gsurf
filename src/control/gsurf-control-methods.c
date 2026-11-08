@@ -118,6 +118,27 @@ arg_int(JsonObject *params, const gchar *name, gint64 *out, GError **error)
 	return FALSE;
 }
 
+/* An optional finite number parameter; FALSE (with INVALID_PARAMS) if it is
+ * present but not a number. */
+static gboolean
+arg_double(JsonObject *params, const gchar *name, gdouble *out, GError **error)
+{
+	JsonNode *node = member(params, name);
+
+	if (node == NULL)
+		return TRUE;
+	if (JSON_NODE_HOLDS_VALUE(node)
+	    && (json_node_get_value_type(node) == G_TYPE_DOUBLE
+	        || json_node_get_value_type(node) == G_TYPE_INT64)) {
+		*out = json_node_get_double(node);
+		if (isfinite(*out))
+			return TRUE;
+	}
+	g_set_error(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+		"'%s' must be a number", name);
+	return FALSE;
+}
+
 /* A boolean member: a JSON boolean, or true/false/on/off/yes/no/1/0.
  * @out keeps its value when absent. */
 static gboolean
@@ -905,7 +926,8 @@ m_page_eval(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 typedef struct {
 	GsurfControlInvocation *inv;
 	GsurfView              *view;
-	gchar                  *path;
+	gchar                  *path;    /* NULL: inline only */
+	gboolean                inline_png;
 } Shot;
 
 static void
@@ -926,7 +948,8 @@ shot_done(GObject *source, GAsyncResult *result, gpointer user_data)
 		goto out;
 	}
 	png = g_bytes_get_data(bytes, &size);
-	if (!g_file_set_contents_full(shot->path, png, (gssize)size,
+	if (shot->path != NULL &&
+	    !g_file_set_contents_full(shot->path, png, (gssize)size,
 			G_FILE_SET_CONTENTS_CONSISTENT, 0600, &error)) {
 		gsurf_control_invocation_return_error(shot->inv, GSURF_CONTROL_ERROR_FAILED,
 			"cannot write %s: %s", shot->path, error->message);
@@ -934,10 +957,23 @@ shot_done(GObject *source, GAsyncResult *result, gpointer user_data)
 	}
 	b = json_builder_new();
 	json_builder_begin_object(b);
-	json_builder_set_member_name(b, "path");
-	json_builder_add_string_value(b, shot->path);
+	if (shot->path != NULL) {
+		json_builder_set_member_name(b, "path");
+		json_builder_add_string_value(b, shot->path);
+	}
 	json_builder_set_member_name(b, "bytes");
 	json_builder_add_int_value(b, (gint64)size);
+	/*
+	 * The image itself, for a caller on another machine or in another
+	 * mount namespace than gsurf's -- a path it cannot open is no
+	 * screenshot at all.
+	 */
+	if (shot->inline_png) {
+		g_autofree gchar *encoded = g_base64_encode(png, size);
+
+		json_builder_set_member_name(b, "png_base64");
+		json_builder_add_string_value(b, encoded);
+	}
 	json_builder_end_object(b);
 	gsurf_control_invocation_return_value(shot->inv, json_builder_get_root(b));
 out:
@@ -954,16 +990,19 @@ m_page_screenshot(GsurfControlServer *server, GsurfControlInvocation *inv, gpoin
 	GError *error = NULL;
 	GsurfView *view;
 	const gchar *path = NULL;
+	gboolean inline_png = FALSE;
 	Shot *shot;
 
 	(void)data;
-	if (!arg_string(params, "path", &path, &error)) {
+	if (!arg_string(params, "path", &path, &error) ||
+	    !arg_bool(params, "inline", &inline_png, &error)) {
 		fail(inv, error);
 		return;
 	}
-	if (path == NULL || *path == '\0') {
+	if ((path == NULL || *path == '\0') && !inline_png) {
 		gsurf_control_invocation_return_error_literal(inv,
-			GSURF_CONTROL_ERROR_INVALID_PARAMS, "missing 'path' (the PNG file to write)");
+			GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"missing 'path' (the PNG file to write), or 'inline': true");
 		return;
 	}
 	view = target_view(server, params, NULL, &error);
@@ -974,8 +1013,9 @@ m_page_screenshot(GsurfControlServer *server, GsurfControlInvocation *inv, gpoin
 	shot = g_new0(Shot, 1);
 	shot->inv = g_object_ref(inv);
 	shot->view = g_object_ref(view);
+	shot->inline_png = inline_png;
 	/* Relative paths resolve against the directory gsurf started in. */
-	shot->path = gsurf_resolve_path(path);
+	shot->path = (path != NULL && *path != '\0') ? gsurf_resolve_path(path) : NULL;
 	gsurf_view_get_snapshot_async(view, NULL, shot_done, shot);
 }
 
@@ -2483,26 +2523,6 @@ lrg_scene_for(GsurfControlServer *server, GsurfWindow **window_out, GError **err
 	return scene;
 }
 
-/* An optional finite number parameter; FALSE (with INVALID_PARAMS) if it is
- * present but not a number. */
-static gboolean
-arg_double(JsonObject *params, const gchar *name, gdouble *out, GError **error)
-{
-	JsonNode *node = member(params, name);
-
-	if (node == NULL)
-		return TRUE;
-	if (JSON_NODE_HOLDS_VALUE(node)
-	    && (json_node_get_value_type(node) == G_TYPE_DOUBLE
-	        || json_node_get_value_type(node) == G_TYPE_INT64)) {
-		*out = json_node_get_double(node);
-		if (isfinite(*out))
-			return TRUE;
-	}
-	g_set_error(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
-		"'%s' must be a number", name);
-	return FALSE;
-}
 
 /* The scene's state, the reply of lrg.state and of every lrg.* change. */
 static JsonNode *
@@ -2864,6 +2884,284 @@ m_lrg_unsupported(GsurfControlServer *server, GsurfControlInvocation *inv, gpoin
 #define m_lrg_screenshot m_lrg_unsupported
 #endif /* GSURF_HAVE_LRG_3D */
 
+/* ----- Agent input: page.click, page.type, page.key ----- */
+
+/*
+ * Modifier names ("ctrl", "shift", "alt", "super") as #GsurfKeyMod
+ * flags; @error names the first one it does not know.
+ */
+static gboolean
+arg_modifiers(JsonObject *params, guint *out, GError **error)
+{
+	JsonNode *node = member(params, "modifiers");
+	JsonArray *list;
+	guint i;
+
+	*out = 0;
+	if (node == NULL)
+		return TRUE;
+	if (!JSON_NODE_HOLDS_ARRAY(node)) {
+		g_set_error_literal(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"'modifiers' must be an array of names (ctrl, shift, alt, super)");
+		return FALSE;
+	}
+	list = json_node_get_array(node);
+	for (i = 0; i < json_array_get_length(list); i++) {
+		const gchar *name = json_array_get_string_element(list, i);
+
+		if (g_ascii_strcasecmp(name != NULL ? name : "", "ctrl") == 0 ||
+		    g_ascii_strcasecmp(name != NULL ? name : "", "control") == 0)
+			*out |= GSURF_MOD_CTRL;
+		else if (g_ascii_strcasecmp(name != NULL ? name : "", "shift") == 0)
+			*out |= GSURF_MOD_SHIFT;
+		else if (g_ascii_strcasecmp(name != NULL ? name : "", "alt") == 0)
+			*out |= GSURF_MOD_ALT;
+		else if (g_ascii_strcasecmp(name != NULL ? name : "", "super") == 0 ||
+		         g_ascii_strcasecmp(name != NULL ? name : "", "meta") == 0)
+			*out |= GSURF_MOD_SUPER;
+		else {
+			g_set_error(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+				"unknown modifier '%s' (ctrl, shift, alt, super)",
+				name != NULL ? name : "");
+			return FALSE;
+		}
+	}
+	return TRUE;
+}
+
+/* A {"done": true, ...} reply with an optional point. */
+static JsonNode *
+input_reply(gboolean point, gdouble x, gdouble y)
+{
+	g_autoptr(JsonBuilder) b = json_builder_new();
+
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "done");
+	json_builder_add_boolean_value(b, TRUE);
+	if (point) {
+		json_builder_set_member_name(b, "x");
+		json_builder_add_double_value(b, x);
+		json_builder_set_member_name(b, "y");
+		json_builder_add_double_value(b, y);
+	}
+	json_builder_end_object(b);
+	return json_builder_get_root(b);
+}
+
+/*
+ * One "at a selector" input waiting on the page to say where the
+ * element is (gsurf_view_locate_script(), which also scrolls it into
+ * view and focuses it).
+ */
+typedef enum { AT_CLICK, AT_TYPE } AtKind;
+
+typedef struct {
+	GsurfControlInvocation *inv;
+	GsurfView              *view;      /* ref */
+	AtKind                  kind;
+	guint                   button;
+	guint                   modifiers;
+	gchar                  *text;      /* AT_TYPE */
+	gchar                  *selector;  /* for the error */
+} AtRun;
+
+static void
+at_run_free(AtRun *run)
+{
+	g_clear_object(&run->inv);
+	g_clear_object(&run->view);
+	g_free(run->text);
+	g_free(run->selector);
+	g_free(run);
+}
+
+static void
+at_located(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	AtRun *run = user_data;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *where = NULL;
+	g_autoptr(JsonParser) parser = json_parser_new();
+	JsonNode *root;
+	JsonArray *xy;
+	gdouble x;
+	gdouble y;
+
+	(void)source;
+	where = gsurf_view_run_javascript_finish(run->view, result, &error);
+	if (where == NULL) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
+			"javascript failed: %s", error != NULL ? error->message : "no result");
+		goto out;
+	}
+
+	/* A JSON [x, y], or null when nothing matched */
+	if (!json_parser_load_from_data(parser, where, -1, NULL) ||
+	    (root = json_parser_get_root(parser)) == NULL || !JSON_NODE_HOLDS_ARRAY(root) ||
+	    json_array_get_length(xy = json_node_get_array(root)) != 2) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+			"nothing on the page matches '%s'", run->selector);
+		goto out;
+	}
+	x = json_array_get_double_element(xy, 0);
+	y = json_array_get_double_element(xy, 1);
+
+	if (run->kind == AT_CLICK
+	        ? !gsurf_view_send_click(run->view, x, y, run->button, run->modifiers, &error)
+	        : !gsurf_view_send_text(run->view, run->text, &error)) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
+			"%s", error->message);
+		goto out;
+	}
+	gsurf_control_invocation_return_value(run->inv, input_reply(run->kind == AT_CLICK, x, y));
+out:
+	at_run_free(run);
+}
+
+static void
+at_selector(GsurfControlInvocation *inv, GsurfView *view, AtKind kind, const gchar *selector,
+            guint button, guint modifiers, const gchar *text)
+{
+	AtRun *run = g_new0(AtRun, 1);
+	g_autofree gchar *script = gsurf_view_locate_script(selector);
+
+	run->inv = g_object_ref(inv);
+	run->view = g_object_ref(view);
+	run->kind = kind;
+	run->button = button;
+	run->modifiers = modifiers;
+	run->text = g_strdup(text);
+	run->selector = g_strdup(selector);
+	gsurf_view_run_javascript_async(view, script, NULL, at_located, run);
+}
+
+static void
+m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfView *view;
+	const gchar *selector = NULL;
+	gdouble x = -1;
+	gdouble y = -1;
+	gint64 button = 1;
+	guint mods = 0;
+
+	(void)data;
+	if (!arg_string(params, "selector", &selector, &error) ||
+	    !arg_double(params, "x", &x, &error) || !arg_double(params, "y", &y, &error) ||
+	    !arg_int(params, "button", &button, &error) || !arg_modifiers(params, &mods, &error) ||
+	    kiosk_refuses("driving the page", &error)) {
+		fail(inv, error);
+		return;
+	}
+	if ((selector == NULL || *selector == '\0') && (!arg_has(params, "x") || !arg_has(params, "y"))) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS, "give a 'selector', or 'x' and 'y'");
+		return;
+	}
+	if (button < 1 || button > 3) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS, "'button' is 1 (left), 2 (middle) or 3 (right)");
+		return;
+	}
+	view = target_view(server, params, NULL, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+
+	if (selector != NULL && *selector != '\0') {
+		at_selector(inv, view, AT_CLICK, selector, (guint)button, mods, NULL);
+		return;
+	}
+	if (!gsurf_view_send_click(view, x, y, (guint)button, mods, &error)) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED, "%s",
+			error->message);
+		g_error_free(error);
+		return;
+	}
+	gsurf_control_invocation_return_value(inv, input_reply(TRUE, x, y));
+}
+
+static void
+m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfView *view;
+	const gchar *selector = NULL;
+	const gchar *text = NULL;
+
+	(void)data;
+	if (!arg_string(params, "selector", &selector, &error) ||
+	    !arg_string(params, "text", &text, &error) ||
+	    kiosk_refuses("driving the page", &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (text == NULL) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS, "missing 'text'");
+		return;
+	}
+	view = target_view(server, params, NULL, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+
+	if (selector != NULL && *selector != '\0') {
+		at_selector(inv, view, AT_TYPE, selector, 0, 0, text);
+		return;
+	}
+	if (!gsurf_view_send_text(view, text, &error)) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED, "%s",
+			error->message);
+		g_error_free(error);
+		return;
+	}
+	gsurf_control_invocation_return_value(inv, input_reply(FALSE, 0, 0));
+}
+
+static void
+m_page_key(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfView *view;
+	const gchar *key = NULL;
+	guint mods = 0;
+	guint keyval;
+
+	(void)data;
+	if (!arg_string(params, "key", &key, &error) || !arg_modifiers(params, &mods, &error) ||
+	    kiosk_refuses("driving the page", &error)) {
+		fail(inv, error);
+		return;
+	}
+	keyval = gsurf_view_keyval_from_name(key);
+	if (keyval == 0) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"'%s' is not a key: name one (Enter, Tab, Escape, Backspace, Delete, "
+			"ArrowUp, Home, PageDown, space, ...) or give one character",
+			key != NULL ? key : "");
+		return;
+	}
+	view = target_view(server, params, NULL, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+	if (!gsurf_view_send_key(view, keyval, mods, &error)) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED, "%s",
+			error->message);
+		g_error_free(error);
+		return;
+	}
+	gsurf_control_invocation_return_value(inv, input_reply(FALSE, 0, 0));
+}
+
 #define VIEW_DOC "view?: id, index?: int (default: the active view)"
 
 typedef struct {
@@ -2926,8 +3224,21 @@ static const CoreMethod core_methods[] = {
 	{ "lrg.screenshot", "Write the next 3D frame (scene and chrome, as shown) as a PNG to "
 	  "'path'; returns {path, bytes}", "{path: string}", m_lrg_screenshot, 0 },
 	{ "page.screenshot", "Write a PNG of a view's visible page to 'path' (relative paths "
-	  "resolve against gsurf's launch directory); returns {path, bytes}",
-	  "{path: string, " VIEW_DOC "}", m_page_screenshot, 0 },
+	  "resolve against gsurf's launch directory), and/or return it as 'png_base64' with "
+	  "'inline': true; returns {path?, bytes, png_base64?}",
+	  "{path?: string, inline?: bool, " VIEW_DOC "}", m_page_screenshot, 0 },
+	{ "page.click", "Click in a view: at the element matching 'selector' (scrolled into "
+	  "view first) or at 'x', 'y' (CSS pixels). Native input where the backend has it "
+	  "(GTK3: trusted events). Refused in kiosk mode; returns {done, x, y}",
+	  "{selector?: string, x?: number, y?: number, button?: 1|2|3, modifiers?: [string], "
+	  VIEW_DOC "}", m_page_click, 0 },
+	{ "page.type", "Type 'text' into the focused element, or into the element matching "
+	  "'selector' (focused first); a newline is Enter. Refused in kiosk mode",
+	  "{text: string, selector?: string, " VIEW_DOC "}", m_page_type, 0 },
+	{ "page.key", "Press one key: a name (Enter, Tab, Escape, Backspace, Delete, ArrowUp, "
+	  "Home, PageDown, space, ...) or one character, with optional modifiers. Refused in "
+	  "kiosk mode", "{key: string, modifiers?: [ctrl|shift|alt|super], " VIEW_DOC "}",
+	  m_page_key, 0 },
 	{ "actions.list", "Every action name action.run accepts, with 'allowed' (false when kiosk "
 	  "mode forbids it)", "{}", m_actions_list, 0 },
 	{ "action.run", "Perform an action exactly as its key binding would (zoom-in, tab-next, "

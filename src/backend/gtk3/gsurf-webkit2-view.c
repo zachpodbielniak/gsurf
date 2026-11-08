@@ -12,6 +12,7 @@
 
 #include "util/gsurf-kiosk.h"
 #include "backend/gtk3/gsurf-webkit2-view.h"
+#include "backend/gtk3/gsurf-gtk3-input.h"
 #include "module/gsurf-module-manager.h"
 
 #include <gtk/gtk.h>
@@ -330,6 +331,62 @@ gsurf_webkit2_view_focus(GsurfView *view)
 
 	if (self->webview != NULL)
 		gtk_widget_grab_focus(GTK_WIDGET(self->webview));
+}
+
+/*
+ * Agent input as GTK's own events, so the page sees it as trusted.  A
+ * point arrives in CSS pixels (what getBoundingClientRect() answers) and
+ * the widget is in device pixels, which differ by the zoom level.
+ */
+static gboolean
+gsurf_webkit2_view_send_input(GsurfView *view, GsurfViewInput kind, gdouble x, gdouble y,
+                              guint code, guint modifiers, const gchar *text,
+                              GError **error)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	GtkWidget *widget = GTK_WIDGET(self->webview);
+	gdouble zoom = webkit_web_view_get_zoom_level(self->webview);
+	const gchar *p;
+
+	if (!gtk_widget_get_realized(widget)) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_INITIALIZED,
+			"the view is not on screen yet");
+		return FALSE;
+	}
+
+	switch (kind) {
+	case GSURF_VIEW_INPUT_CLICK:
+		x *= zoom;
+		y *= zoom;
+		gsurf_gtk3_input_focus(widget);
+		gsurf_gtk3_input_motion(widget, x, y, modifiers);
+		gsurf_gtk3_input_button(widget, x, y, code, TRUE, modifiers);
+		gsurf_gtk3_input_button(widget, x, y, code, FALSE, modifiers);
+		return TRUE;
+
+	case GSURF_VIEW_INPUT_KEY:
+		gsurf_gtk3_input_focus(widget);
+		gsurf_gtk3_input_key(widget, code, 0, modifiers, TRUE);
+		gsurf_gtk3_input_key(widget, code, 0, modifiers, FALSE);
+		return TRUE;
+
+	case GSURF_VIEW_INPUT_TEXT:
+		gsurf_gtk3_input_focus(widget);
+		for (p = text; p != NULL && *p != '\0'; p = g_utf8_next_char(p)) {
+			gunichar c = g_utf8_get_char(p);
+			guint keyval = (c == '\n' || c == '\r') ? GDK_KEY_Return
+			             : c == '\t' ? GDK_KEY_Tab : gdk_unicode_to_keyval(c);
+			/* an upper-case letter is Shift plus the letter, as typed */
+			guint mods = g_unichar_isupper(c) ? GSURF_MOD_SHIFT : 0;
+
+			gsurf_gtk3_input_key(widget, keyval, 0, mods, TRUE);
+			gsurf_gtk3_input_key(widget, keyval, 0, mods, FALSE);
+		}
+		return TRUE;
+	}
+
+	g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "unknown input");
+	return FALSE;
 }
 
 static void
@@ -825,6 +882,7 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->run_javascript_finish = gsurf_webkit2_view_run_javascript_finish;
 	view_class->get_native_widget = gsurf_webkit2_view_get_native_widget;
 	view_class->focus = gsurf_webkit2_view_focus;
+	view_class->send_input = gsurf_webkit2_view_send_input;
 	view_class->get_snapshot_async = gsurf_webkit2_view_get_snapshot_async;
 	view_class->get_snapshot_finish = gsurf_webkit2_view_get_snapshot_finish;
 	view_class->show_inspector = gsurf_webkit2_view_show_inspector;
