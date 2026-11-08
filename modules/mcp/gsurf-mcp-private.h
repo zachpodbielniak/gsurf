@@ -28,7 +28,7 @@
 G_BEGIN_DECLS
 
 /* The most arguments one tool takes. */
-#define GSURF_MCP_TOOL_MAX_ARGS (8)
+#define GSURF_MCP_TOOL_MAX_ARGS (10)
 
 /**
  * GsurfMcpToolArg:

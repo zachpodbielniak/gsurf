@@ -45,7 +45,7 @@ On activation the module prints the socket path it is listening on. =data/defaul
 
 Every view has a process-unique id that never changes and is never reused (=gsurf_view_get_id()=). Tools take it as =view= (and =parent=, =before=, =after=, =target= where a second view is meant); =list_views= and every tool returning a view report it as =id=. Positions (=index=) change whenever tabs open, close or move; the original tools keep their =index= argument for backward compatibility, but agents should use ids.
 
-The page tools (=navigate=, =get_current_uri=, =get_title=, =go_back=, =go_forward=, =reload=, =stop=, =get_page_text=, =get_page_html=, =get_links=, =execute_javascript=, =scroll=, =find_text=, =click_link=, =screenshot=, =save_screenshot=, =get_cookies=) act on the active view unless given =view= (or =index=).
+The page tools (=navigate=, =get_current_uri=, =get_title=, =go_back=, =go_forward=, =reload=, =stop=, =get_page_text=, =get_page_html=, =get_links=, =execute_javascript=, =scroll=, =find_text=, =click_link=, =screenshot=, =save_screenshot=, =get_cookies=, =set_cookie=) act on the active view unless given =view= (or =index=).
 
 Only views of the active window are addressable (gsurf runs one window per process). =reopen_in_container= replaces a view: the old id is gone afterwards and the result carries the new one.
 
@@ -94,6 +94,7 @@ Tools that change wmux panes or windows return the current wmux window's panes a
 | =screenshot= / =save_screenshot= | (=path=), =view?= | PNG of the visible page |
 | =get_history= | =limit?= | Recent history lines |
 | =get_cookies= | =view?= | =document.cookie= |
+| =set_cookie= | =name=, =value=, =domain=, =path?=, =expires?=, =secure?=, =http_only?=, =same_site?=, =view?= | Store one cookie in the view's session (its container's), HttpOnly too, as a server would set it |
 | =get_config= / =set_config= | (=key=, =value=) | Browser configuration |
 | =set_setting= | =key=, =value= | Web-engine setting, applied to the active view |
 | =list_modules= / =toggle_module= | (=name=, =enabled?=) | Modules |
@@ -444,6 +445,7 @@ Since 0.4.4 (all GIR-annotated, see the headers):
 | =gsurf_module_manager_execute_action()= and =gsurf_module_manager_set_action_executor()= (the gsurf binary registers its keybind executor) | =run_action=, =set_mode=, =follow_hints= with kiosk refusals |
 | =gsurf_module_manager_get_mode()= (0.4.2) | =get_mode= |
 | =GsurfContainerRegistry=, =gsurf_window_reopen_view()=, =gsurf_view_new_full()= | containers and view creation |
+| =gsurf_view_add_cookie_async()= / =_finish()= and =GsurfCookie= (0.5.10; GTK3, GTK4 and LRG backends) | =set_cookie= |
 
 See [[file:architecture.org][architecture.org]] ("Window layouts (panes)") and [[file:module-system.org][module-system.org]].
 
@@ -476,5 +478,5 @@ gchar *gsurf_mcp_module_list_tools (GsurfModule *module);
 * Tests
 
 - =tests/test-mcp.c= (headless, =make test=, needs =MCP=1=): loads the real =mcp.so= and calls its tools in-process. A recording window layout and tree-provider module stand in for wmux and tabs, so every convenience tool is checked down to the exact command line it sends; also registration (all tools off by default, per-tool enabling, schemas, reconfigure), every "no window" error, view addressing by id / index / numeric strings, the opener-derived tree, provider-backed moves and collapses, the layout's errors as tool errors, run_action through modules, kiosk refusals, containers with their configured host rules.
-- =tests/test-mcp-webkit.c= (=make test-gui=, both toolkits): real windows with =wmux=, =tabs=, =containers= and =modal=, driven only through tools and checked against the core: splits with directions, ratios and URIs and their pixel / fractional rectangles, pane selection by direction, view, index and last, zoom, layouts, kills, every command-language error class, break-pane, wmux windows (new, rename and automatic naming, select by index / last / next, kill), background children shown in panes (edge, centre swap) and split in, the grouped tree with its background group, re-parenting and collapsing, containers (rules, reopen in place with a new id, temporary children), modes, hints, run_action through modules and a host executor, wmux switched off, and a real JSON-RPC round trip over the Unix socket.
+- =tests/test-mcp-webkit.c= (=make test-gui=, both toolkits): real windows with =wmux=, =tabs=, =containers= and =modal=, driven only through tools and checked against the core: splits with directions, ratios and URIs and their pixel / fractional rectangles, pane selection by direction, view, index and last, zoom, layouts, kills, every command-language error class, break-pane, wmux windows (new, rename and automatic naming, select by index / last / next, kill), background children shown in panes (edge, centre swap) and split in, the grouped tree with its background group, re-parenting and collapsing, containers (rules, reopen in place with a new id, temporary children), an HttpOnly =set_cookie= reaching the server but not =document.cookie= (and its argument errors), modes, hints, run_action through modules and a host executor, wmux switched off, and a real JSON-RPC round trip over the Unix socket.
 - The core seams have their own unit tests: =test-window-layout= (=list_panes=, =run_command=, =describe=, =GsurfLayoutPane=), =test-tab-tree-provider=, =test-manager= (=execute_action=), =test-enums=.

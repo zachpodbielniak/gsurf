@@ -69,6 +69,19 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 	(void)srv;
 	(void)query;
 	(void)user_data;
+	/* /cookie: a page titled with the Cookie header the request carried. */
+	if (g_strcmp0(path, "/cookie") == 0) {
+		const gchar *sent = soup_message_headers_get_one(
+			soup_server_message_get_request_headers(msg), "Cookie");
+		g_autofree gchar *title = g_markup_escape_text(sent != NULL ? sent : "none", -1);
+
+		body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
+			"<body>cookie</body></html>", title);
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body,
+			strlen(body));
+		return;
+	}
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><a href=\"/p/linked\">link</a> %s</body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -166,7 +179,7 @@ h_init(H *h, const gchar *extra_yaml)
 		"follow_hints", "run_action", "list_actions", "wmux_status", "list_wmux_windows",
 		"list_panes", "wmux_command", "split_pane", "select_pane", "kill_pane", "zoom_pane",
 		"select_layout", "show_view_in_pane", "select_window", "new_window",
-		"rename_window", "kill_window", "toggle_module", NULL
+		"rename_window", "kill_window", "toggle_module", "set_cookie", "execute_javascript", NULL
 	};
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GString) yaml = NULL;
@@ -885,6 +898,47 @@ test_containers(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Cookies                                                             */
+/* ------------------------------------------------------------------ */
+
+static void
+test_cookies(void)
+{
+	H h;
+	g_autofree gchar *uri = g_strdup_printf("http://127.0.0.1:%u/cookie", port);
+	gchar *text;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h, NULL))
+		return;
+
+	/* 1. An HttpOnly cookie set over MCP goes with the next request. */
+	text = callf(&h, "set_cookie", FALSE, "{\"name\":\"gate\",\"value\":\"ok\","
+		"\"domain\":\"127.0.0.1\",\"http_only\":true,"
+		"\"expires\":%" G_GINT64_FORMAT "}", g_get_real_time() / G_USEC_PER_SEC + 3600);
+	g_assert_cmpstr(text, ==, "ok");
+	g_free(text);
+	g_free(callf(&h, "navigate", FALSE, "{\"uri\":\"%s\"}", uri));
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "gate=ok") == 0 ||
+		g_strcmp0(gsurf_view_get_title(h.first), "none") == 0);
+	g_assert_cmpstr(gsurf_view_get_title(h.first), ==, "gate=ok");
+
+	/* 2. Page scripts do not see it. */
+	text = call(&h, "execute_javascript", "{\"code\":\"document.cookie\"}", FALSE);
+	g_assert_null(strstr(text, "gate"));
+	g_free(text);
+
+	/* 3. A cookie without a domain, or with an unknown same_site, is refused. */
+	text = call(&h, "set_cookie", "{\"name\":\"a\",\"value\":\"b\"}", TRUE);
+	ASSERT_HAS(text, "missing 'domain'");
+	g_free(text);
+	text = call(&h, "set_cookie", "{\"name\":\"a\",\"value\":\"b\",\"domain\":\"127.0.0.1\","
+		"\"same_site\":\"sometimes\"}", TRUE);
+	ASSERT_HAS(text, "'same_site' must be none, lax or strict");
+	g_free(text);
+	h_free(&h);
+}
+
+/* ------------------------------------------------------------------ */
 /* Modes and actions                                                   */
 /* ------------------------------------------------------------------ */
 
@@ -1119,6 +1173,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/mcp/webkit/windows", test_windows);
 	g_test_add_func("/gsurf/mcp/webkit/tree-and-drops", test_tree_and_drops);
 	g_test_add_func("/gsurf/mcp/webkit/containers", test_containers);
+	g_test_add_func("/gsurf/mcp/webkit/cookies", test_cookies);
 	g_test_add_func("/gsurf/mcp/webkit/modes-actions", test_modes_actions);
 	g_test_add_func("/gsurf/mcp/webkit/wmux-off", test_wmux_off);
 	g_test_add_func("/gsurf/mcp/webkit/socket", test_socket);

@@ -42,7 +42,7 @@ static const gchar *const all_tools[] = {
 	"navigate", "get_current_uri", "get_title", "go_back", "go_forward", "reload", "stop",
 	"get_page_text", "get_page_html", "get_links", "execute_javascript", "scroll",
 	"find_text", "click_link", "screenshot", "save_screenshot", "get_history",
-	"get_cookies", "get_config", "set_config", "set_setting", "list_modules",
+	"get_cookies", "set_cookie", "get_config", "set_config", "set_setting", "list_modules",
 	"toggle_module",
 	"list_views", "switch_view", "open_view", "close_view", "open_child_view",
 	"move_view", "set_collapsed", "get_tab_tree", "list_containers",

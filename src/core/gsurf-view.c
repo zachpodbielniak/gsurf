@@ -1080,6 +1080,42 @@ gsurf_view_find_previous(GsurfView *self)
 }
 
 void
+gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
+                            GCancellable *cancellable,
+                            GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfViewClass *klass;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(cookie != NULL);
+
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->add_cookie_async != NULL) {
+		klass->add_cookie_async(self, cookie, cancellable, callback, user_data);
+		return;
+	}
+	g_task_report_new_error(self, callback, user_data, gsurf_view_add_cookie_async,
+		G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Cookies not supported by this backend");
+}
+
+gboolean
+gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **error)
+{
+	GsurfViewClass *klass;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	if (g_async_result_is_tagged(result, gsurf_view_add_cookie_async))
+		return g_task_propagate_boolean(G_TASK(result), error);
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->add_cookie_finish != NULL)
+		return klass->add_cookie_finish(self, result, error);
+	g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		"Cookies not supported by this backend");
+	return FALSE;
+}
+
+void
 gsurf_view_set_cookie_accept_policy(GsurfView *self, gint policy)
 {
 	GSURF_VIEW_VOID_VFUNC(set_cookie_accept_policy) klass->set_cookie_accept_policy(self, policy);
