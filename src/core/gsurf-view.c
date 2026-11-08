@@ -1309,6 +1309,41 @@ gsurf_view_find_previous(GsurfView *self)
 }
 
 void
+gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
+                            GCancellable *cancellable,
+                            GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfViewClass *klass;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(cookie != NULL);
+
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->add_cookie_async != NULL) {
+		klass->add_cookie_async(self, cookie, cancellable, callback, user_data);
+		return;
+	}
+	g_task_report_new_error(self, callback, user_data, gsurf_view_add_cookie_async,
+		G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED, "Cookies not supported by this backend");
+}
+
+/*
+ * gsurf_view_add_cookie_finish:
+ *
+ * Both the "not supported" report above and every backend's
+ * add_cookie_async complete a #GTask whose source object is @self, so
+ * finishing is a plain boolean propagation; no finish vfunc is needed.
+ */
+gboolean
+gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+	g_return_val_if_fail(g_task_is_valid(result, self), FALSE);
+
+	return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+void
 gsurf_view_set_cookie_accept_policy(GsurfView *self, gint policy)
 {
 	GSURF_VIEW_VOID_VFUNC(set_cookie_accept_policy) klass->set_cookie_accept_policy(self, policy);

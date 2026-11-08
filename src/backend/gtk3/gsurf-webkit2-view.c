@@ -548,6 +548,18 @@ gsurf_webkit2_view_set_cookie_accept_policy(GsurfView *view, gint policy)
 }
 
 static void
+gsurf_webkit2_view_add_cookie_async(GsurfView *view, const GsurfCookie *cookie,
+                                    GCancellable *cancellable,
+                                    GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
+	WebKitCookieManager *cm =
+		webkit_web_context_get_cookie_manager(webkit_web_view_get_context(self->webview));
+
+	gsurf_webkit_common_add_cookie_async(view, cm, cookie, cancellable, callback, user_data);
+}
+
+static void
 gsurf_webkit2_view_set_proxy(GsurfView *view, const gchar *uri)
 {
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
@@ -896,6 +908,7 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->find_next = gsurf_webkit2_view_find_next;
 	view_class->find_previous = gsurf_webkit2_view_find_previous;
 	view_class->set_cookie_accept_policy = gsurf_webkit2_view_set_cookie_accept_policy;
+	view_class->add_cookie_async = gsurf_webkit2_view_add_cookie_async;
 	view_class->set_proxy = gsurf_webkit2_view_set_proxy;
 	view_class->register_script_message = gsurf_webkit2_view_register_script_message;
 	view_class->add_user_script_in_world = gsurf_webkit2_view_add_user_script_in_world;

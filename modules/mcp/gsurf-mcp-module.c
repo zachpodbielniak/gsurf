@@ -615,6 +615,75 @@ tool_get_cookies(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	return text_result(cookies);
 }
 
+typedef struct {
+	GMainLoop *loop;
+	GsurfView *view;
+	gboolean   done;
+	GError    *error;
+} CookieCtx;
+
+static void
+cookie_done(GObject *source, GAsyncResult *res, gpointer data)
+{
+	CookieCtx *c = data;
+
+	c->done = gsurf_view_add_cookie_finish(c->view, res, &c->error);
+	g_main_loop_quit(c->loop);
+}
+
+/* set_cookie: put one cookie into the view's session cookie store, HttpOnly
+ * included, as if a server had set it. A page that needs a sign-in cookie
+ * (an access gate, a saved session) opens signed in from its first request. */
+static McpToolResult *
+tool_set_cookie(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
+{
+	g_autoptr(GError) error = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &error);
+	const gchar *same = gsurf_mcp_arg_string(args, "same_site");
+	GsurfCookie cookie = { 0 };
+	CookieCtx c = { 0 };
+	gint64 expires = 0;
+
+	if (view == NULL)
+		return gsurf_mcp_gerror(error, "no active view");
+	cookie.name = gsurf_mcp_arg_string(args, "name");
+	cookie.value = gsurf_mcp_arg_string(args, "value");
+	cookie.domain = gsurf_mcp_arg_string(args, "domain");
+	cookie.path = gsurf_mcp_arg_string(args, "path");
+	if (cookie.name == NULL || *cookie.name == '\0')
+		return error_result("missing 'name'");
+	if (cookie.value == NULL)
+		return error_result("missing 'value'");
+	if (cookie.domain == NULL || *cookie.domain == '\0')
+		return error_result("missing 'domain'");
+	if (gsurf_mcp_arg_has(args, "expires") && !gsurf_mcp_arg_int(args, "expires", &expires, &error))
+		return gsurf_mcp_gerror(error, "bad 'expires'");
+	cookie.expires = expires;
+	if (!gsurf_mcp_arg_bool(args, "secure", &cookie.secure, &error) ||
+	    !gsurf_mcp_arg_bool(args, "http_only", &cookie.http_only, &error))
+		return gsurf_mcp_gerror(error, "bad flag");
+	if (same == NULL || g_ascii_strcasecmp(same, "lax") == 0)
+		cookie.same_site = 1;
+	else if (g_ascii_strcasecmp(same, "none") == 0)
+		cookie.same_site = 0;
+	else if (g_ascii_strcasecmp(same, "strict") == 0)
+		cookie.same_site = 2;
+	else
+		return gsurf_mcp_error("'same_site' must be none, lax or strict, not '%s'", same);
+
+	c.view = view;
+	c.loop = g_main_loop_new(NULL, FALSE);
+	gsurf_view_add_cookie_async(view, &cookie, NULL, cookie_done, &c);
+	g_main_loop_run(c.loop);
+	g_main_loop_unref(c.loop);
+	if (!c.done) {
+		McpToolResult *r = gsurf_mcp_gerror(c.error, "cookie not stored");
+		g_clear_error(&c.error);
+		return r;
+	}
+	return text_result("ok");
+}
+
 /* ----- config / settings ----- */
 
 static gchar *
@@ -868,6 +937,16 @@ static const GsurfMcpToolDef page_tools[] = {
 	{ "get_history", "Get recent history entries",
 	  {{ "limit", "number", "max entries", FALSE }}, tool_get_history },
 	{ "get_cookies", "Get the cookies visible to a view's document", {VIEW_ARG}, tool_get_cookies },
+	{ "set_cookie", "Store a cookie (HttpOnly too) in a view's session, as a server would set it",
+	  {{ "name", "string", "cookie name", TRUE },
+	   { "value", "string", "cookie value", TRUE },
+	   { "domain", "string", "host, or .domain for its subdomains too", TRUE },
+	   { "path", "string", "path (default /)", FALSE },
+	   { "expires", "integer", "expiry in Unix seconds (default: a session cookie)", FALSE },
+	   { "secure", "boolean", "https only", FALSE },
+	   { "http_only", "boolean", "hidden from page scripts", FALSE },
+	   { "same_site", "string", "none, lax (default) or strict", FALSE },
+	   VIEW_ARG }, tool_set_cookie },
 	{ "get_config", "Get the browser configuration as JSON", {{ NULL, NULL, NULL, FALSE }},
 	  tool_get_config },
 	{ "set_config", "Set a configuration value",

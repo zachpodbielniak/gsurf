@@ -388,3 +388,50 @@ gsurf_webkit_common_decide_response(GsurfView *view, WebKitPolicyDecision *decis
 	webkit_policy_decision_ignore(decision);
 	return TRUE;
 }
+
+/* --- Cookies --- */
+
+static void
+cookie_added(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	g_autoptr(GTask) task = user_data;
+	GError *error = NULL;
+
+	if (webkit_cookie_manager_add_cookie_finish(WEBKIT_COOKIE_MANAGER(source), result, &error))
+		g_task_return_boolean(task, TRUE);
+	else
+		g_task_return_error(task, error);
+}
+
+void
+gsurf_webkit_common_add_cookie_async(GsurfView *view, WebKitCookieManager *manager,
+                                     const GsurfCookie *cookie, GCancellable *cancellable,
+                                     GAsyncReadyCallback callback, gpointer user_data)
+{
+	GTask *task = g_task_new(view, cancellable, callback, user_data);
+	SoupCookie *sc;
+
+	g_task_set_source_tag(task, gsurf_webkit_common_add_cookie_async);
+	if (cookie->name == NULL || *cookie->name == '\0' ||
+	    cookie->domain == NULL || *cookie->domain == '\0') {
+		g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"a cookie needs a name and a domain");
+		g_object_unref(task);
+		return;
+	}
+	sc = soup_cookie_new(cookie->name, cookie->value != NULL ? cookie->value : "",
+		cookie->domain, cookie->path != NULL && *cookie->path != '\0' ? cookie->path : "/", -1);
+	if (cookie->expires > 0) {
+		g_autoptr(GDateTime) when = g_date_time_new_from_unix_utc(cookie->expires);
+		soup_cookie_set_expires(sc, when);
+	}
+	soup_cookie_set_secure(sc, cookie->secure);
+	soup_cookie_set_http_only(sc, cookie->http_only);
+	soup_cookie_set_same_site_policy(sc,
+		cookie->same_site == 0 ? SOUP_SAME_SITE_POLICY_NONE :
+		cookie->same_site == 2 ? SOUP_SAME_SITE_POLICY_STRICT :
+		                         SOUP_SAME_SITE_POLICY_LAX);
+	/* WebKit copies the cookie. */
+	webkit_cookie_manager_add_cookie(manager, sc, cancellable, cookie_added, task);
+	soup_cookie_free(sc);
+}

@@ -45,6 +45,32 @@ typedef enum {
 G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
 
 /**
+ * GsurfCookie:
+ * @name: the cookie name
+ * @value: the cookie value
+ * @domain: the host it belongs to ("example.com"), or a domain with a
+ *   leading dot (".example.com") for the host and its subdomains
+ * @path: the path it applies to; %NULL means "/"
+ * @expires: expiry in Unix seconds; 0 or less makes a session cookie
+ * @secure: send it over https only
+ * @http_only: hide it from page scripts (document.cookie)
+ * @same_site: 0 none, 1 lax, 2 strict
+ *
+ * One cookie for gsurf_view_add_cookie_async(). The strings are borrowed
+ * (since 0.5.11).
+ */
+typedef struct {
+	const gchar *name;
+	const gchar *value;
+	const gchar *domain;
+	const gchar *path;
+	gint64       expires;
+	gboolean     secure;
+	gboolean     http_only;
+	gint         same_site;
+} GsurfCookie;
+
+/**
  * GsurfViewClass:
  * @parent_class: the parent class
  * @load_uri: load a URI
@@ -71,9 +97,13 @@ G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
  *   page sees it as trusted (isTrusted); %NULL makes gsurf_view_send_key(),
  *   gsurf_view_send_click() and gsurf_view_send_text() dispatch DOM events
  *   from JavaScript instead (since 0.5.10)
+ * @add_cookie_async: add a cookie to the view's session cookie store and
+ *   complete a #GTask whose source object is the view, returning a boolean;
+ *   gsurf_view_add_cookie_finish() propagates it (since 0.5.11)
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
+
 struct _GsurfViewClass
 {
 	GObjectClass parent_class;
@@ -146,7 +176,11 @@ struct _GsurfViewClass
 	                                             guint modifiers, const gchar *text,
 	                                             GError **error);
 
-	gpointer padding[1];
+	/* Cookies: add one to the view's session (see gsurf_view_add_cookie_async()).
+	 * Takes the last padding slot, so the class size is unchanged. */
+	void         (*add_cookie_async)            (GsurfView *self, const GsurfCookie *cookie,
+	                                             GCancellable *cancellable,
+	                                             GAsyncReadyCallback callback, gpointer user_data);
 };
 
 /* --- Navigation --- */
@@ -437,6 +471,39 @@ void gsurf_view_find_previous(GsurfView *self);
  * Sets the cookie accept policy on the view's network session.
  */
 void gsurf_view_set_cookie_accept_policy(GsurfView *self, gint policy);
+
+/**
+ * gsurf_view_add_cookie_async:
+ * @self: a #GsurfView
+ * @cookie: the cookie to add (copied before this returns)
+ * @cancellable: (nullable): a #GCancellable
+ * @callback: (scope async): called when the cookie is stored
+ * @user_data: (closure): data for @callback
+ *
+ * Adds @cookie to the cookie store of the view's network session (its
+ * container's, when it has one), replacing a cookie with the same name,
+ * domain and path. Pages of that session send it from the next request.
+ * Fails with %G_IO_ERROR_NOT_SUPPORTED on a backend without cookies.
+ *
+ * Since: 0.5.11
+ */
+void gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
+                                 GCancellable *cancellable,
+                                 GAsyncReadyCallback callback, gpointer user_data);
+
+/**
+ * gsurf_view_add_cookie_finish:
+ * @self: a #GsurfView
+ * @result: the #GAsyncResult given to the callback
+ * @error: return location for a #GError
+ *
+ * Finishes gsurf_view_add_cookie_async().
+ *
+ * Returns: %TRUE when the cookie was stored
+ *
+ * Since: 0.5.11
+ */
+gboolean gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **error);
 
 /**
  * gsurf_view_set_proxy:

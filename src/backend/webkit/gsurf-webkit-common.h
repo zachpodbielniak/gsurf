@@ -64,6 +64,14 @@ void gsurf_webkit_common_mouse_target(GsurfView *view, WebKitHitTestResult *hit)
  * popup and return its native widget (or %NULL to block it). */
 GtkWidget *gsurf_webkit_common_create(GsurfView *view, WebKitNavigationAction *action);
 
+/* Add @cookie to @manager, @view's session cookie store. The task's source
+ * object is @view, so gsurf_view_add_cookie_finish() finishes it. */
+void     gsurf_webkit_common_add_cookie_async(GsurfView *view, WebKitCookieManager *manager,
+                                              const GsurfCookie *cookie,
+                                              GCancellable *cancellable,
+                                              GAsyncReadyCallback callback,
+                                              gpointer user_data);
+
 /* The focus tracker content script (document start, every frame). Each
  * frame posts {f: frame token, t: is top frame, e: editable focused} to
  * the "gsurfFocus" message handler whenever focus moves inside it; see

@@ -720,6 +720,17 @@ lrg_view_set_cookie_accept_policy(GsurfView *view, gint policy)
 }
 
 static void
+lrg_view_add_cookie_async(GsurfView *view, const GsurfCookie *cookie,
+                          GCancellable *cancellable,
+                          GAsyncReadyCallback callback, gpointer user_data)
+{
+	WebKitCookieManager *cm = webkit_web_context_get_cookie_manager(
+		webkit_web_view_get_context(GSURF_LRG_VIEW(view)->webview));
+
+	gsurf_webkit_common_add_cookie_async(view, cm, cookie, cancellable, callback, user_data);
+}
+
+static void
 lrg_view_set_proxy(GsurfView *view, const gchar *uri)
 {
 	GsurfLrgView *self = GSURF_LRG_VIEW(view);
@@ -1030,6 +1041,7 @@ gsurf_lrg_view_class_init(GsurfLrgViewClass *klass)
 	view_class->find_next = lrg_view_find_next;
 	view_class->find_previous = lrg_view_find_previous;
 	view_class->set_cookie_accept_policy = lrg_view_set_cookie_accept_policy;
+	view_class->add_cookie_async = lrg_view_add_cookie_async;
 	view_class->set_proxy = lrg_view_set_proxy;
 }
 
