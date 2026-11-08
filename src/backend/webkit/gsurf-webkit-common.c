@@ -435,9 +435,3 @@ gsurf_webkit_common_add_cookie_async(GsurfView *view, WebKitCookieManager *manag
 	webkit_cookie_manager_add_cookie(manager, sc, cancellable, cookie_added, task);
 	soup_cookie_free(sc);
 }
-
-gboolean
-gsurf_webkit_common_add_cookie_finish(GAsyncResult *result, GError **error)
-{
-	return g_task_propagate_boolean(G_TASK(result), error);
-}

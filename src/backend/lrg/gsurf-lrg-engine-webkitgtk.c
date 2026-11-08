@@ -22,6 +22,7 @@
 #include "backend/webkit/gsurf-webkit-session.h"
 
 #include "backend/lrg/gsurf-lrg-engine.h"
+#include "backend/gtk3/gsurf-gtk3-input.h"
 
 #include <string.h>
 #include <gtk/gtk.h>
@@ -201,139 +202,31 @@ gsurf_lrg_engine_get_webview(GsurfLrgEngine *self)
 
 /* --- input injection via synthesized GDK events --- */
 
-static guint
-engine_gdk_state(guint mods)
-{
-	guint state = 0;
-	if (mods & GSURF_MOD_SHIFT)
-		state |= GDK_SHIFT_MASK;
-	if (mods & GSURF_MOD_CTRL)
-		state |= GDK_CONTROL_MASK;
-	if (mods & GSURF_MOD_ALT)
-		state |= GDK_MOD1_MASK;
-	if (mods & GSURF_MOD_SUPER)
-		state |= GDK_SUPER_MASK;
-	return state;
-}
-
-static GdkWindow *
-engine_event_window(GsurfLrgEngine *self)
-{
-	return gtk_widget_get_window(GTK_WIDGET(self->webview));
-}
-
-static GdkDevice *
-engine_device(GsurfLrgEngine *self, gboolean keyboard)
-{
-	GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(self->webview));
-	GdkSeat *seat = gdk_display_get_default_seat(display);
-
-	return keyboard ? gdk_seat_get_keyboard(seat)
-	                : gdk_seat_get_pointer(seat);
-}
-
-/* Resolve a hardware keycode (and keyboard group) for a keysym from the
- * display keymap.  Real key events carry a hardware_keycode; WebKit's handling
- * of editing keys (Backspace/Delete/arrows) is unreliable with keycode 0 even
- * though printable chars resolve from the keyval alone.  Returns 0 if the
- * keysym isn't on the keymap. */
-static guint16
-engine_keycode_for_keysym(GsurfLrgEngine *self, guint keysym, guint8 *out_group)
-{
-	GdkDisplay *display = gtk_widget_get_display(GTK_WIDGET(self->webview));
-	GdkKeymap *keymap = gdk_keymap_get_for_display(display);
-	GdkKeymapKey *keys = NULL;
-	gint n = 0;
-	guint16 code = 0;
-
-	if (out_group != NULL)
-		*out_group = 0;
-	if (keymap != NULL
-	    && gdk_keymap_get_entries_for_keyval(keymap, keysym, &keys, &n)
-	    && n > 0) {
-		code = (guint16)keys[0].keycode;
-		if (out_group != NULL)
-			*out_group = (guint8)keys[0].group;
-	}
-	g_free(keys);
-	return code;
-}
+/*
+ * The events themselves are built in backend/gtk3/gsurf-gtk3-input.c,
+ * which the GTK3 view shares for agent input: two copies of "what a
+ * synthesized key event must carry for WebKit to take it" would differ
+ * the first time one of them learned something.
+ */
 
 void
 gsurf_lrg_engine_send_key(GsurfLrgEngine *self, guint keysym, guint keycode,
                           guint mods, gboolean pressed)
 {
-	GdkWindow *win = engine_event_window(self);
-	GdkEvent *ev;
-	guint8 group = 0;
-
-	if (win == NULL)
-		return;
-
-	/* Synthesized events must look real enough for WebKit: derive the
-	 * hardware keycode + group from the keymap when the caller didn't supply
-	 * one (the raylib path always passes 0). */
-	if (keycode == 0)
-		keycode = engine_keycode_for_keysym(self, keysym, &group);
-
-	ev = gdk_event_new(pressed ? GDK_KEY_PRESS : GDK_KEY_RELEASE);
-	ev->key.window = g_object_ref(win);
-	ev->key.send_event = TRUE;
-	ev->key.time = GDK_CURRENT_TIME;
-	ev->key.state = engine_gdk_state(mods);
-	ev->key.keyval = keysym;
-	ev->key.hardware_keycode = (guint16)keycode;
-	ev->key.group = group;
-	gdk_event_set_device(ev, engine_device(self, TRUE));
-
-	gtk_main_do_event(ev);
-	gdk_event_free(ev);
+	gsurf_gtk3_input_key(GTK_WIDGET(self->webview), keysym, keycode, mods, pressed);
 }
 
 void
 gsurf_lrg_engine_send_motion(GsurfLrgEngine *self, int x, int y, guint mods)
 {
-	GdkWindow *win = engine_event_window(self);
-	GdkEvent *ev;
-
-	if (win == NULL)
-		return;
-
-	ev = gdk_event_new(GDK_MOTION_NOTIFY);
-	ev->motion.window = g_object_ref(win);
-	ev->motion.send_event = TRUE;
-	ev->motion.time = GDK_CURRENT_TIME;
-	ev->motion.x = x;
-	ev->motion.y = y;
-	ev->motion.state = engine_gdk_state(mods);
-	gdk_event_set_device(ev, engine_device(self, FALSE));
-
-	gtk_main_do_event(ev);
-	gdk_event_free(ev);
+	gsurf_gtk3_input_motion(GTK_WIDGET(self->webview), x, y, mods);
 }
 
 void
 gsurf_lrg_engine_send_button(GsurfLrgEngine *self, int x, int y, guint button,
                              gboolean pressed, guint mods)
 {
-	GdkWindow *win = engine_event_window(self);
-	GdkEvent *ev;
-
-	if (win == NULL)
-		return;
-
-	ev = gdk_event_new(pressed ? GDK_BUTTON_PRESS : GDK_BUTTON_RELEASE);
-	ev->button.window = g_object_ref(win);
-	ev->button.send_event = TRUE;
-	ev->button.time = GDK_CURRENT_TIME;
-	ev->button.x = x;
-	ev->button.y = y;
-	ev->button.button = button;
-	ev->button.state = engine_gdk_state(mods);
-	gdk_event_set_device(ev, engine_device(self, FALSE));
-
-	gtk_main_do_event(ev);
-	gdk_event_free(ev);
+	gsurf_gtk3_input_button(GTK_WIDGET(self->webview), x, y, button, pressed, mods);
 }
 
 /* One discrete wheel "click" in DIR -- WebKit scrolls by its standard step,
@@ -343,7 +236,9 @@ static void
 engine_scroll_click(GsurfLrgEngine *self, int x, int y, GdkScrollDirection dir,
                     guint mods)
 {
-	GdkWindow *win = engine_event_window(self);
+	gdouble wx = x;
+	gdouble wy = y;
+	GdkWindow *win = gsurf_gtk3_input_window(GTK_WIDGET(self->webview), &wx, &wy);
 	GdkEvent *ev;
 
 	if (win == NULL)
@@ -352,11 +247,11 @@ engine_scroll_click(GsurfLrgEngine *self, int x, int y, GdkScrollDirection dir,
 	ev->scroll.window = g_object_ref(win);
 	ev->scroll.send_event = TRUE;
 	ev->scroll.time = GDK_CURRENT_TIME;
-	ev->scroll.x = x;
-	ev->scroll.y = y;
-	ev->scroll.state = engine_gdk_state(mods);
+	ev->scroll.x = wx;
+	ev->scroll.y = wy;
+	ev->scroll.state = gsurf_gtk3_input_state(mods);
 	ev->scroll.direction = dir;
-	gdk_event_set_device(ev, engine_device(self, FALSE));
+	gdk_event_set_device(ev, gsurf_gtk3_input_device(GTK_WIDGET(self->webview), FALSE));
 	gtk_main_do_event(ev);
 	gdk_event_free(ev);
 }
@@ -488,7 +383,7 @@ gsurf_lrg_engine_set_focus(GsurfLrgEngine *self, gboolean focused)
 		gtk_widget_grab_focus(GTK_WIDGET(self->webview));
 	}
 
-	win = engine_event_window(self);
+	win = gsurf_gtk3_input_window(GTK_WIDGET(self->webview), NULL, NULL);
 	if (win == NULL)
 		return;
 
@@ -498,7 +393,7 @@ gsurf_lrg_engine_set_focus(GsurfLrgEngine *self, gboolean focused)
 	ev->focus_change.in = focused;
 	/* A real focus event carries the keyboard device; without one GDK warns
 	 * ("Event with type 12 not holding a GdkDevice") and may drop it. */
-	gdk_event_set_device(ev, engine_device(self, TRUE));
+	gdk_event_set_device(ev, gsurf_gtk3_input_device(GTK_WIDGET(self->webview), TRUE));
 	gtk_main_do_event(ev);
 	gdk_event_free(ev);
 }

@@ -328,6 +328,149 @@ tool_click_link(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	return text_result(result);
 }
 
+/* ----- input: click, type_text, press_key ----- */
+
+/*
+ * Where the element matching @selector is: scrolled into view, focused,
+ * and its centre as view coordinates -- gsurf_view_locate_script(), the
+ * same reading the control socket's page.click uses.  FALSE with
+ * @error_text when nothing matches.
+ */
+static gboolean
+locate(GsurfView *view, const gchar *selector, gdouble *x, gdouble *y,
+       gchar **error_text)
+{
+	g_autofree gchar *script = gsurf_view_locate_script(selector);
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *where = run_js_sync(view, script, &error);
+	g_autoptr(JsonParser) parser = json_parser_new();
+	JsonNode *root;
+	JsonArray *xy;
+
+	if (where == NULL) {
+		*error_text = g_strdup(error != NULL ? error->message : "javascript failed");
+		return FALSE;
+	}
+	if (!json_parser_load_from_data(parser, where, -1, NULL) ||
+	    (root = json_parser_get_root(parser)) == NULL || !JSON_NODE_HOLDS_ARRAY(root) ||
+	    json_array_get_length(xy = json_node_get_array(root)) != 2) {
+		*error_text = g_strdup_printf("nothing on the page matches '%s'", selector);
+		return FALSE;
+	}
+	*x = json_array_get_double_element(xy, 0);
+	*y = json_array_get_double_element(xy, 1);
+	return TRUE;
+}
+
+static McpToolResult *
+tool_click(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
+{
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
+	const gchar *selector = args && json_object_has_member(args, "selector")
+		? json_object_get_string_member(args, "selector") : NULL;
+	gint64 button = args && json_object_has_member(args, "button")
+		? json_object_get_int_member(args, "button") : 1;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *why = NULL;
+	g_autofree gchar *said = NULL;
+	gdouble x = -1;
+	gdouble y = -1;
+
+	if (view == NULL)
+		return gsurf_mcp_gerror(verr, "no active view");
+
+	if (selector != NULL && *selector != '\0') {
+		if (!locate(view, selector, &x, &y, &why))
+			return error_result(why);
+	} else if (args && json_object_has_member(args, "x") &&
+	           json_object_has_member(args, "y")) {
+		x = json_object_get_double_member(args, "x");
+		y = json_object_get_double_member(args, "y");
+	} else {
+		return error_result("give a 'selector', or 'x' and 'y'");
+	}
+
+	if (!gsurf_view_send_click(view, x, y, (guint)CLAMP(button, 1, 3), 0, &error))
+		return error_result(error->message);
+	said = g_strdup_printf("clicked at %.0f, %.0f", x, y);
+	return text_result(said);
+}
+
+static McpToolResult *
+tool_type_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
+{
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
+	const gchar *text = args && json_object_has_member(args, "text")
+		? json_object_get_string_member(args, "text") : NULL;
+	const gchar *selector = args && json_object_has_member(args, "selector")
+		? json_object_get_string_member(args, "selector") : NULL;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *why = NULL;
+	gdouble x;
+	gdouble y;
+
+	if (view == NULL)
+		return gsurf_mcp_gerror(verr, "no active view");
+	if (text == NULL)
+		return error_result("missing 'text'");
+	/* locating focuses the element, which is where the text goes */
+	if (selector != NULL && *selector != '\0' && !locate(view, selector, &x, &y, &why))
+		return error_result(why);
+	if (!gsurf_view_send_text(view, text, &error))
+		return error_result(error->message);
+	return text_result("typed");
+}
+
+static McpToolResult *
+tool_press_key(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
+{
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
+	const gchar *key = args && json_object_has_member(args, "key")
+		? json_object_get_string_member(args, "key") : NULL;
+	const gchar *mods_text = args && json_object_has_member(args, "modifiers")
+		? json_object_get_string_member(args, "modifiers") : NULL;
+	g_autoptr(GError) error = NULL;
+	guint keyval = gsurf_view_keyval_from_name(key);
+	guint mods = 0;
+
+	if (view == NULL)
+		return gsurf_mcp_gerror(verr, "no active view");
+	if (keyval == 0)
+		return error_result("not a key: name one (Enter, Tab, Escape, Backspace, Delete, "
+		                    "ArrowUp, Home, PageDown, space, ...) or give one character");
+
+	/* "ctrl+shift" -- one string, since a tool argument here is a scalar */
+	if (mods_text != NULL) {
+		g_auto(GStrv) names = g_strsplit_set(mods_text, "+, ", -1);
+		guint i;
+
+		for (i = 0; names[i] != NULL; i++) {
+			if (*names[i] == '\0')
+				continue;
+			if (g_ascii_strcasecmp(names[i], "ctrl") == 0 ||
+			    g_ascii_strcasecmp(names[i], "control") == 0)
+				mods |= GSURF_MOD_CTRL;
+			else if (g_ascii_strcasecmp(names[i], "shift") == 0)
+				mods |= GSURF_MOD_SHIFT;
+			else if (g_ascii_strcasecmp(names[i], "alt") == 0)
+				mods |= GSURF_MOD_ALT;
+			else if (g_ascii_strcasecmp(names[i], "super") == 0 ||
+			         g_ascii_strcasecmp(names[i], "meta") == 0)
+				mods |= GSURF_MOD_SUPER;
+			else
+				return error_result("modifiers are ctrl, shift, alt and super, "
+				                    "joined with '+'");
+		}
+	}
+
+	if (!gsurf_view_send_key(view, keyval, mods, &error))
+		return error_result(error->message);
+	return text_result("pressed");
+}
+
 /* ----- capture ----- */
 
 typedef struct {
@@ -771,6 +914,23 @@ static const GsurfMcpToolDef page_tools[] = {
 	{ "click_link", "Click a link by index (a[href] order) or CSS selector",
 	  {{ "index", "number", "link index", FALSE },
 	   { "selector", "string", "CSS selector", FALSE }, VIEW_ARG }, tool_click_link },
+	{ "click", "Click in a view: at the element matching a CSS selector (scrolled into view "
+	  "first) or at x, y in CSS pixels. Trusted input on GTK3",
+	  {{ "selector", "string", "CSS selector of the element to click", FALSE },
+	   { "x", "number", "horizontal position, CSS pixels", FALSE },
+	   { "y", "number", "vertical position, CSS pixels", FALSE },
+	   { "button", "number", "1 left (default), 2 middle, 3 right", FALSE }, VIEW_ARG },
+	  tool_click },
+	{ "type_text", "Type text into the focused element, or the one matching 'selector' "
+	  "(focused first); a newline is Enter. Trusted input on GTK3",
+	  {{ "text", "string", "the text to type", TRUE },
+	   { "selector", "string", "CSS selector to focus first", FALSE }, VIEW_ARG },
+	  tool_type_text },
+	{ "press_key", "Press one key: Enter, Tab, Escape, Backspace, Delete, ArrowUp, Home, "
+	  "PageDown, space, ... or one character. Trusted input on GTK3",
+	  {{ "key", "string", "the key", TRUE },
+	   { "modifiers", "string", "held modifiers joined with '+': ctrl+shift", FALSE },
+	   VIEW_ARG }, tool_press_key },
 	{ "screenshot", "Capture a view's visible page as a PNG image", {VIEW_ARG}, tool_screenshot },
 	{ "save_screenshot", "Capture a view's visible page to a PNG file",
 	  {{ "path", "string", "output file path", TRUE }, VIEW_ARG }, tool_save_screenshot },

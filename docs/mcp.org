@@ -91,10 +91,15 @@ Tools that change wmux panes or windows return the current wmux window's panes a
 | =scroll= | =direction=, =view?= | up / down / top / bottom |
 | =find_text= | =text=, =backward?=, =view?= | Find in page |
 | =click_link= | =index?= or =selector?=, =view?= | Click a link |
+| =click= | =selector?= or =x=, =y=; =button?=, =view?= | Click at an element (scrolled into view and focused first) or at a point in CSS pixels (since 0.5.10) |
+| =type_text= | =text=, =selector?=, =view?= | Type into the focused element, or the one matching =selector=; a newline is Enter (since 0.5.10) |
+| =press_key= | =key=, =modifiers?=, =view?= | One key by name (=Enter=, =Tab=, =Escape=, =Backspace=, =ArrowUp=, =Home=, =PageDown=, =space=, ...) or one character; =modifiers= is =ctrl+shift= style (since 0.5.10) |
+
+=click=, =type_text= and =press_key= return once the input is handed to the engine; the page handles it a moment later, so read the result (=get_page_text=, =execute_javascript=) rather than assuming it. On GTK3 the input is GTK's own events and the page sees it as trusted; GTK4 and LRG views dispatch DOM events from JavaScript instead.
 | =screenshot= / =save_screenshot= | (=path=), =view?= | PNG of the visible page |
 | =get_history= | =limit?= | Recent history lines |
 | =get_cookies= | =view?= | =document.cookie= |
-| =set_cookie= | =name=, =value=, =domain=, =path?=, =expires?=, =secure?=, =http_only?=, =same_site?=, =view?= | Store one cookie in the view's session (its container's), HttpOnly too, as a server would set it |
+| =set_cookie= | =name=, =value=, =domain=, =path?=, =expires?=, =secure?=, =http_only?=, =same_site?=, =view?= | Store one cookie in the view's session (its container's), HttpOnly too, as a server would set it (since 0.5.11) |
 | =get_config= / =set_config= | (=key=, =value=) | Browser configuration |
 | =set_setting= | =key=, =value= | Web-engine setting, applied to the active view |
 | =list_modules= / =toggle_module= | (=name=, =enabled?=) | Modules |
@@ -445,7 +450,7 @@ Since 0.4.4 (all GIR-annotated, see the headers):
 | =gsurf_module_manager_execute_action()= and =gsurf_module_manager_set_action_executor()= (the gsurf binary registers its keybind executor) | =run_action=, =set_mode=, =follow_hints= with kiosk refusals |
 | =gsurf_module_manager_get_mode()= (0.4.2) | =get_mode= |
 | =GsurfContainerRegistry=, =gsurf_window_reopen_view()=, =gsurf_view_new_full()= | containers and view creation |
-| =gsurf_view_add_cookie_async()= / =_finish()= and =GsurfCookie= (0.5.10; GTK3, GTK4 and LRG backends) | =set_cookie= |
+| =gsurf_view_add_cookie_async()= / =_finish()= and =GsurfCookie= (0.5.11; GTK3, GTK4 and LRG backends) | =set_cookie= |
 
 See [[file:architecture.org][architecture.org]] ("Window layouts (panes)") and [[file:module-system.org][module-system.org]].
 

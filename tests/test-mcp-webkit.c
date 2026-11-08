@@ -82,6 +82,24 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 			strlen(body));
 		return;
 	}
+
+	/* /form: an input and a button that reports what it was given */
+	if (g_strcmp0(path, "/form") == 0) {
+		static const gchar form[] =
+			"<!doctype html><html><head><title>form</title></head><body>"
+			"<input id='name' autocomplete='off'>"
+			"<button id='go' style='margin:40px' onclick=\"document.title="
+			"'got:'+document.getElementById('name').value\">Go</button>"
+			"<script>document.addEventListener('keydown',function(e){"
+			"if(e.key==='Escape')document.body.dataset.esc='yes';});</script>"
+			"</body></html>";
+
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, form,
+			strlen(form));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><a href=\"/p/linked\">link</a> %s</body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -179,7 +197,8 @@ h_init(H *h, const gchar *extra_yaml)
 		"follow_hints", "run_action", "list_actions", "wmux_status", "list_wmux_windows",
 		"list_panes", "wmux_command", "split_pane", "select_pane", "kill_pane", "zoom_pane",
 		"select_layout", "show_view_in_pane", "select_window", "new_window",
-		"rename_window", "kill_window", "toggle_module", "set_cookie", "execute_javascript", NULL
+		"rename_window", "kill_window", "toggle_module", "set_cookie", "click", "type_text",
+		"press_key", "execute_javascript", NULL
 	};
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GString) yaml = NULL;
@@ -942,6 +961,73 @@ test_cookies(void)
 /* Modes and actions                                                   */
 /* ------------------------------------------------------------------ */
 
+/* click, type_text and press_key: what an agent drives a form with. */
+static void
+test_input(void)
+{
+	H h;
+	g_autofree gchar *form = NULL;
+	gchar *text;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h, NULL))
+		return;
+
+	form = g_strdup_printf("http://127.0.0.1:%u/form", port);
+	g_free(callf(&h, "navigate", FALSE, "{\"uri\":\"%s\"}", form));
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "form") == 0);
+	g_free(call(&h, "set_mode", "{\"mode\":\"insert\"}", FALSE));
+
+	g_free(call(&h, "type_text", "{\"selector\":\"#name\",\"text\":\"agent\"}", FALSE));
+	/* keys are handled after the call returns: wait for them to land */
+	{
+		gchar *value = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(value);
+			value = call(&h, "execute_javascript",
+				"{\"code\":\"document.getElementById('name').value\"}", FALSE);
+			if (strstr(value, "agent") != NULL)
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+		ASSERT_HAS(value, "agent");
+		g_free(value);
+	}
+	text = call(&h, "click", "{\"selector\":\"#go\"}", FALSE);
+	ASSERT_HAS(text, "clicked at");
+	g_free(text);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "got:agent") == 0);
+
+	g_free(call(&h, "press_key", "{\"key\":\"Escape\"}", FALSE));
+	{
+		gchar *esc = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(esc);
+			esc = call(&h, "execute_javascript",
+				"{\"code\":\"document.body.dataset.esc || ''\"}", FALSE);
+			if (strstr(esc, "yes") != NULL)
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+		ASSERT_HAS(esc, "yes");
+		g_free(esc);
+	}
+
+	/* refusals say what to do */
+	text = call(&h, "click", "{\"selector\":\"#nothing\"}", TRUE);
+	ASSERT_HAS(text, "nothing on the page matches");
+	g_free(text);
+	g_free(call(&h, "click", "{}", TRUE));
+	g_free(call(&h, "press_key", "{\"key\":\"NotAKey\"}", TRUE));
+	g_free(call(&h, "press_key", "{\"key\":\"a\",\"modifiers\":\"hyper\"}", TRUE));
+	g_free(call(&h, "type_text", "{}", TRUE));
+
+	h_free(&h);
+}
+
 static void
 test_modes_actions(void)
 {
@@ -1175,6 +1261,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/mcp/webkit/containers", test_containers);
 	g_test_add_func("/gsurf/mcp/webkit/cookies", test_cookies);
 	g_test_add_func("/gsurf/mcp/webkit/modes-actions", test_modes_actions);
+	g_test_add_func("/gsurf/mcp/webkit/input", test_input);
 	g_test_add_func("/gsurf/mcp/webkit/wmux-off", test_wmux_off);
 	g_test_add_func("/gsurf/mcp/webkit/socket", test_socket);
 

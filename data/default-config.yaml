@@ -438,6 +438,9 @@ modules:
       find_text: false
       execute_javascript: false     # arbitrary JS in page context
       click_link: false
+      click: false                  # input into the page, as a person would
+      type_text: false
+      press_key: false
       scroll: false
       list_views: false
       switch_view: false

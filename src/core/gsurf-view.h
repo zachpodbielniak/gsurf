@@ -27,7 +27,48 @@ G_BEGIN_DECLS
 
 #define GSURF_TYPE_VIEW (gsurf_view_get_type())
 
+/**
+ * GsurfViewInput:
+ * @GSURF_VIEW_INPUT_KEY: press and release one key (keyval, modifiers)
+ * @GSURF_VIEW_INPUT_CLICK: press and release a pointer button at a point
+ *   in the view (x, y, button, modifiers)
+ * @GSURF_VIEW_INPUT_TEXT: type a string, one character at a time
+ *
+ * What #GsurfViewClass.send_input is asked to do (since 0.5.10).
+ */
+typedef enum {
+	GSURF_VIEW_INPUT_KEY,
+	GSURF_VIEW_INPUT_CLICK,
+	GSURF_VIEW_INPUT_TEXT
+} GsurfViewInput;
+
 G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
+
+/**
+ * GsurfCookie:
+ * @name: the cookie name
+ * @value: the cookie value
+ * @domain: the host it belongs to ("example.com"), or a domain with a
+ *   leading dot (".example.com") for the host and its subdomains
+ * @path: the path it applies to; %NULL means "/"
+ * @expires: expiry in Unix seconds; 0 or less makes a session cookie
+ * @secure: send it over https only
+ * @http_only: hide it from page scripts (document.cookie)
+ * @same_site: 0 none, 1 lax, 2 strict
+ *
+ * One cookie for gsurf_view_add_cookie_async(). The strings are borrowed
+ * (since 0.5.11).
+ */
+typedef struct {
+	const gchar *name;
+	const gchar *value;
+	const gchar *domain;
+	const gchar *path;
+	gint64       expires;
+	gboolean     secure;
+	gboolean     http_only;
+	gint         same_site;
+} GsurfCookie;
 
 /**
  * GsurfViewClass:
@@ -52,33 +93,16 @@ G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
  * @get_snapshot_finish: finish a snapshot (returns PNG #GBytes)
  * @get_native_widget: the underlying native widget (as gpointer)
  * @focus: give keyboard focus to the page (see gsurf_view_focus())
+ * @send_input: deliver input as the native toolkit's own events, so the
+ *   page sees it as trusted (isTrusted); %NULL makes gsurf_view_send_key(),
+ *   gsurf_view_send_click() and gsurf_view_send_text() dispatch DOM events
+ *   from JavaScript instead (since 0.5.10)
+ * @add_cookie_async: add a cookie to the view's session cookie store and
+ *   complete a #GTask whose source object is the view, returning a boolean;
+ *   gsurf_view_add_cookie_finish() propagates it (since 0.5.11)
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
-/**
- * GsurfCookie:
- * @name: the cookie name
- * @value: the cookie value
- * @domain: the host it belongs to ("example.com"), or a domain with a
- *   leading dot (".example.com") for the host and its subdomains
- * @path: the path it applies to; %NULL means "/"
- * @expires: expiry in Unix seconds; 0 or less makes a session cookie
- * @secure: send it over https only
- * @http_only: hide it from page scripts (document.cookie)
- * @same_site: 0 none, 1 lax, 2 strict
- *
- * One cookie for gsurf_view_add_cookie_async(). The strings are borrowed.
- */
-typedef struct {
-	const gchar *name;
-	const gchar *value;
-	const gchar *domain;
-	const gchar *path;
-	gint64       expires;
-	gboolean     secure;
-	gboolean     http_only;
-	gint         same_site;
-} GsurfCookie;
 
 struct _GsurfViewClass
 {
@@ -147,12 +171,16 @@ struct _GsurfViewClass
 	/* The page favicon as the native image type. */
 	gpointer     (*get_favicon)                 (GsurfView *self);
 
-	/* Cookies: add one to the view's session (see gsurf_view_add_cookie_async()). */
+	gboolean     (*send_input)                  (GsurfView *self, GsurfViewInput kind,
+	                                             gdouble x, gdouble y, guint code,
+	                                             guint modifiers, const gchar *text,
+	                                             GError **error);
+
+	/* Cookies: add one to the view's session (see gsurf_view_add_cookie_async()).
+	 * Takes the last padding slot, so the class size is unchanged. */
 	void         (*add_cookie_async)            (GsurfView *self, const GsurfCookie *cookie,
 	                                             GCancellable *cancellable,
 	                                             GAsyncReadyCallback callback, gpointer user_data);
-	gboolean     (*add_cookie_finish)           (GsurfView *self, GAsyncResult *result,
-	                                             GError **error);
 };
 
 /* --- Navigation --- */
@@ -227,6 +255,82 @@ gchar       *gsurf_view_run_javascript_finish(GsurfView *self, GAsyncResult *res
 void         gsurf_view_get_snapshot_async(GsurfView *self, GCancellable *cancellable,
                                            GAsyncReadyCallback callback, gpointer user_data);
 GBytes      *gsurf_view_get_snapshot_finish(GsurfView *self, GAsyncResult *result, GError **error);
+
+/* --- Input (since 0.5.10) --- */
+
+/**
+ * gsurf_view_send_key:
+ * @self: a #GsurfView
+ * @keyval: an X/GDK keysym (gsurf_view_keyval_from_name() resolves names)
+ * @modifiers: #GsurfKeyMod flags held while it is pressed
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Presses and releases one key in the page, as the keyboard would.  On
+ * a backend with native input (GTK3) the page sees a trusted event; on
+ * the others it is dispatched from JavaScript and is not trusted.
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_key(GsurfView *self, guint keyval, guint modifiers,
+                                 GError **error);
+
+/**
+ * gsurf_view_send_click:
+ * @self: a #GsurfView
+ * @x: horizontal position in the view, in CSS pixels from its left edge
+ * @y: vertical position in the view, in CSS pixels from its top edge
+ * @button: 1 left, 2 middle, 3 right
+ * @modifiers: #GsurfKeyMod flags held during the click
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Moves the pointer to (@x, @y) and presses and releases @button there.
+ * Trusted where the backend has native input, as for gsurf_view_send_key().
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_click(GsurfView *self, gdouble x, gdouble y, guint button,
+                                   guint modifiers, GError **error);
+
+/**
+ * gsurf_view_send_text:
+ * @self: a #GsurfView
+ * @text: UTF-8 text; a newline is the Return key
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Types @text into whatever has the page's focus, one key at a time.
+ * Trusted where the backend has native input, as for gsurf_view_send_key().
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_text(GsurfView *self, const gchar *text, GError **error);
+
+/**
+ * gsurf_view_keyval_from_name:
+ * @name: a key name -- "Enter", "Tab", "Escape", "Backspace", "Delete",
+ *   "ArrowLeft"/"Left", "Home", "PageDown", "space", ... -- or one character
+ *
+ * The keysym gsurf_view_send_key() takes for @name.  The DOM's names
+ * (KeyboardEvent.key) and the X ones are both accepted, case-insensitively
+ * for the named keys.
+ *
+ * Returns: the keysym, or 0 when @name is not a key
+ */
+guint        gsurf_view_keyval_from_name(const gchar *name);
+
+/**
+ * gsurf_view_locate_script:
+ * @selector: a CSS selector
+ *
+ * JavaScript that finds the first element matching @selector, scrolls it
+ * into view, focuses it, and evaluates to a JSON array [x, y] -- the
+ * centre of its box in view coordinates, ready for
+ * gsurf_view_send_click() -- or to null when nothing matches.  The one
+ * spelling for every caller that clicks or types "at a selector", so they
+ * agree on what "the element" is.
+ *
+ * Returns: (transfer full): the script
+ */
+gchar       *gsurf_view_locate_script(const gchar *selector);
 
 /* --- Editing state (DOM focus awareness) --- */
 
@@ -373,12 +477,15 @@ void gsurf_view_set_cookie_accept_policy(GsurfView *self, gint policy);
  * @self: a #GsurfView
  * @cookie: the cookie to add (copied before this returns)
  * @cancellable: (nullable): a #GCancellable
- * @callback: called when the cookie is stored
- * @user_data: data for @callback
+ * @callback: (scope async): called when the cookie is stored
+ * @user_data: (closure): data for @callback
  *
  * Adds @cookie to the cookie store of the view's network session (its
  * container's, when it has one), replacing a cookie with the same name,
  * domain and path. Pages of that session send it from the next request.
+ * Fails with %G_IO_ERROR_NOT_SUPPORTED on a backend without cookies.
+ *
+ * Since: 0.5.11
  */
 void gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
                                  GCancellable *cancellable,
@@ -390,7 +497,11 @@ void gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
  * @result: the #GAsyncResult given to the callback
  * @error: return location for a #GError
  *
+ * Finishes gsurf_view_add_cookie_async().
+ *
  * Returns: %TRUE when the cookie was stored
+ *
+ * Since: 0.5.11
  */
 gboolean gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **error);
 

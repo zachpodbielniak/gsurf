@@ -730,12 +730,6 @@ lrg_view_add_cookie_async(GsurfView *view, const GsurfCookie *cookie,
 	gsurf_webkit_common_add_cookie_async(view, cm, cookie, cancellable, callback, user_data);
 }
 
-static gboolean
-lrg_view_add_cookie_finish(GsurfView *view, GAsyncResult *result, GError **error)
-{
-	return gsurf_webkit_common_add_cookie_finish(result, error);
-}
-
 static void
 lrg_view_set_proxy(GsurfView *view, const gchar *uri)
 {
@@ -1048,7 +1042,6 @@ gsurf_lrg_view_class_init(GsurfLrgViewClass *klass)
 	view_class->find_previous = lrg_view_find_previous;
 	view_class->set_cookie_accept_policy = lrg_view_set_cookie_accept_policy;
 	view_class->add_cookie_async = lrg_view_add_cookie_async;
-	view_class->add_cookie_finish = lrg_view_add_cookie_finish;
 	view_class->set_proxy = lrg_view_set_proxy;
 }
 

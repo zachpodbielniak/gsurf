@@ -65,13 +65,12 @@ void gsurf_webkit_common_mouse_target(GsurfView *view, WebKitHitTestResult *hit)
 GtkWidget *gsurf_webkit_common_create(GsurfView *view, WebKitNavigationAction *action);
 
 /* Add @cookie to @manager, @view's session cookie store. The task's source
- * object is @view; finish with gsurf_webkit_common_add_cookie_finish(). */
+ * object is @view, so gsurf_view_add_cookie_finish() finishes it. */
 void     gsurf_webkit_common_add_cookie_async(GsurfView *view, WebKitCookieManager *manager,
                                               const GsurfCookie *cookie,
                                               GCancellable *cancellable,
                                               GAsyncReadyCallback callback,
                                               gpointer user_data);
-gboolean gsurf_webkit_common_add_cookie_finish(GAsyncResult *result, GError **error);
 
 /* The focus tracker content script (document start, every frame). Each
  * frame posts {f: frame token, t: is top frame, e: editable focused} to
