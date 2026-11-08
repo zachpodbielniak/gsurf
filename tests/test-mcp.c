@@ -1274,6 +1274,100 @@ test_containers(void)
 	h_free(&h);
 }
 
+/* What gsurf_view_add_cookie_async() reported. */
+typedef struct {
+	gboolean  called;
+	gboolean  stored;
+	GError   *error;
+} CookieResult;
+
+static void
+cookie_result(GObject *source, GAsyncResult *res, gpointer user_data)
+{
+	CookieResult *r = user_data;
+
+	r->called = TRUE;
+	r->stored = gsurf_view_add_cookie_finish(GSURF_VIEW(source), res, &r->error);
+}
+
+/* A backend without cookies (the headless TestView fills no add_cookie_async
+ * slot): the core API and set_cookie both fail with "not supported", never
+ * crash or claim success. The argument errors are checked before the view
+ * is asked, so they hold on every backend; test-mcp-webkit covers a real
+ * cookie reaching a server. */
+static void
+test_cookies(void)
+{
+	H h = { 0 };
+	g_autofree gchar *yaml = config_yaml(TRUE, NULL);
+	GsurfCookie cookie = { 0 };
+	CookieResult r = { 0 };
+	gchar *text;
+	guint i;
+
+	if (!h_mcp(&h, yaml))
+		return;
+	h_window(&h);
+
+	/* 1. The core API: the report completes from an idle, with
+	 *    G_IO_ERROR_NOT_SUPPORTED, and the finish says "not stored". */
+	cookie.name = "sid";
+	cookie.value = "1";
+	cookie.domain = "example.com";
+	gsurf_view_add_cookie_async(h.a, &cookie, NULL, cookie_result, &r);
+	g_assert_false(r.called);
+	for (i = 0; i < 100 && !r.called; i++)
+		g_main_context_iteration(NULL, TRUE);
+	g_assert_true(r.called);
+	g_assert_false(r.stored);
+	g_assert_error(r.error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED);
+	g_clear_error(&r.error);
+
+	/* 2. set_cookie on that view: a tool error carrying the reason. */
+	text = call(&h, "set_cookie", "{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\"}",
+		TRUE);
+	ASSERT_HAS(text, "not supported");
+	g_free(text);
+	text = callf(&h, "set_cookie", TRUE,
+		"{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\",\"view\":%" G_GUINT64_FORMAT "}",
+		gsurf_view_get_id(h.c));
+	ASSERT_HAS(text, "not supported");
+	g_free(text);
+
+	/* 3. Argument errors, before any backend is asked. */
+	text = call(&h, "set_cookie", "{\"value\":\"1\",\"domain\":\"example.com\"}", TRUE);
+	ASSERT_HAS(text, "missing 'name'");
+	g_free(text);
+	text = call(&h, "set_cookie", "{\"name\":\"\",\"value\":\"1\",\"domain\":\"example.com\"}", TRUE);
+	ASSERT_HAS(text, "missing 'name'");
+	g_free(text);
+	text = call(&h, "set_cookie", "{\"name\":\"sid\",\"domain\":\"example.com\"}", TRUE);
+	ASSERT_HAS(text, "missing 'value'");
+	g_free(text);
+	text = call(&h, "set_cookie", "{\"name\":\"sid\",\"value\":\"1\"}", TRUE);
+	ASSERT_HAS(text, "missing 'domain'");
+	g_free(text);
+	text = call(&h, "set_cookie",
+		"{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\",\"expires\":\"soon\"}", TRUE);
+	g_assert_null(strstr(text, "not supported"));
+	g_free(text);
+	text = call(&h, "set_cookie",
+		"{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\",\"secure\":\"maybe\"}", TRUE);
+	g_assert_null(strstr(text, "not supported"));
+	g_free(text);
+	text = call(&h, "set_cookie",
+		"{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\",\"same_site\":\"sometimes\"}",
+		TRUE);
+	ASSERT_HAS(text, "'same_site' must be none, lax or strict, not 'sometimes'");
+	g_free(text);
+	text = call(&h, "set_cookie",
+		"{\"name\":\"sid\",\"value\":\"1\",\"domain\":\"example.com\",\"view\":999999}", TRUE);
+	ASSERT_HAS(text, "unknown view 999999");
+	g_free(text);
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1293,6 +1387,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/mcp/wmux", test_wmux);
 	g_test_add_func("/mcp/actions-and-kiosk", test_actions_and_kiosk);
 	g_test_add_func("/mcp/containers", test_containers);
+	g_test_add_func("/mcp/cookies", test_cookies);
 
 	ret = g_test_run();
 	if (so_handle != NULL)
