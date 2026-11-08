@@ -27,6 +27,21 @@ G_BEGIN_DECLS
 
 #define GSURF_TYPE_VIEW (gsurf_view_get_type())
 
+/**
+ * GsurfViewInput:
+ * @GSURF_VIEW_INPUT_KEY: press and release one key (keyval, modifiers)
+ * @GSURF_VIEW_INPUT_CLICK: press and release a pointer button at a point
+ *   in the view (x, y, button, modifiers)
+ * @GSURF_VIEW_INPUT_TEXT: type a string, one character at a time
+ *
+ * What #GsurfViewClass.send_input is asked to do (since 0.5.10).
+ */
+typedef enum {
+	GSURF_VIEW_INPUT_KEY,
+	GSURF_VIEW_INPUT_CLICK,
+	GSURF_VIEW_INPUT_TEXT
+} GsurfViewInput;
+
 G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
 
 /**
@@ -52,6 +67,10 @@ G_DECLARE_DERIVABLE_TYPE(GsurfView, gsurf_view, GSURF, VIEW, GObject)
  * @get_snapshot_finish: finish a snapshot (returns PNG #GBytes)
  * @get_native_widget: the underlying native widget (as gpointer)
  * @focus: give keyboard focus to the page (see gsurf_view_focus())
+ * @send_input: deliver input as the native toolkit's own events, so the
+ *   page sees it as trusted (isTrusted); %NULL makes gsurf_view_send_key(),
+ *   gsurf_view_send_click() and gsurf_view_send_text() dispatch DOM events
+ *   from JavaScript instead (since 0.5.10)
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
@@ -122,7 +141,12 @@ struct _GsurfViewClass
 	/* The page favicon as the native image type. */
 	gpointer     (*get_favicon)                 (GsurfView *self);
 
-	gpointer padding[2];
+	gboolean     (*send_input)                  (GsurfView *self, GsurfViewInput kind,
+	                                             gdouble x, gdouble y, guint code,
+	                                             guint modifiers, const gchar *text,
+	                                             GError **error);
+
+	gpointer padding[1];
 };
 
 /* --- Navigation --- */
@@ -197,6 +221,82 @@ gchar       *gsurf_view_run_javascript_finish(GsurfView *self, GAsyncResult *res
 void         gsurf_view_get_snapshot_async(GsurfView *self, GCancellable *cancellable,
                                            GAsyncReadyCallback callback, gpointer user_data);
 GBytes      *gsurf_view_get_snapshot_finish(GsurfView *self, GAsyncResult *result, GError **error);
+
+/* --- Input (since 0.5.10) --- */
+
+/**
+ * gsurf_view_send_key:
+ * @self: a #GsurfView
+ * @keyval: an X/GDK keysym (gsurf_view_keyval_from_name() resolves names)
+ * @modifiers: #GsurfKeyMod flags held while it is pressed
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Presses and releases one key in the page, as the keyboard would.  On
+ * a backend with native input (GTK3) the page sees a trusted event; on
+ * the others it is dispatched from JavaScript and is not trusted.
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_key(GsurfView *self, guint keyval, guint modifiers,
+                                 GError **error);
+
+/**
+ * gsurf_view_send_click:
+ * @self: a #GsurfView
+ * @x: horizontal position in the view, in CSS pixels from its left edge
+ * @y: vertical position in the view, in CSS pixels from its top edge
+ * @button: 1 left, 2 middle, 3 right
+ * @modifiers: #GsurfKeyMod flags held during the click
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Moves the pointer to (@x, @y) and presses and releases @button there.
+ * Trusted where the backend has native input, as for gsurf_view_send_key().
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_click(GsurfView *self, gdouble x, gdouble y, guint button,
+                                   guint modifiers, GError **error);
+
+/**
+ * gsurf_view_send_text:
+ * @self: a #GsurfView
+ * @text: UTF-8 text; a newline is the Return key
+ * @error: (out) (optional): return location for a #GError
+ *
+ * Types @text into whatever has the page's focus, one key at a time.
+ * Trusted where the backend has native input, as for gsurf_view_send_key().
+ *
+ * Returns: %TRUE if the input was delivered
+ */
+gboolean     gsurf_view_send_text(GsurfView *self, const gchar *text, GError **error);
+
+/**
+ * gsurf_view_keyval_from_name:
+ * @name: a key name -- "Enter", "Tab", "Escape", "Backspace", "Delete",
+ *   "ArrowLeft"/"Left", "Home", "PageDown", "space", ... -- or one character
+ *
+ * The keysym gsurf_view_send_key() takes for @name.  The DOM's names
+ * (KeyboardEvent.key) and the X ones are both accepted, case-insensitively
+ * for the named keys.
+ *
+ * Returns: the keysym, or 0 when @name is not a key
+ */
+guint        gsurf_view_keyval_from_name(const gchar *name);
+
+/**
+ * gsurf_view_locate_script:
+ * @selector: a CSS selector
+ *
+ * JavaScript that finds the first element matching @selector, scrolls it
+ * into view, focuses it, and evaluates to a JSON array [x, y] -- the
+ * centre of its box in view coordinates, ready for
+ * gsurf_view_send_click() -- or to null when nothing matches.  The one
+ * spelling for every caller that clicks or types "at a selector", so they
+ * agree on what "the element" is.
+ *
+ * Returns: (transfer full): the script
+ */
+gchar       *gsurf_view_locate_script(const gchar *selector);
 
 /* --- Editing state (DOM focus awareness) --- */
 

@@ -91,6 +91,11 @@ Tools that change wmux panes or windows return the current wmux window's panes a
 | =scroll= | =direction=, =view?= | up / down / top / bottom |
 | =find_text= | =text=, =backward?=, =view?= | Find in page |
 | =click_link= | =index?= or =selector?=, =view?= | Click a link |
+| =click= | =selector?= or =x=, =y=; =button?=, =view?= | Click at an element (scrolled into view and focused first) or at a point in CSS pixels (since 0.5.10) |
+| =type_text= | =text=, =selector?=, =view?= | Type into the focused element, or the one matching =selector=; a newline is Enter (since 0.5.10) |
+| =press_key= | =key=, =modifiers?=, =view?= | One key by name (=Enter=, =Tab=, =Escape=, =Backspace=, =ArrowUp=, =Home=, =PageDown=, =space=, ...) or one character; =modifiers= is =ctrl+shift= style (since 0.5.10) |
+
+=click=, =type_text= and =press_key= return once the input is handed to the engine; the page handles it a moment later, so read the result (=get_page_text=, =execute_javascript=) rather than assuming it. On GTK3 the input is GTK's own events and the page sees it as trusted; GTK4 and LRG views dispatch DOM events from JavaScript instead.
 | =screenshot= / =save_screenshot= | (=path=), =view?= | PNG of the visible page |
 | =get_history= | =limit?= | Recent history lines |
 | =get_cookies= | =view?= | =document.cookie= |

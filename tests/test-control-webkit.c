@@ -58,6 +58,27 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 	(void)srv;
 	(void)query;
 	(void)user_data;
+
+	/* A form for the input methods: the button says what it was given
+	 * and whether the click was the browser's own (isTrusted). */
+	if (g_strcmp0(path, "/form") == 0) {
+		static const gchar form[] =
+			"<!doctype html><html><head><title>form</title></head><body>"
+			"<input id='name' autocomplete='off'>"
+			"<button id='go' style='margin:40px' onclick=\""
+			"document.getElementById('out').textContent='clicked:'+"
+			"document.getElementById('name').value+':'+event.isTrusted\">Go</button>"
+			"<div id='out'>none</div>"
+			"<script>document.addEventListener('keydown',function(e){"
+			"if(e.key==='Enter')document.body.dataset.enter='yes';});</script>"
+			"</body></html>";
+
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, form,
+			strlen(form));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><p>hello %s</p></body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -854,6 +875,159 @@ test_events(void)
 	h_free(&h);
 }
 
+/* A page.eval answer as a string, or "" while it is not one. */
+static gchar *
+eval_text(H *h, const gchar *script)
+{
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *quoted = NULL;
+	g_autoptr(JsonNode) literal = json_node_new(JSON_NODE_VALUE);
+
+	json_node_set_string(literal, script);
+	quoted = json_to_string(literal, FALSE);
+	node = rpcf(h, "page.eval", 0, "{\"script\":%s}", quoted);
+	return g_strdup(JSON_NODE_HOLDS_VALUE(node) &&
+		json_node_get_value_type(node) == G_TYPE_STRING ? json_node_get_string(node) : "");
+}
+
+/*
+ * page.type, page.key, page.click and an inline page.screenshot, against
+ * a real form.  On GTK3 the click must be the browser's own -- that is
+ * the point of sending GDK events rather than dispatching DOM ones.
+ */
+static void
+test_input(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *form = NULL;
+	gdouble x;
+	gdouble y;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+
+	form = g_strdup_printf("http://127.0.0.1:%u/form", port);
+	node = rpcf(&h, "navigate", 0, "{\"uri\":\"%s\"}", form);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "form") == 0);
+	/* typed keys go to the page, not to the modal module's bindings */
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 1. Type into a field named by selector (focused first). */
+	node = rpc(&h, "page.type", "{\"selector\":\"#name\",\"text\":\"Hello zz\"}", 0);
+	g_assert_true(json_object_get_boolean_member(obj(node), "done"));
+	g_clear_pointer(&node, json_node_unref);
+	{
+		gchar *value = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(value);
+			value = eval_text(&h, "document.getElementById('name').value");
+			if (g_strcmp0(value, "Hello zz") == 0)
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+		g_assert_cmpstr(value, ==, "Hello zz");
+		g_free(value);
+	}
+
+	/* 2. A key by name, into the focused field. */
+	node = rpc(&h, "page.key", "{\"key\":\"Enter\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+	{
+		gchar *enter = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(enter);
+			enter = eval_text(&h, "document.body.dataset.enter || ''");
+			if (g_strcmp0(enter, "yes") == 0)
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+		g_assert_cmpstr(enter, ==, "yes");
+		g_free(enter);
+	}
+
+	/* 3. A click on an element by selector, then the same point by x, y. */
+	node = rpc(&h, "page.click", "{\"selector\":\"#go\"}", 0);
+	x = json_object_get_double_member(obj(node), "x");
+	y = json_object_get_double_member(obj(node), "y");
+	g_assert_cmpfloat(x, >, 0);
+	g_assert_cmpfloat(y, >, 0);
+	g_clear_pointer(&node, json_node_unref);
+	{
+		gchar *out = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(out);
+			out = eval_text(&h, "document.getElementById('out').textContent");
+			if (g_str_has_prefix(out, "clicked:"))
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+#ifdef GSURF_BACKEND_GTK4
+		g_assert_cmpstr(out, ==, "clicked:Hello zz:false");
+#else
+		/* GDK events: the page cannot tell them from a person's */
+		g_assert_cmpstr(out, ==, "clicked:Hello zz:true");
+#endif
+		g_free(out);
+	}
+	g_free(eval_text(&h, "document.getElementById('out').textContent='none'"));
+	node = rpcf(&h, "page.click", 0, "{\"x\":%g,\"y\":%g}", x, y);
+	g_clear_pointer(&node, json_node_unref);
+	{
+		gchar *out = NULL;
+		guint i;
+
+		for (i = 0; i < 200; i++) {
+			g_free(out);
+			out = eval_text(&h, "document.getElementById('out').textContent");
+			if (g_str_has_prefix(out, "clicked:"))
+				break;
+			gsurf_webkit_test_spin(25);
+		}
+		g_assert_true(g_str_has_prefix(out, "clicked:Hello zz:"));
+		g_free(out);
+	}
+
+	/* 4. What is refused, and how. */
+	node = rpc(&h, "page.click", "{\"selector\":\"#nothing-here\"}", -32001);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.click", "{}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.click", "{\"x\":1,\"y\":1,\"button\":9}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.key", "{\"key\":\"NotAKey\"}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.key", "{\"key\":\"a\",\"modifiers\":[\"hyper\"]}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.type", "{}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 5. A screenshot handed back rather than written. */
+	node = rpc(&h, "page.screenshot", "{\"inline\":true}", 0);
+	{
+		const gchar *b64 = json_object_get_string_member(obj(node), "png_base64");
+		gsize size = 0;
+		g_autofree guchar *png = g_base64_decode(b64, &size);
+
+		g_assert_false(json_object_has_member(obj(node), "path"));
+		g_assert_cmpuint(size, ==, (gsize)json_object_get_int_member(obj(node), "bytes"));
+		g_assert_true(size > 8 && memcmp(png, "\x89PNG", 4) == 0);
+	}
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.screenshot", "{}", -32602);
+	g_clear_pointer(&node, json_node_unref);
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -875,6 +1049,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/control/webkit/layout", test_layout);
 	g_test_add_func("/gsurf/control/webkit/modes-actions", test_modes_actions);
 	g_test_add_func("/gsurf/control/webkit/events", test_events);
+	g_test_add_func("/gsurf/control/webkit/input", test_input);
 
 	ret = g_test_run();
 	g_clear_object(&soup);

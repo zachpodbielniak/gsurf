@@ -12,6 +12,8 @@
 #include "config/gsurf-config.h"
 
 #include <errno.h>
+#include <gio/gio.h>
+#include <json-glib/json-glib.h>
 #include <pwd.h>
 #include <string.h>
 
@@ -920,6 +922,233 @@ gsurf_view_get_snapshot_finish(GsurfView *self, GAsyncResult *result, GError **e
 	g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
 		"Snapshots not supported by this backend");
 	return NULL;
+}
+
+/* --- Input --- */
+
+/*
+ * Key names, the DOM's (KeyboardEvent.key) and the X ones, to keysyms.
+ * The DOM name is what an agent reading a page will reach for; the X
+ * name is what somebody who knows GTK will.
+ */
+static const struct {
+	const gchar *name;
+	guint        keyval;
+	const gchar *dom;   /* KeyboardEvent.key, for the JavaScript fallback */
+} key_names[] = {
+	{ "enter",      0xff0d, "Enter" },
+	{ "return",     0xff0d, "Enter" },
+	{ "tab",        0xff09, "Tab" },
+	{ "escape",     0xff1b, "Escape" },
+	{ "esc",        0xff1b, "Escape" },
+	{ "backspace",  0xff08, "Backspace" },
+	{ "delete",     0xffff, "Delete" },
+	{ "space",      0x0020, " " },
+	{ "arrowleft",  0xff51, "ArrowLeft" },
+	{ "left",       0xff51, "ArrowLeft" },
+	{ "arrowup",    0xff52, "ArrowUp" },
+	{ "up",         0xff52, "ArrowUp" },
+	{ "arrowright", 0xff53, "ArrowRight" },
+	{ "right",      0xff53, "ArrowRight" },
+	{ "arrowdown",  0xff54, "ArrowDown" },
+	{ "down",       0xff54, "ArrowDown" },
+	{ "home",       0xff50, "Home" },
+	{ "end",        0xff57, "End" },
+	{ "pageup",     0xff55, "PageUp" },
+	{ "page_up",    0xff55, "PageUp" },
+	{ "pagedown",   0xff56, "PageDown" },
+	{ "page_down",  0xff56, "PageDown" }
+};
+
+/* The keysym for one Unicode character: Latin-1 maps to itself. */
+static guint
+keyval_for_unichar(gunichar c)
+{
+	if (c == '\n' || c == '\r')
+		return 0xff0d;
+	if (c == '\t')
+		return 0xff09;
+	if ((c >= 0x20 && c <= 0x7e) || (c >= 0xa0 && c <= 0xff))
+		return c;
+	return 0x01000000 | c;
+}
+
+guint
+gsurf_view_keyval_from_name(const gchar *name)
+{
+	gsize i;
+
+	if (name == NULL || *name == '\0')
+		return 0;
+
+	for (i = 0; i < G_N_ELEMENTS(key_names); i++)
+		if (g_ascii_strcasecmp(name, key_names[i].name) == 0)
+			return key_names[i].keyval;
+
+	/* exactly one character is that character's key */
+	if (g_utf8_validate(name, -1, NULL) && g_utf8_strlen(name, -1) == 1)
+		return keyval_for_unichar(g_utf8_get_char(name));
+
+	return 0;
+}
+
+/* The DOM's name for a keysym, for the JavaScript fallback. */
+static gchar *
+dom_key_for_keyval(guint keyval)
+{
+	gsize i;
+	gunichar c;
+
+	for (i = 0; i < G_N_ELEMENTS(key_names); i++)
+		if (key_names[i].keyval == keyval)
+			return g_strdup(key_names[i].dom);
+
+	c = (keyval & 0xff000000) == 0x01000000 ? (gunichar)(keyval & 0x00ffffff)
+	                                         : (gunichar)keyval;
+	return g_ucs4_to_utf8(&c, 1, NULL, NULL, NULL);
+}
+
+/* A JavaScript string literal for @text (JSON's quoting is JavaScript's). */
+static gchar *
+js_literal(const gchar *text)
+{
+	g_autoptr(JsonNode) node = json_node_new(JSON_NODE_VALUE);
+
+	json_node_set_string(node, text != NULL ? text : "");
+	return json_to_string(node, FALSE);
+}
+
+gchar *
+gsurf_view_locate_script(const gchar *selector)
+{
+	g_autofree gchar *sel = js_literal(selector);
+
+	return g_strdup_printf(
+		"(function(){var e=document.querySelector(%s);if(!e)return null;"
+		"if(e.scrollIntoView)e.scrollIntoView({block:'center',inline:'center'});"
+		"if(e.focus)e.focus({preventScroll:true});"
+		"var r=e.getBoundingClientRect();"
+		"return [Math.round(r.left+r.width/2),Math.round(r.top+r.height/2)];})()",
+		sel);
+}
+
+/*
+ * The JavaScript fallback: DOM events dispatched from the page itself,
+ * for a backend with no native input.  Not trusted (isTrusted is false),
+ * which a page can check; said in the docs rather than hidden.
+ */
+static gchar *
+fallback_script(GsurfViewInput kind, gdouble x, gdouble y, guint code,
+                guint modifiers, const gchar *text)
+{
+	g_autofree gchar *mods = g_strdup_printf(
+		"{shiftKey:%s,ctrlKey:%s,altKey:%s,metaKey:%s}",
+		(modifiers & GSURF_MOD_SHIFT) ? "true" : "false",
+		(modifiers & GSURF_MOD_CTRL) ? "true" : "false",
+		(modifiers & GSURF_MOD_ALT) ? "true" : "false",
+		(modifiers & GSURF_MOD_SUPER) ? "true" : "false");
+
+	switch (kind) {
+	case GSURF_VIEW_INPUT_CLICK:
+		return g_strdup_printf(
+			"(function(x,y,b,m){var e=document.elementFromPoint(x,y);if(!e)return false;"
+			"var o=Object.assign({bubbles:true,cancelable:true,view:window,clientX:x,"
+			"clientY:y,button:b},m);"
+			"e.dispatchEvent(new MouseEvent('mousedown',o));if(e.focus)e.focus();"
+			"e.dispatchEvent(new MouseEvent('mouseup',o));"
+			"if(b===0)e.click();return true;})(%d,%d,%u,%s)",
+			(gint)x, (gint)y, code > 0 ? code - 1 : 0, mods);
+	case GSURF_VIEW_INPUT_KEY: {
+		g_autofree gchar *dom = dom_key_for_keyval(code);
+		g_autofree gchar *key = js_literal(dom);
+
+		return g_strdup_printf(
+			"(function(k,m){var e=document.activeElement||document.body;"
+			"var o=Object.assign({key:k,bubbles:true,cancelable:true},m);"
+			"var go=e.dispatchEvent(new KeyboardEvent('keydown',o));"
+			"if(go){if(k==='Enter'&&e.form&&e.tagName!=='TEXTAREA'){"
+			"if(e.form.requestSubmit)e.form.requestSubmit();else e.form.submit();}"
+			"else if(k==='Backspace')document.execCommand('delete');"
+			"else if(k.length===1)document.execCommand('insertText',false,k);}"
+			"e.dispatchEvent(new KeyboardEvent('keyup',o));return true;})(%s,%s)",
+			key, mods);
+	}
+	case GSURF_VIEW_INPUT_TEXT: {
+		g_autofree gchar *literal = js_literal(text);
+
+		return g_strdup_printf(
+			"(function(t){var e=document.activeElement;if(!e)return false;"
+			"if(document.execCommand('insertText',false,t))return true;"
+			"if('value' in e){e.value+=t;"
+			"e.dispatchEvent(new Event('input',{bubbles:true}));return true;}"
+			"return false;})(%s)", literal);
+	}
+	}
+
+	return NULL;
+}
+
+static gboolean
+send_input(GsurfView *self, GsurfViewInput kind, gdouble x, gdouble y, guint code,
+           guint modifiers, const gchar *text, GError **error)
+{
+	GsurfViewClass *klass = GSURF_VIEW_GET_CLASS(self);
+	g_autofree gchar *script = NULL;
+
+	if (klass->send_input != NULL)
+		return klass->send_input(self, kind, x, y, code, modifiers, text, error);
+
+	script = fallback_script(kind, x, y, code, modifiers, text);
+	if (script == NULL || klass->run_javascript_async == NULL) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+			"this view cannot take input");
+		return FALSE;
+	}
+	gsurf_view_run_javascript_async(self, script, NULL, NULL, NULL);
+	return TRUE;
+}
+
+gboolean
+gsurf_view_send_key(GsurfView *self, guint keyval, guint modifiers, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	if (keyval == 0) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"no key");
+		return FALSE;
+	}
+	return send_input(self, GSURF_VIEW_INPUT_KEY, 0, 0, keyval, modifiers, NULL, error);
+}
+
+gboolean
+gsurf_view_send_click(GsurfView *self, gdouble x, gdouble y, guint button,
+                      guint modifiers, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	if (x < 0 || y < 0 || button < 1 || button > 3) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"a click needs x, y >= 0 and a button of 1, 2 or 3 (got %g, %g, %u)",
+			x, y, button);
+		return FALSE;
+	}
+	return send_input(self, GSURF_VIEW_INPUT_CLICK, x, y, button, modifiers, NULL, error);
+}
+
+gboolean
+gsurf_view_send_text(GsurfView *self, const gchar *text, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	if (text == NULL || !g_utf8_validate(text, -1, NULL)) {
+		g_set_error_literal(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"text must be UTF-8");
+		return FALSE;
+	}
+	if (*text == '\0')
+		return TRUE;
+	return send_input(self, GSURF_VIEW_INPUT_TEXT, 0, 0, 0, 0, text, error);
 }
 
 /* --- Embedding --- */
