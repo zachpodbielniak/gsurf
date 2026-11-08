@@ -1416,7 +1416,13 @@ test_integration(void)
 	if (!gsurf_webkit_test_init())
 		return;
 	g_assert_nonnull(gsurf_container_registry_define(registry, "work", "Work", "#f38ba8", NULL));
-	if (!h_init(&h, "    border_width: 1\n    active_border_width: 4\n",
+	/* select_background: active_pane, so the sidebar click in step 3
+	 * puts the background tab in the active pane (test_solo covers the
+	 * default). Without it this only passed while the click landed in the
+	 * same main-loop turn that added the tab (its "fresh tab" window):
+	 * GTK3 clicks at once, GTK4 first waits for the row's layout. */
+	if (!h_init(&h, "    border_width: 1\n    active_border_width: 4\n"
+			"    select_background: active_pane\n",
 			"  tabs:\n    enabled: true\n    sidebar: true\n"
 			"  containers:\n    enabled: true\n    new_tab: default\n", modules)) {
 		gsurf_container_registry_undefine(registry, "work", NULL);

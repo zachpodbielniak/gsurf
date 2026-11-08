@@ -349,6 +349,13 @@ $(OBJDIR)/tests/test-wmux-keys.o $(OBJDIR)/tests/test-wmux-bindings.o: $(WMUX_MO
 $(OBJDIR)/tests/test-wmux.o $(OBJDIR)/tests/test-wmux-webkit.o \
 $(OBJDIR)/tests/test-wmux-docs.o: $(WMUX_MODEL_FILES) $(wildcard modules/wmux/*.h)
 
+# The WebKit GUI suites share the header-only tests/webkit-test-util.h
+# (GTK init, its log writer, bounded waits): a change there rebuilds every
+# suite that includes it.
+WEBKIT_TEST_UTIL_OBJS := $(patsubst tests/%.c,$(OBJDIR)/tests/%.o,\
+	$(shell grep -l '"webkit-test-util.h"' tests/*.c))
+$(WEBKIT_TEST_UTIL_OBJS): tests/webkit-test-util.h
+
 $(OUTDIR)/test-%: $(OBJDIR)/tests/test-%.o $(OUTDIR)/$(LIB_SHARED_FULL)
 	$(CC) -o $@ $< $(TEST_LDFLAGS)
 
