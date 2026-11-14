@@ -1238,6 +1238,44 @@ test_actions_and_kiosk(void)
 	h_free(&h);
 }
 
+/*
+ * A secret hold on a view refuses the tools that read the page back
+ * (execute_javascript, screenshot, save_screenshot) on that view only,
+ * and a committed navigation lifts it.
+ */
+static void
+test_secret_hold(void)
+{
+	H h = { 0 };
+	g_autofree gchar *yaml = config_yaml(TRUE, NULL);
+	gchar *text;
+
+	if (!h_mcp(&h, yaml))
+		return;
+	h_window(&h);
+
+	gsurf_view_set_secret_hold(h.a);
+	text = call(&h, "execute_javascript", "{\"code\":\"1\"}", TRUE);
+	ASSERT_HAS(text, "execute_javascript refused: a secret was typed into this page");
+	g_free(text);
+	text = call(&h, "screenshot", NULL, TRUE);
+	ASSERT_HAS(text, "screenshot refused");
+	g_free(text);
+	text = call(&h, "save_screenshot", "{\"path\":\"/nonexistent/x.png\"}", TRUE);
+	ASSERT_HAS(text, "save_screenshot refused");
+	g_free(text);
+
+	/* the hold belongs to one view */
+	g_assert_false(gsurf_view_get_secret_hold(h.b));
+
+	/* a redirect is not leaving the page; a commit is */
+	gsurf_view_emit_load_changed(h.a, GSURF_LOAD_REDIRECTED);
+	g_assert_true(gsurf_view_get_secret_hold(h.a));
+	gsurf_view_emit_load_changed(h.a, GSURF_LOAD_COMMITTED);
+	g_assert_false(gsurf_view_get_secret_hold(h.a));
+	h_free(&h);
+}
+
 /* list_containers: registry containers with the containers module's
  * configured host rules (matched by id, or by name without one). */
 static void
@@ -1388,6 +1426,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/mcp/actions-and-kiosk", test_actions_and_kiosk);
 	g_test_add_func("/mcp/containers", test_containers);
 	g_test_add_func("/mcp/cookies", test_cookies);
+	g_test_add_func("/mcp/secret-hold", test_secret_hold);
 
 	ret = g_test_run();
 	if (so_handle != NULL)

@@ -245,6 +245,8 @@ tool_execute_javascript(McpServer *s, const gchar *name, JsonObject *args, gpoin
 
 	if (view == NULL)
 		return gsurf_mcp_gerror(verr, "no active view");
+	if (!gsurf_view_check_secret_hold(view, "execute_javascript", &verr))
+		return error_result(verr->message);
 	if (code == NULL)
 		return error_result("missing 'code'");
 	result = run_js_sync(view, code, &error);
@@ -520,6 +522,8 @@ tool_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 
 	if (view == NULL)
 		return gsurf_mcp_gerror(verr, "no active view");
+	if (!gsurf_view_check_secret_hold(view, "screenshot", &verr))
+		return error_result(verr->message);
 	bytes = snapshot_sync(view, &error);
 	if (bytes == NULL)
 		return error_result(error ? error->message : "snapshot failed");
@@ -547,6 +551,8 @@ tool_save_screenshot(McpServer *s, const gchar *name, JsonObject *args, gpointer
 		return gsurf_mcp_gerror(verr, "no active view");
 	if (path == NULL)
 		return error_result("missing 'path'");
+	if (!gsurf_view_check_secret_hold(view, "save_screenshot", &verr))
+		return error_result(verr->message);
 	bytes = snapshot_sync(view, &error);
 	if (bytes == NULL)
 		return error_result(error ? error->message : "snapshot failed");

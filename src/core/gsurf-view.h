@@ -332,6 +332,49 @@ guint        gsurf_view_keyval_from_name(const gchar *name);
  */
 gchar       *gsurf_view_locate_script(const gchar *selector);
 
+/* --- Secret hold (since 0.5.13) --- */
+
+/**
+ * gsurf_view_set_secret_hold:
+ * @self: a #GsurfView
+ *
+ * Marks the current document as holding a secret (a password or a
+ * one-time code typed into it).  Until a main-frame navigation commits
+ * a new document, gsurf_view_check_secret_hold() refuses, and the
+ * control socket and the mcp module refuse screenshots and scripts on
+ * @self.  There is deliberately no call that clears the hold: only
+ * leaving the page does (fail closed).  Notifies #GsurfView:secret-hold.
+ *
+ * Since: 0.5.13
+ */
+void     gsurf_view_set_secret_hold(GsurfView *self);
+
+/**
+ * gsurf_view_get_secret_hold:
+ * @self: a #GsurfView
+ *
+ * Returns: whether a secret hold is on the current document
+ *
+ * Since: 0.5.13
+ */
+gboolean gsurf_view_get_secret_hold(GsurfView *self);
+
+/**
+ * gsurf_view_check_secret_hold:
+ * @self: (nullable): a #GsurfView
+ * @what: (nullable): what is being refused, for the message ("page.eval")
+ * @error: (out) (optional): return location for a #GError
+ *
+ * The one gate every page-reading path (screenshots, scripts) passes
+ * through.  Fails closed: %NULL or a non-view counts as held.
+ *
+ * Returns: %TRUE when @self holds no secret; %FALSE with
+ *   %G_IO_ERROR_PERMISSION_DENIED otherwise
+ *
+ * Since: 0.5.13
+ */
+gboolean gsurf_view_check_secret_hold(GsurfView *self, const gchar *what, GError **error);
+
 /* --- Editing state (DOM focus awareness) --- */
 
 /**

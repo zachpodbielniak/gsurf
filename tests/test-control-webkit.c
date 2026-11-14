@@ -79,6 +79,26 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 		return;
 	}
 
+	/* A login form for page.fill_secret: the title says whether the
+	 * password field holds exactly the expected secret (the old value
+	 * replaced), so the test never needs page.eval while the hold is on. */
+	if (g_strcmp0(path, "/login") == 0) {
+		static const gchar login[] =
+			"<!doctype html><html><head><title>login</title></head><body>"
+			"<form method='post' action='/p/submitted'>"
+			"<input id='user' autocomplete='off'>"
+			"<input id='pw' type='password' value='old' autocomplete='off'>"
+			"<button id='go' type='submit'>Go</button></form>"
+			"<script>document.getElementById('pw').addEventListener('input',function(){"
+			"document.title=this.value==='s3cret-zz'?'filled':'typing';});</script>"
+			"</body></html>";
+
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, login,
+			strlen(login));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><p>hello %s</p></body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -1028,6 +1048,102 @@ test_input(void)
 	h_free(&h);
 }
 
+/* Serialised @node does not contain @needle. */
+static void
+assert_not_in(JsonNode *node, const gchar *needle)
+{
+	g_autofree gchar *text = node != NULL ? json_to_string(node, FALSE) : g_strdup("");
+
+	if (strstr(text, needle) != NULL)
+		g_error("'%s' leaked into: %s", needle, text);
+}
+
+/*
+ * page.fill_secret against a real login form: the secret replaces the
+ * field's contents as typed input, the reply never carries it, and the
+ * hold refuses page.eval, page.screenshot until a navigation commits.
+ */
+static void
+test_fill_secret(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *login = NULL;
+	g_autofree gchar *after = NULL;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+
+	login = g_strdup_printf("http://127.0.0.1:%u/login", port);
+	node = rpcf(&h, "navigate", 0, "{\"uri\":\"%s\"}", login);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "login") == 0);
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 1. The fill: done, held, and the secret nowhere in the reply. */
+	node = rpc(&h, "page.fill_secret", "{\"selector\":\"#pw\",\"text\":\"s3cret-zz\"}", 0);
+	g_assert_true(json_object_get_boolean_member(obj(node), "done"));
+	g_assert_true(json_object_get_boolean_member(obj(node), "secret_hold"));
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	g_assert_true(gsurf_view_get_secret_hold(h.first));
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "filled") == 0);
+
+	/* 2. While held: no scripts, no pictures; the hold is visible. */
+	node = rpc(&h, "page.eval", "{\"script\":\"document.getElementById('pw').value\"}",
+		-32003);
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.screenshot", "{\"inline\":true}", -32003);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.secret_hold", NULL, 0);
+	g_assert_true(json_object_get_boolean_member(obj(node), "secret_hold"));
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "views.list", NULL, 0);
+	g_assert_true(json_object_get_boolean_member(
+		json_array_get_object_element(json_node_get_array(node), 0), "secret_hold"));
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 3. A failed fill still holds (fail closed); bad fields are named. */
+	after = page("after");
+	node = rpcf(&h, "navigate", 0, "{\"uri\":\"%s\"}", after);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "after") == 0);
+	g_assert_false(gsurf_view_get_secret_hold(h.first));
+	node = rpc(&h, "page.eval", "{\"script\":\"1+1\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.fill_secret", "{\"selector\":\"#nothing\",\"text\":\"s3cret-zz\"}",
+		-32001);
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	g_assert_true(gsurf_view_get_secret_hold(h.first));
+
+	/* 4. submit: Enter after the secret; the form's navigation lifts it. */
+	node = rpcf(&h, "navigate", 0, "{\"uri\":\"%s\"}", login);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "login") == 0);
+	g_assert_false(gsurf_view_get_secret_hold(h.first));
+	node = rpc(&h, "page.fill_secret", "{\"selector\":\"#go\",\"text\":\"s3cret-zz\"}",
+		-32000);
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	/* the page must still be on the host the caller checked */
+	node = rpc(&h, "page.fill_secret",
+		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz\",\"host\":\"evil.example\"}",
+		-32003);
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.fill_secret",
+		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz\",\"submit\":true,"
+		"\"host\":\"127.0.0.1\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "submitted") == 0);
+	WAIT_UNTIL(!gsurf_view_get_secret_hold(h.first));
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1050,6 +1166,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/control/webkit/modes-actions", test_modes_actions);
 	g_test_add_func("/gsurf/control/webkit/events", test_events);
 	g_test_add_func("/gsurf/control/webkit/input", test_input);
+	g_test_add_func("/gsurf/control/webkit/fill-secret", test_fill_secret);
 
 	ret = g_test_run();
 	g_clear_object(&soup);

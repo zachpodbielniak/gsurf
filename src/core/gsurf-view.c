@@ -30,6 +30,7 @@ typedef struct {
 	gchar     *initial_uri;   /* construct: placement hint */
 	gpointer   session;       /* native session acquired from the registry */
 	gboolean   acquired;      /* whether release() is owed */
+	gboolean   secret_hold;   /* a secret was typed into this document */
 } GsurfViewPrivate;
 
 G_DEFINE_ABSTRACT_TYPE_WITH_PRIVATE(GsurfView, gsurf_view, G_TYPE_OBJECT)
@@ -43,6 +44,7 @@ enum {
 	PROP_INITIAL_URI,
 	PROP_OPENER_ID,
 	PROP_EDITING,
+	PROP_SECRET_HOLD,
 	N_PROPS
 };
 
@@ -187,6 +189,7 @@ gsurf_view_get_property(GObject *object, guint prop_id,
 	case PROP_INITIAL_URI:  g_value_set_string(value, priv->initial_uri); break;
 	case PROP_OPENER_ID:    g_value_set_uint64(value, priv->opener_id); break;
 	case PROP_EDITING:      g_value_set_boolean(value, priv->editing); break;
+	case PROP_SECRET_HOLD:  g_value_set_boolean(value, priv->secret_hold); break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, prop_id, pspec);
 	}
@@ -269,6 +272,19 @@ gsurf_view_class_init(GsurfViewClass *klass)
 	 * Since: 0.5.9
 	 */
 	props[PROP_EDITING] = g_param_spec_boolean("editing", NULL, NULL,
+		FALSE, G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
+	/**
+	 * GsurfView:secret-hold:
+	 *
+	 * Whether a secret (a password, a one-time code) has been typed into
+	 * the current document (gsurf_view_set_secret_hold()).  While it is
+	 * set, the control socket and the mcp module refuse screenshots and
+	 * scripts that could read the page back.  Only a committed main-frame
+	 * navigation (a new document) clears it.
+	 *
+	 * Since: 0.5.13
+	 */
+	props[PROP_SECRET_HOLD] = g_param_spec_boolean("secret-hold", NULL, NULL,
 		FALSE, G_PARAM_READABLE | G_PARAM_EXPLICIT_NOTIFY | G_PARAM_STATIC_STRINGS);
 	g_object_class_install_properties(object_class, N_PROPS, props);
 
@@ -1417,6 +1433,53 @@ gsurf_view_has_new_view_handler(GsurfView *self)
 	return g_signal_has_handler_pending(self, signals[SIG_NEW_VIEW_REQUESTED], 0, FALSE);
 }
 
+/* --- Secret hold --- */
+
+/* Sets the hold and notifies when it changes. */
+static void
+set_secret_hold(GsurfView *self, gboolean hold)
+{
+	GsurfViewPrivate *priv = gsurf_view_get_instance_private(self);
+
+	hold = hold != FALSE;
+	if (priv->secret_hold == hold)
+		return;
+	priv->secret_hold = hold;
+	g_object_notify_by_pspec(G_OBJECT(self), props[PROP_SECRET_HOLD]);
+}
+
+void
+gsurf_view_set_secret_hold(GsurfView *self)
+{
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	set_secret_hold(self, TRUE);
+}
+
+gboolean
+gsurf_view_get_secret_hold(GsurfView *self)
+{
+	GsurfViewPrivate *priv;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), TRUE);
+
+	priv = gsurf_view_get_instance_private(self);
+	return priv->secret_hold;
+}
+
+gboolean
+gsurf_view_check_secret_hold(GsurfView *self, const gchar *what, GError **error)
+{
+	/* Fail closed: a view we cannot even ask is treated as held. */
+	if (!GSURF_IS_VIEW(self) || gsurf_view_get_secret_hold(self)) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_PERMISSION_DENIED,
+			"%s refused: a secret was typed into this page "
+			"(the hold lasts until the view navigates away)",
+			what != NULL ? what : "reading the page");
+		return FALSE;
+	}
+	return TRUE;
+}
+
 /* --- Signal emission helpers --- */
 
 void
@@ -1431,6 +1494,12 @@ gsurf_view_emit_load_changed(GsurfView *self, GsurfLoadEvent event)
 	 * own reports (an autofocused field) arrive after the commit. */
 	if (event == GSURF_LOAD_COMMITTED)
 		gsurf_view_set_editing(self, FALSE);
+
+	/* The same commit is what ends a secret hold: the document the
+	 * secret was typed into is gone.  Nothing else (a redirect, a
+	 * same-document URI change, a finished load) clears it. */
+	if (event == GSURF_LOAD_COMMITTED)
+		set_secret_hold(self, FALSE);
 	g_signal_emit(self, signals[SIG_LOAD_CHANGED], 0, event);
 }
 

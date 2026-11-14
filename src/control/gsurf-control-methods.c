@@ -275,6 +275,22 @@ kiosk_refuses(const gchar *what, GError **error)
 	return TRUE;
 }
 
+/*
+ * A secret hold on @view refuses @what (screenshots, scripts), as the
+ * control protocol's permission error.  Fail closed: a NULL view is held.
+ */
+static gboolean
+hold_refuses(GsurfView *view, const gchar *what, GError **error)
+{
+	g_autoptr(GError) held = NULL;
+
+	if (gsurf_view_check_secret_hold(view, what, &held))
+		return FALSE;
+	g_set_error_literal(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_PERMISSION_DENIED,
+		held->message);
+	return TRUE;
+}
+
 static GsurfWindowLayout *
 get_layout(GsurfWindow *window, GError **error)
 {
@@ -417,6 +433,8 @@ add_view_members(JsonBuilder *b, GsurfWindow *window, GsurfView *view, guint ind
 	json_builder_add_boolean_value(b, view == gsurf_window_get_active_view(window));
 	json_builder_set_member_name(b, "visible");
 	json_builder_add_boolean_value(b, gsurf_window_get_view_visible(window, view));
+	json_builder_set_member_name(b, "secret_hold");
+	json_builder_add_boolean_value(b, gsurf_view_get_secret_hold(view));
 
 	/* 3. Tree: the opener (fixed) and the tree parent. */
 	json_builder_set_member_name(b, "opener_id");
@@ -901,7 +919,7 @@ m_page_eval(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 		return;
 	}
 	view = target_view(server, params, NULL, &error);
-	if (view == NULL) {
+	if (view == NULL || hold_refuses(view, "page.eval", &error)) {
 		fail(inv, error);
 		return;
 	}
@@ -1006,7 +1024,7 @@ m_page_screenshot(GsurfControlServer *server, GsurfControlInvocation *inv, gpoin
 		return;
 	}
 	view = target_view(server, params, NULL, &error);
-	if (view == NULL) {
+	if (view == NULL || hold_refuses(view, "page.screenshot", &error)) {
 		fail(inv, error);
 		return;
 	}
@@ -2815,6 +2833,25 @@ m_lrg_camera(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	lrg_reply(inv, window, scene, "camera");
 }
 
+/*
+ * The 3D frame shows every tab at once, so one held view refuses it.
+ * No window to look in is refused too (fail closed).
+ */
+static gboolean
+any_view_held(GsurfControlServer *server, GError **error)
+{
+	GsurfWindow *window = get_window(server, error);
+	guint i;
+
+	if (window == NULL)
+		return TRUE;
+	for (i = 0; i < gsurf_window_get_n_views(window); i++) {
+		if (hold_refuses(gsurf_window_get_nth_view(window, i), "lrg.screenshot", error))
+			return TRUE;
+	}
+	return FALSE;
+}
+
 /* lrg.screenshot answers once the next frame has been written. */
 static void
 lrg_shot_done(GsurfLrgScene *scene, const gchar *path, gboolean ok, gpointer user_data)
@@ -2851,7 +2888,8 @@ m_lrg_screenshot(GsurfControlServer *server, GsurfControlInvocation *inv, gpoint
 	g_autofree gchar *resolved = NULL;
 
 	(void)data;
-	if (scene == NULL || !arg_string(params, "path", &path, &error)) {
+	if (scene == NULL || !arg_string(params, "path", &path, &error) ||
+	    any_view_held(server, &error)) {
 		fail(inv, error);
 		return;
 	}
@@ -3162,6 +3200,253 @@ m_page_key(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer dat
 	gsurf_control_invocation_return_value(inv, input_reply(FALSE, 0, 0));
 }
 
+/* ----- Secrets: page.fill_secret, page.secret_hold ----- */
+
+/*
+ * page.fill_secret: the secret waiting on the page to focus and select
+ * the field.  The text is wiped before it is freed, and no reply or
+ * error ever carries it.
+ */
+typedef struct {
+	GsurfControlInvocation *inv;
+	GsurfView              *view;      /* ref */
+	gchar                  *text;      /* the secret: wiped on free */
+	gchar                  *selector;  /* for the error */
+	gchar                  *host;      /* the page must still be here; NULL: anywhere */
+	gboolean                submit;
+} SecretRun;
+
+static void
+secret_run_free(SecretRun *run)
+{
+	g_clear_object(&run->inv);
+	g_clear_object(&run->view);
+	if (run->text != NULL)
+		memset(run->text, 0, strlen(run->text));
+	g_free(run->text);
+	g_free(run->selector);
+	g_free(run->host);
+	g_free(run);
+}
+
+/*
+ * Whether @view's page is on @host (case-insensitive), read at the moment
+ * of typing: a caller that checked the address before asking cannot see a
+ * page that moved in between -- a redirect, a script, a click it did not
+ * make -- and a secret must not follow it there.
+ */
+static gboolean
+view_on_host(GsurfView *view, const gchar *host)
+{
+	const gchar *uri = gsurf_view_get_uri(view);
+	g_autoptr(GUri) parsed = uri != NULL ? g_uri_parse(uri, G_URI_FLAGS_NONE, NULL) : NULL;
+	const gchar *actual = parsed != NULL ? g_uri_get_host(parsed) : NULL;
+
+	return actual != NULL && g_ascii_strcasecmp(actual, host) == 0;
+}
+
+/*
+ * The field script: the first element matching the selector, scrolled
+ * into view, focused, and its contents selected so the typed secret
+ * replaces them.  Evaluates to "ok", "readonly" (not something a person
+ * could type into) or null (nothing matches).  It never sets a value.
+ */
+static gchar *
+secret_field_script(const gchar *selector)
+{
+	g_autoptr(JsonNode) literal = string_node(selector);
+	g_autofree gchar *quoted = json_to_string(literal, FALSE);
+
+	return g_strdup_printf(
+		"(function(){var e=document.querySelector(%s);if(!e)return null;"
+		"var t=e.tagName;var ok=e.isContentEditable||t==='TEXTAREA'||"
+		"(t==='INPUT'&&!/^(button|checkbox|color|file|hidden|image|radio|range|reset|submit)$/i"
+		".test(e.type||''));"
+		"if(!ok||e.disabled||e.readOnly)return 'readonly';"
+		"if(e.scrollIntoView)e.scrollIntoView({block:'center',inline:'center'});"
+		"e.focus({preventScroll:true});"
+		"try{if(e.select)e.select();else{var r=document.createRange();"
+		"r.selectNodeContents(e);var s=getSelection();s.removeAllRanges();s.addRange(r);}}"
+		"catch(x){}"
+		"return document.activeElement===e?'ok':'unfocused';})()",
+		quoted);
+}
+
+static JsonNode *
+secret_reply(void)
+{
+	g_autoptr(JsonBuilder) b = json_builder_new();
+
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "done");
+	json_builder_add_boolean_value(b, TRUE);
+	json_builder_set_member_name(b, "secret_hold");
+	json_builder_add_boolean_value(b, TRUE);
+	json_builder_end_object(b);
+	return json_builder_get_root(b);
+}
+
+static void
+secret_located(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	SecretRun *run = user_data;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *state = NULL;
+
+	(void)source;
+	state = gsurf_view_run_javascript_finish(run->view, result, &error);
+
+	/* 1. The field: found, typeable, focused. */
+	if (state == NULL) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
+			"javascript failed: %s", error != NULL ? error->message : "no result");
+		goto out;
+	}
+	if (g_strcmp0(state, "ok") != 0) {
+		gsurf_control_invocation_return_error(run->inv,
+			g_strcmp0(state, "readonly") == 0 || g_strcmp0(state, "unfocused") == 0
+				? GSURF_CONTROL_ERROR_FAILED : GSURF_CONTROL_ERROR_NOT_FOUND,
+			g_strcmp0(state, "readonly") == 0
+				? "'%s' is not a field a secret can be typed into"
+				: g_strcmp0(state, "unfocused") == 0
+					? "'%s' would not take the focus"
+					: "nothing on the page matches '%s'",
+			run->selector);
+		goto out;
+	}
+
+	/* 2. Still on the host the caller checked, now that the field is found. */
+	if (run->host != NULL && !view_on_host(run->view, run->host)) {
+		gsurf_control_invocation_return_error(run->inv,
+			GSURF_CONTROL_ERROR_PERMISSION_DENIED,
+			"the page is no longer on %s; nothing was typed", run->host);
+		goto out;
+	}
+
+	/* 3. The secret, typed over the selection as key input; then Enter
+	 *    when asked to submit.  The hold is already on. */
+	if (!gsurf_view_send_text(run->view, run->text, &error) ||
+	    (run->submit &&
+	     !gsurf_view_send_key(run->view, gsurf_view_keyval_from_name("Enter"), 0, &error))) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
+			"typing the secret failed: %s", error->message);
+		goto out;
+	}
+	gsurf_control_invocation_return_value(run->inv, secret_reply());
+out:
+	secret_run_free(run);
+}
+
+/* TRUE when @text has a control character (a newline would press Enter). */
+static gboolean
+has_control_char(const gchar *text)
+{
+	const gchar *p;
+
+	for (p = text; *p != '\0'; p = g_utf8_next_char(p)) {
+		if (g_unichar_iscntrl(g_utf8_get_char(p)))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+static void
+m_page_fill_secret(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfView *view;
+	const gchar *selector = NULL;
+	const gchar *text = NULL;
+	const gchar *host = NULL;
+	gboolean submit = FALSE;
+	g_autofree gchar *script = NULL;
+	SecretRun *run;
+
+	(void)data;
+	/* 1. Arguments; no message below ever quotes 'text'. */
+	if (!arg_string(params, "selector", &selector, &error) ||
+	    !arg_string(params, "text", &text, &error) ||
+	    !arg_bool(params, "submit", &submit, &error) ||
+	    !arg_string(params, "host", &host, &error) ||
+	    kiosk_refuses("driving the page", &error)) {
+		fail(inv, error);
+		return;
+	}
+	if (selector == NULL || *selector == '\0') {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS, "missing 'selector' (the field)");
+		return;
+	}
+	if (text == NULL || *text == '\0' || !g_utf8_validate(text, -1, NULL) ||
+	    has_control_char(text)) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"'text' must be non-empty UTF-8 without control characters "
+			"(use 'submit' to press Enter)");
+		return;
+	}
+	view = target_view(server, params, NULL, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+
+	/* 2. The hold goes on before a single key is sent: a fill that fails
+	 *    half-way may have left part of the secret in the page. */
+	gsurf_view_set_secret_hold(view);
+
+	/* 3. Focus and select the field, then type (secret_located()). */
+	run = g_new0(SecretRun, 1);
+	run->inv = g_object_ref(inv);
+	run->view = g_object_ref(view);
+	run->text = g_strdup(text);
+	run->selector = g_strdup(selector);
+	run->host = host != NULL && *host != '\0' ? g_strdup(host) : NULL;
+	run->submit = submit;
+	script = secret_field_script(selector);
+	gsurf_view_run_javascript_async(view, script, NULL, secret_located, run);
+}
+
+static void
+m_page_secret_hold(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	GError *error = NULL;
+	GsurfView *view;
+	gboolean hold = FALSE;
+	g_autoptr(JsonBuilder) b = NULL;
+
+	(void)data;
+	if (!arg_bool(params, "hold", &hold, &error)) {
+		fail(inv, error);
+		return;
+	}
+	/* Only navigating away clears a hold: there is no 'hold: false'. */
+	if (arg_has(params, "hold") && !hold) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_PERMISSION_DENIED,
+			"a secret hold cannot be lifted; it ends when the view navigates away");
+		return;
+	}
+	view = target_view(server, params, NULL, &error);
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+	if (hold)
+		gsurf_view_set_secret_hold(view);
+
+	b = json_builder_new();
+	json_builder_begin_object(b);
+	json_builder_set_member_name(b, "view");
+	json_builder_add_int_value(b, (gint64)gsurf_view_get_id(view));
+	json_builder_set_member_name(b, "secret_hold");
+	json_builder_add_boolean_value(b, gsurf_view_get_secret_hold(view));
+	json_builder_end_object(b);
+	gsurf_control_invocation_return_value(inv, json_builder_get_root(b));
+}
+
 #define VIEW_DOC "view?: id, index?: int (default: the active view)"
 
 typedef struct {
@@ -3235,6 +3520,17 @@ static const CoreMethod core_methods[] = {
 	{ "page.type", "Type 'text' into the focused element, or into the element matching "
 	  "'selector' (focused first); a newline is Enter. Refused in kiosk mode",
 	  "{text: string, selector?: string, " VIEW_DOC "}", m_page_type, 0 },
+	{ "page.fill_secret", "Type a secret (a password, a one-time code) into the field "
+	  "matching 'selector' as key input, replacing its contents; 'submit' presses Enter "
+	  "after. Puts a secret hold on the view first: page.screenshot, page.eval and "
+	  "lrg.screenshot are refused until it navigates away. Never echoes 'text'. Refused "
+	  "in kiosk mode. With 'host', refused unless the page is still on that host when "
+	  "the field is found", "{selector: string, text: string, submit?: bool, "
+	  "host?: string, " VIEW_DOC "}",
+	  m_page_fill_secret, 0 },
+	{ "page.secret_hold", "A view's secret hold: {view, secret_hold}; 'hold': true sets it "
+	  "(nothing lifts it but navigating away)", "{hold?: true, " VIEW_DOC "}",
+	  m_page_secret_hold, 0 },
 	{ "page.key", "Press one key: a name (Enter, Tab, Escape, Backspace, Delete, ArrowUp, "
 	  "Home, PageDown, space, ...) or one character, with optional modifiers. Refused in "
 	  "kiosk mode", "{key: string, modifiers?: [ctrl|shift|alt|super], " VIEW_DOC "}",

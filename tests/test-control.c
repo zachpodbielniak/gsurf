@@ -622,6 +622,10 @@ test_core_headless(void)
 	line = call(server, "page.eval", "{\"script\":\"1\"}");
 	g_assert_cmpint(error_code(line), ==, -32003);
 	g_free(line);
+	line = call(server, "page.fill_secret", "{\"selector\":\"#p\",\"text\":\"hunter2-zz\"}");
+	g_assert_cmpint(error_code(line), ==, -32003);
+	g_assert_null(strstr(line, "hunter2-zz"));
+	g_free(line);
 	line = call(server, "modules.toggle", "{\"name\":\"x\"}");
 	g_assert_cmpint(error_code(line), ==, -32003);
 	g_free(line);
@@ -632,6 +636,31 @@ test_core_headless(void)
 	g_assert_cmpint(error_code(line), ==, -32001);  /* still: no window */
 	g_free(line);
 	config->kiosk = FALSE;
+
+	/* 4b. page.fill_secret checks its arguments before it looks for a
+	 *     view, and never quotes the secret back. */
+	line = call(server, "page.fill_secret", "{\"text\":\"hunter2-zz\"}");
+	g_assert_cmpint(error_code(line), ==, -32602);
+	g_assert_null(strstr(line, "hunter2-zz"));
+	g_free(line);
+	line = call(server, "page.fill_secret", "{\"selector\":\"#p\",\"text\":\"\"}");
+	g_assert_cmpint(error_code(line), ==, -32602);
+	g_free(line);
+	line = call(server, "page.fill_secret",
+		"{\"selector\":\"#p\",\"text\":\"hunter2-zz\\nmore\"}");
+	g_assert_cmpint(error_code(line), ==, -32602);
+	g_assert_null(strstr(line, "hunter2-zz"));
+	g_free(line);
+	line = call(server, "page.fill_secret", "{\"selector\":\"#p\",\"text\":\"hunter2-zz\"}");
+	g_assert_cmpint(error_code(line), ==, -32001);  /* no window */
+	g_assert_null(strstr(line, "hunter2-zz"));
+	g_free(line);
+	line = call(server, "page.secret_hold", "{\"hold\":false}");
+	g_assert_cmpint(error_code(line), ==, -32003);  /* nothing lifts a hold */
+	g_free(line);
+	line = call(server, "page.secret_hold", NULL);
+	g_assert_cmpint(error_code(line), ==, -32001);
+	g_free(line);
 
 	/* 5. The config section itself. */
 	g_assert_false(config->control_enabled);
