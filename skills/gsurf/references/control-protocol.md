@@ -67,6 +67,8 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `page.uri`, `page.title`, `page.text` | `view?`/`index?` | a string |
 | `page.eval` | `script`, `view?`/`index?` | the last value as JSON (`undefined` → null); kiosk refuses |
 | `page.screenshot` | `path`, `view?`/`index?` | `{path, bytes}`; relative to gsurf's launch directory |
+| `page.fill_secret` | `selector`, `text`, `submit?`, `view?`/`index?` | `{done, secret_hold}`: types a secret into the field as key input (old contents replaced); sets the secret hold first; never echoes `text`; kiosk refuses |
+| `page.secret_hold` | `hold?` (only `true`), `view?`/`index?` | `{view, secret_hold}`; only navigating away lifts a hold (`hold: false` is -32003) |
 | `actions.list` | | `[{name, allowed}]` |
 | `action.run` | `name`, `view?`/`index?` | `{action, performed}` |
 | `mode.get` / `mode.set` | `mode: normal\|insert`, `view?` | `{mode, label, passthrough, typing, modal_active}` (the mode in effect: `insert` while a field or the address bar has the keys, `typing: true`); set needs `modal` |
@@ -140,4 +142,4 @@ Implement `GsurfControlProvider` (`register_methods`) and call `gsurf_control_se
 
 ## Security
 
-Anything that can connect can run JavaScript in the user's pages, read them and open URLs: the user's own shell trust. Never forward the socket over SSH without the user asking. Kiosk mode refuses opening, reopening and navigating views, `page.eval`, module toggles and the actions kiosk forbids.
+Anything that can connect can run JavaScript in the user's pages, read them and open URLs: the user's own shell trust. Never forward the socket over SSH without the user asking. Kiosk mode refuses opening, reopening and navigating views, `page.eval`, module toggles and the actions kiosk forbids. A secret hold (set by `page.fill_secret`) refuses `page.eval`, `page.screenshot`, `lrg.screenshot` and the mcp `execute_javascript`/`screenshot`/`save_screenshot` with -32003 until the view commits a navigation to a new document.

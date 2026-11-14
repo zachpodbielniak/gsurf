@@ -71,3 +71,5 @@ Errors are tool error results with a hint: `unknown view 42 (… list_views give
 ## Embedders and tests
 
 `mcp.so` exports `gsurf_mcp_module_call_tool(module, name, arguments_json, &is_error, &error)` and `gsurf_mcp_module_list_tools(module)` for in-process calls (find them with `g_module_symbol()`). `tests/test-mcp.c` (headless, `MCP=1`) and `tests/test-mcp-webkit.c` (`make test-gui`) cover every tool.
+
+A view with a secret hold (set by the control socket's `page.fill_secret`) refuses `execute_javascript`, `screenshot` and `save_screenshot` until it navigates to a new document.
