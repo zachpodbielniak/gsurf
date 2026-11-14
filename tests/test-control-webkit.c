@@ -1128,8 +1128,15 @@ test_fill_secret(void)
 		-32000);
 	assert_not_in(node, "s3cret");
 	g_clear_pointer(&node, json_node_unref);
+	/* the page must still be on the host the caller checked */
 	node = rpc(&h, "page.fill_secret",
-		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz\",\"submit\":true}", 0);
+		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz\",\"host\":\"evil.example\"}",
+		-32003);
+	assert_not_in(node, "s3cret");
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.fill_secret",
+		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz\",\"submit\":true,"
+		"\"host\":\"127.0.0.1\"}", 0);
 	g_clear_pointer(&node, json_node_unref);
 	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "submitted") == 0);
 	WAIT_UNTIL(!gsurf_view_get_secret_hold(h.first));

@@ -67,7 +67,7 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `page.uri`, `page.title`, `page.text` | `view?`/`index?` | a string |
 | `page.eval` | `script`, `view?`/`index?` | the last value as JSON (`undefined` → null); kiosk refuses |
 | `page.screenshot` | `path`, `view?`/`index?` | `{path, bytes}`; relative to gsurf's launch directory |
-| `page.fill_secret` | `selector`, `text`, `submit?`, `view?`/`index?` | `{done, secret_hold}`: types a secret into the field as key input (old contents replaced); sets the secret hold first; never echoes `text`; kiosk refuses |
+| `page.fill_secret` | `selector`, `text`, `submit?`, `host?`, `view?`/`index?` | `{done, secret_hold}`: types a secret into the field as key input (old contents replaced); sets the secret hold first; with `host`, refused (-32003) unless the page is still there; never echoes `text`; kiosk refuses |
 | `page.secret_hold` | `hold?` (only `true`), `view?`/`index?` | `{view, secret_hold}`; only navigating away lifts a hold (`hold: false` is -32003) |
 | `actions.list` | | `[{name, allowed}]` |
 | `action.run` | `name`, `view?`/`index?` | `{action, performed}` |

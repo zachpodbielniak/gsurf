@@ -3212,6 +3212,7 @@ typedef struct {
 	GsurfView              *view;      /* ref */
 	gchar                  *text;      /* the secret: wiped on free */
 	gchar                  *selector;  /* for the error */
+	gchar                  *host;      /* the page must still be here; NULL: anywhere */
 	gboolean                submit;
 } SecretRun;
 
@@ -3224,7 +3225,24 @@ secret_run_free(SecretRun *run)
 		memset(run->text, 0, strlen(run->text));
 	g_free(run->text);
 	g_free(run->selector);
+	g_free(run->host);
 	g_free(run);
+}
+
+/*
+ * Whether @view's page is on @host (case-insensitive), read at the moment
+ * of typing: a caller that checked the address before asking cannot see a
+ * page that moved in between -- a redirect, a script, a click it did not
+ * make -- and a secret must not follow it there.
+ */
+static gboolean
+view_on_host(GsurfView *view, const gchar *host)
+{
+	const gchar *uri = gsurf_view_get_uri(view);
+	g_autoptr(GUri) parsed = uri != NULL ? g_uri_parse(uri, G_URI_FLAGS_NONE, NULL) : NULL;
+	const gchar *actual = parsed != NULL ? g_uri_get_host(parsed) : NULL;
+
+	return actual != NULL && g_ascii_strcasecmp(actual, host) == 0;
 }
 
 /*
@@ -3297,7 +3315,15 @@ secret_located(GObject *source, GAsyncResult *result, gpointer user_data)
 		goto out;
 	}
 
-	/* 2. The secret, typed over the selection as key input; then Enter
+	/* 2. Still on the host the caller checked, now that the field is found. */
+	if (run->host != NULL && !view_on_host(run->view, run->host)) {
+		gsurf_control_invocation_return_error(run->inv,
+			GSURF_CONTROL_ERROR_PERMISSION_DENIED,
+			"the page is no longer on %s; nothing was typed", run->host);
+		goto out;
+	}
+
+	/* 3. The secret, typed over the selection as key input; then Enter
 	 *    when asked to submit.  The hold is already on. */
 	if (!gsurf_view_send_text(run->view, run->text, &error) ||
 	    (run->submit &&
@@ -3332,6 +3358,7 @@ m_page_fill_secret(GsurfControlServer *server, GsurfControlInvocation *inv, gpoi
 	GsurfView *view;
 	const gchar *selector = NULL;
 	const gchar *text = NULL;
+	const gchar *host = NULL;
 	gboolean submit = FALSE;
 	g_autofree gchar *script = NULL;
 	SecretRun *run;
@@ -3341,6 +3368,7 @@ m_page_fill_secret(GsurfControlServer *server, GsurfControlInvocation *inv, gpoi
 	if (!arg_string(params, "selector", &selector, &error) ||
 	    !arg_string(params, "text", &text, &error) ||
 	    !arg_bool(params, "submit", &submit, &error) ||
+	    !arg_string(params, "host", &host, &error) ||
 	    kiosk_refuses("driving the page", &error)) {
 		fail(inv, error);
 		return;
@@ -3374,6 +3402,7 @@ m_page_fill_secret(GsurfControlServer *server, GsurfControlInvocation *inv, gpoi
 	run->view = g_object_ref(view);
 	run->text = g_strdup(text);
 	run->selector = g_strdup(selector);
+	run->host = host != NULL && *host != '\0' ? g_strdup(host) : NULL;
 	run->submit = submit;
 	script = secret_field_script(selector);
 	gsurf_view_run_javascript_async(view, script, NULL, secret_located, run);
@@ -3495,7 +3524,9 @@ static const CoreMethod core_methods[] = {
 	  "matching 'selector' as key input, replacing its contents; 'submit' presses Enter "
 	  "after. Puts a secret hold on the view first: page.screenshot, page.eval and "
 	  "lrg.screenshot are refused until it navigates away. Never echoes 'text'. Refused "
-	  "in kiosk mode", "{selector: string, text: string, submit?: bool, " VIEW_DOC "}",
+	  "in kiosk mode. With 'host', refused unless the page is still on that host when "
+	  "the field is found", "{selector: string, text: string, submit?: bool, "
+	  "host?: string, " VIEW_DOC "}",
 	  m_page_fill_secret, 0 },
 	{ "page.secret_hold", "A view's secret hold: {view, secret_hold}; 'hold': true sets it "
 	  "(nothing lifts it but navigating away)", "{hold?: true, " VIEW_DOC "}",
