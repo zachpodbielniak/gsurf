@@ -99,6 +99,25 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 		return;
 	}
 
+	/* Three fields filled back to back: the title is all three values,
+	 * so a key that lands in the wrong field shows. */
+	if (g_strcmp0(path, "/three") == 0) {
+		static const gchar three[] =
+			"<!doctype html><html><head><title>three</title></head><body>"
+			"<input id='user' autocomplete='off'>"
+			"<input id='pw' type='password' autocomplete='off'>"
+			"<input id='otp' autocomplete='off'>"
+			"<script>document.addEventListener('input',function(){"
+			"document.title=['user','pw','otp'].map(function(i){"
+			"return document.getElementById(i).value;}).join('|');});</script>"
+			"</body></html>";
+
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, three,
+			strlen(three));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><p>hello %s</p></body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -1144,6 +1163,47 @@ test_fill_secret(void)
 	h_free(&h);
 }
 
+/*
+ * A typing command answers once the page has the keys.
+ *
+ * WebKit delivers typed keys one at a time but runs a script at once, so
+ * a reply sent when the keys were handed over let the next command's
+ * focus overtake them: a password fill followed by a one-time-code fill
+ * posted the password's first four characters, and the rest in the code
+ * field.  Each command here is sent the moment the last one answers.
+ */
+static void
+test_typing_settles(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *three = NULL;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+
+	three = g_strdup_printf("http://127.0.0.1:%u/three", port);
+	node = rpcf(&h, "navigate", 0, "{\"uri\":\"%s\"}", three);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first), "three") == 0);
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	node = rpc(&h, "page.type",
+		"{\"selector\":\"#user\",\"text\":\"someone-with-a-long-name\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.fill_secret",
+		"{\"selector\":\"#pw\",\"text\":\"s3cret-zz-twenty-four-ch\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpc(&h, "page.fill_secret", "{\"selector\":\"#otp\",\"text\":\"123456\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(h.first),
+		"someone-with-a-long-name|s3cret-zz-twenty-four-ch|123456") == 0);
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1167,6 +1227,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/control/webkit/events", test_events);
 	g_test_add_func("/gsurf/control/webkit/input", test_input);
 	g_test_add_func("/gsurf/control/webkit/fill-secret", test_fill_secret);
+	g_test_add_func("/gsurf/control/webkit/typing-settles", test_typing_settles);
 
 	ret = g_test_run();
 	g_clear_object(&soup);
