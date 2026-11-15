@@ -2987,6 +2987,120 @@ input_reply(gboolean point, gdouble x, gdouble y)
 }
 
 /*
+ * Typing settles before the reply.
+ *
+ * gsurf_view_send_text() hands every key to WebKit at once, and WebKit
+ * delivers them to the page one at a time, each after the web process
+ * has handled the last.  A script, though, goes straight through.  So a
+ * reply sent when the keys were handed over let the caller's next
+ * command -- a page.fill_secret focusing the next field, a click --
+ * overtake the keys still queued: measured, a 24-character password
+ * fill followed at once by a one-time-code fill posted "pw=hunt" and
+ * "otp=er2-...925843", the rest of the password typed into the wrong
+ * field.  The page counts the keyups it has seen (TYPED_ARM_SCRIPT), and
+ * a typing command replies once the count has caught up.
+ *
+ * The count is a number in the page and never the text.  A page that
+ * swallows keyup, or a field that moves focus into a frame, costs at
+ * most TYPED_SETTLE_MS; a submit that navigates ends the wait at once
+ * (the new document has no count).
+ */
+#define TYPED_ARM_SCRIPT \
+	"(function(){var w=window;if(!w.__gsurfTyped){w.__gsurfTyped={n:0};" \
+	"w.addEventListener('keyup',function(){w.__gsurfTyped.n++;},true);}" \
+	"return String(w.__gsurfTyped.n);})()"
+#define TYPED_COUNT_SCRIPT \
+	"String(window.__gsurfTyped?window.__gsurfTyped.n:-1)"
+#define TYPED_POLL_MS (15)
+#define TYPED_SETTLE_MS (5000)
+
+typedef struct {
+	GsurfControlInvocation *inv;
+	GsurfView              *view;      /* ref */
+	JsonNode               *reply;     /* sent once the keys are in */
+	gint64                  expected;  /* the page's count when they are */
+	gint64                  deadline;  /* monotonic */
+} Settle;
+
+static void
+settle_free(Settle *settle)
+{
+	g_clear_object(&settle->inv);
+	g_clear_object(&settle->view);
+	g_clear_pointer(&settle->reply, json_node_unref);
+	g_free(settle);
+}
+
+static gboolean settle_tick(gpointer user_data);
+
+static void
+settle_counted(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	Settle *settle = user_data;
+	g_autofree gchar *count = NULL;
+	gint64 seen;
+
+	(void)source;
+	count = gsurf_view_run_javascript_finish(settle->view, result, NULL);
+	/* Unreadable or -1: another document, so nothing is left to type. */
+	seen = count != NULL ? g_ascii_strtoll(count, NULL, 10) : -1;
+	if (seen < 0 || seen >= settle->expected ||
+	    g_get_monotonic_time() >= settle->deadline) {
+		gsurf_control_invocation_return_value(settle->inv,
+			g_steal_pointer(&settle->reply));
+		settle_free(settle);
+		return;
+	}
+	g_timeout_add(TYPED_POLL_MS, settle_tick, settle);
+}
+
+static gboolean
+settle_tick(gpointer user_data)
+{
+	Settle *settle = user_data;
+
+	gsurf_view_run_javascript_async(settle->view, TYPED_COUNT_SCRIPT, NULL,
+		settle_counted, settle);
+	return G_SOURCE_REMOVE;
+}
+
+/*
+ * Replies @reply (taken) once the page has counted @keys more keyups
+ * than @baseline.  A @baseline below zero (never armed) replies now.
+ */
+static void
+reply_when_typed(GsurfControlInvocation *inv, GsurfView *view, JsonNode *reply,
+                 gint64 baseline, guint keys)
+{
+	Settle *settle;
+
+	if (baseline < 0 || keys == 0) {
+		gsurf_control_invocation_return_value(inv, reply);
+		return;
+	}
+	settle = g_new0(Settle, 1);
+	settle->inv = g_object_ref(inv);
+	settle->view = g_object_ref(view);
+	settle->reply = reply;
+	settle->expected = baseline + keys;
+	settle->deadline = g_get_monotonic_time() + (gint64)TYPED_SETTLE_MS * 1000;
+	settle_tick(settle);
+}
+
+/* The page's keyup count from an armed script's answer, or -1. */
+static gint64
+typed_baseline(const gchar *answer)
+{
+	gchar *end = NULL;
+	gint64 n;
+
+	if (answer == NULL || *answer == '\0')
+		return -1;
+	n = g_ascii_strtoll(answer, &end, 10);
+	return end != answer && *end == '\0' && n >= 0 ? n : -1;
+}
+
+/*
  * One "at a selector" input waiting on the page to say where the
  * element is (gsurf_view_locate_script(), which also scrolls it into
  * view and focuses it).
@@ -3001,6 +3115,7 @@ typedef struct {
 	guint                   modifiers;
 	gchar                  *text;      /* AT_TYPE */
 	gchar                  *selector;  /* for the error */
+	gint64                  baseline;  /* AT_TYPE: the page's keyup count before */
 } AtRun;
 
 static void
@@ -3051,14 +3166,18 @@ at_located(GObject *source, GAsyncResult *result, gpointer user_data)
 			"%s", error->message);
 		goto out;
 	}
-	gsurf_control_invocation_return_value(run->inv, input_reply(run->kind == AT_CLICK, x, y));
+	if (run->kind == AT_TYPE)
+		reply_when_typed(run->inv, run->view, input_reply(FALSE, 0, 0), run->baseline,
+			(guint)g_utf8_strlen(run->text, -1));
+	else
+		gsurf_control_invocation_return_value(run->inv, input_reply(TRUE, x, y));
 out:
 	at_run_free(run);
 }
 
 static void
 at_selector(GsurfControlInvocation *inv, GsurfView *view, AtKind kind, const gchar *selector,
-            guint button, guint modifiers, const gchar *text)
+            guint button, guint modifiers, const gchar *text, gint64 baseline)
 {
 	AtRun *run = g_new0(AtRun, 1);
 	g_autofree gchar *script = gsurf_view_locate_script(selector);
@@ -3070,6 +3189,7 @@ at_selector(GsurfControlInvocation *inv, GsurfView *view, AtKind kind, const gch
 	run->modifiers = modifiers;
 	run->text = g_strdup(text);
 	run->selector = g_strdup(selector);
+	run->baseline = baseline;
 	gsurf_view_run_javascript_async(view, script, NULL, at_located, run);
 }
 
@@ -3110,7 +3230,7 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	}
 
 	if (selector != NULL && *selector != '\0') {
-		at_selector(inv, view, AT_CLICK, selector, (guint)button, mods, NULL);
+		at_selector(inv, view, AT_CLICK, selector, (guint)button, mods, NULL, -1);
 		return;
 	}
 	if (!gsurf_view_send_click(view, x, y, (guint)button, mods, &error)) {
@@ -3122,6 +3242,51 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	gsurf_control_invocation_return_value(inv, input_reply(TRUE, x, y));
 }
 
+/* page.type, waiting on the page's keyup count (TYPED_ARM_SCRIPT). */
+typedef struct {
+	GsurfControlInvocation *inv;
+	GsurfView              *view;      /* ref */
+	gchar                  *selector;  /* NULL: the focused element */
+	gchar                  *text;
+} TypeRun;
+
+static void
+type_run_free(TypeRun *run)
+{
+	g_clear_object(&run->inv);
+	g_clear_object(&run->view);
+	g_free(run->selector);
+	g_free(run->text);
+	g_free(run);
+}
+
+static void
+type_armed(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	TypeRun *run = user_data;
+	g_autofree gchar *answer = NULL;
+	g_autoptr(GError) error = NULL;
+	gint64 baseline;
+
+	(void)source;
+	/* A page that will not run the script still gets the keys; the reply
+	 * just does not wait for them (baseline -1). */
+	answer = gsurf_view_run_javascript_finish(run->view, result, NULL);
+	baseline = typed_baseline(answer);
+
+	if (run->selector != NULL) {
+		at_selector(run->inv, run->view, AT_TYPE, run->selector, 0, 0, run->text,
+			baseline);
+	} else if (!gsurf_view_send_text(run->view, run->text, &error)) {
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED, "%s",
+			error->message);
+	} else {
+		reply_when_typed(run->inv, run->view, input_reply(FALSE, 0, 0), baseline,
+			(guint)g_utf8_strlen(run->text, -1));
+	}
+	type_run_free(run);
+}
+
 static void
 m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
 {
@@ -3130,6 +3295,7 @@ m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	GsurfView *view;
 	const gchar *selector = NULL;
 	const gchar *text = NULL;
+	TypeRun *run;
 
 	(void)data;
 	if (!arg_string(params, "selector", &selector, &error) ||
@@ -3149,17 +3315,12 @@ m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 		return;
 	}
 
-	if (selector != NULL && *selector != '\0') {
-		at_selector(inv, view, AT_TYPE, selector, 0, 0, text);
-		return;
-	}
-	if (!gsurf_view_send_text(view, text, &error)) {
-		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED, "%s",
-			error->message);
-		g_error_free(error);
-		return;
-	}
-	gsurf_control_invocation_return_value(inv, input_reply(FALSE, 0, 0));
+	run = g_new0(TypeRun, 1);
+	run->inv = g_object_ref(inv);
+	run->view = g_object_ref(view);
+	run->selector = selector != NULL && *selector != '\0' ? g_strdup(selector) : NULL;
+	run->text = g_strdup(text);
+	gsurf_view_run_javascript_async(view, TYPED_ARM_SCRIPT, NULL, type_armed, run);
 }
 
 static void
@@ -3248,8 +3409,10 @@ view_on_host(GsurfView *view, const gchar *host)
 /*
  * The field script: the first element matching the selector, scrolled
  * into view, focused, and its contents selected so the typed secret
- * replaces them.  Evaluates to "ok", "readonly" (not something a person
- * could type into) or null (nothing matches).  It never sets a value.
+ * replaces them.  Evaluates to "ok:<keyups>" (the page's keyup count,
+ * armed in the same step so nothing can move the focus in between),
+ * "readonly" (not something a person could type into), "unfocused" or
+ * null (nothing matches).  It never sets a value.
  */
 static gchar *
 secret_field_script(const gchar *selector)
@@ -3268,8 +3431,9 @@ secret_field_script(const gchar *selector)
 		"try{if(e.select)e.select();else{var r=document.createRange();"
 		"r.selectNodeContents(e);var s=getSelection();s.removeAllRanges();s.addRange(r);}}"
 		"catch(x){}"
-		"return document.activeElement===e?'ok':'unfocused';})()",
-		quoted);
+		"if(document.activeElement!==e)return 'unfocused';"
+		"return 'ok:'+%s;})()",
+		quoted, TYPED_ARM_SCRIPT);
 }
 
 static JsonNode *
@@ -3302,7 +3466,7 @@ secret_located(GObject *source, GAsyncResult *result, gpointer user_data)
 			"javascript failed: %s", error != NULL ? error->message : "no result");
 		goto out;
 	}
-	if (g_strcmp0(state, "ok") != 0) {
+	if (!g_str_has_prefix(state, "ok:")) {
 		gsurf_control_invocation_return_error(run->inv,
 			g_strcmp0(state, "readonly") == 0 || g_strcmp0(state, "unfocused") == 0
 				? GSURF_CONTROL_ERROR_FAILED : GSURF_CONTROL_ERROR_NOT_FOUND,
@@ -3332,7 +3496,10 @@ secret_located(GObject *source, GAsyncResult *result, gpointer user_data)
 			"typing the secret failed: %s", error->message);
 		goto out;
 	}
-	gsurf_control_invocation_return_value(run->inv, secret_reply());
+	/* 4. Only once the page has the keys: the caller's next command
+	 *    must not overtake the secret's tail (see reply_when_typed()). */
+	reply_when_typed(run->inv, run->view, secret_reply(), typed_baseline(state + 3),
+		(guint)g_utf8_strlen(run->text, -1) + (run->submit ? 1 : 0));
 out:
 	secret_run_free(run);
 }
