@@ -524,7 +524,8 @@ arg_frame(JsonObject *params, gchar **out, GError **error)
 		}
 	}
 	g_set_error_literal(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
-		"'frame' must be a frame id (page.frames gives them) or text from the frame's URI");
+		"'frame' must be a frame id (page.frames gives them) or a site: host, "
+			"host:port or *.host");
 	return FALSE;
 }
 
@@ -3791,8 +3792,8 @@ m_page_secret_hold(GsurfControlServer *server, GsurfControlInvocation *inv, gpoi
 }
 
 #define VIEW_DOC "view?: id, index?: int (default: the active view)"
-#define FRAME_DOC "frame?: id | string (a frame id from page.frames, or text from the " \
-	"frame's URI; default: the main frame)"
+#define FRAME_DOC "frame?: id | string (a frame id from page.frames, or a site: host, " \
+	"host:port or *.host; default: the main frame)"
 
 typedef struct {
 	const gchar            *name;
