@@ -39,6 +39,7 @@
 
 /* Core classes */
 #include "core/gsurf-view.h"
+#include "core/gsurf-view-frames.h"
 #include "core/gsurf-backend.h"
 #include "core/gsurf-application.h"
 #include "core/gsurf-download.h"

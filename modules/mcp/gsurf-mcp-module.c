@@ -66,34 +66,116 @@ typedef struct {
 	GsurfView *view;
 	gchar     *result;
 	GError    *error;
+	gdouble    frame_x;   /* the frame's origin in the view */
+	gdouble    frame_y;
+	guint64    frame_id;
+	gboolean   typed;
 } JsCtx;
 
 static void
 js_done(GObject *source, GAsyncResult *res, gpointer data)
 {
 	JsCtx *c = data;
-	c->result = gsurf_view_run_javascript_finish(c->view, res, &c->error);
+	c->result = gsurf_view_run_javascript_in_frame_finish(c->view, res, &c->frame_x,
+		&c->frame_y, &c->frame_id, &c->error);
 	g_main_loop_quit(c->loop);
 }
 
-/* Run JS and return its (string/JSON) value synchronously via a nested
- * main loop. Returns newly-allocated text, or %NULL on error. */
+/*
+ * Run JS in @frame of @view (NULL: the main frame; @require picks among
+ * frames whose URI matches) and return its (string/JSON) value
+ * synchronously via a nested main loop; @c (may be NULL) gets where the
+ * frame is.  Returns newly-allocated text, or %NULL on error.
+ */
 static gchar *
-run_js_sync(GsurfView *view, const gchar *script, GError **error)
+run_js_in_frame_sync(GsurfView *view, const gchar *frame, const gchar *require,
+                     const gchar *script, JsCtx *out, GError **error)
 {
 	JsCtx c = { 0 };
 
 	c.view = view;
 	c.loop = g_main_loop_new(NULL, FALSE);
-	gsurf_view_run_javascript_async(view, script, NULL, js_done, &c);
+	gsurf_view_run_javascript_in_frame_async(view, frame, require, script, NULL, js_done, &c);
 	g_main_loop_run(c.loop);
 	g_main_loop_unref(c.loop);
+	if (out != NULL) {
+		out->frame_x = c.frame_x;
+		out->frame_y = c.frame_y;
+		out->frame_id = c.frame_id;
+	}
 
 	if (c.error != NULL) {
 		g_propagate_error(error, c.error);
 		return NULL;
 	}
 	return c.result;
+}
+
+/* Run JS in the main frame; see run_js_in_frame_sync(). */
+static gchar *
+run_js_sync(GsurfView *view, const gchar *script, GError **error)
+{
+	return run_js_in_frame_sync(view, NULL, NULL, script, NULL, error);
+}
+
+/*
+ * The optional 'frame' argument: a frame id (list_frames 'id') or text
+ * from the frame's URI.  NULL in @out when absent; FALSE with @error_text
+ * when it is something else.
+ */
+static gboolean
+frame_arg(JsonObject *args, gchar **out, gchar **error_text)
+{
+	JsonNode *node = args != NULL && json_object_has_member(args, "frame")
+		? json_object_get_member(args, "frame") : NULL;
+
+	*out = NULL;
+	if (node == NULL || JSON_NODE_HOLDS_NULL(node))
+		return TRUE;
+	if (JSON_NODE_HOLDS_VALUE(node)) {
+		GType type = json_node_get_value_type(node);
+
+		if ((type == G_TYPE_INT64 || type == G_TYPE_DOUBLE) &&
+		    json_node_get_double(node) >= 1) {
+			*out = g_strdup_printf("%" G_GINT64_FORMAT, (gint64)json_node_get_double(node));
+			return TRUE;
+		}
+		if (type == G_TYPE_STRING && *json_node_get_string(node) != '\0') {
+			*out = g_strdup(json_node_get_string(node));
+			return TRUE;
+		}
+	}
+	*error_text = g_strdup("'frame' must be a frame id (list_frames gives them) or text "
+		"from the frame's URI");
+	return FALSE;
+}
+
+/* An error from a frame: the page methods' words say where to look. */
+static McpToolResult *
+frame_error_result(const GError *error)
+{
+	g_autofree gchar *text = NULL;
+
+	if (error == NULL)
+		return error_result("javascript failed");
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+		/* the extension names page.frames; MCP clients know list_frames */
+		g_autoptr(GString) said = g_string_new(error->message);
+
+		g_string_replace(said, "page.frames", "list_frames", 0);
+		return error_result(said->str);
+	}
+	text = g_strdup(error->message);
+	return error_result(text);
+}
+
+static void
+frames_listed(GObject *source, GAsyncResult *res, gpointer data)
+{
+	JsCtx *c = data;
+
+	c->result = gsurf_view_list_frames_finish(c->view, res, &c->error);
+	g_main_loop_quit(c->loop);
 }
 
 /* ===== tool handlers ===== */
@@ -190,11 +272,17 @@ tool_get_page_text(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *text = NULL;
 
+	g_autofree gchar *frame = NULL;
+	g_autofree gchar *why = NULL;
+
 	if (view == NULL)
 		return gsurf_mcp_gerror(verr, "no active view");
-	text = run_js_sync(view, "document.body ? document.body.innerText : ''", &error);
+	if (!frame_arg(args, &frame, &why))
+		return error_result(why);
+	text = run_js_in_frame_sync(view, frame, NULL,
+		"document.body ? document.body.innerText : ''", NULL, &error);
 	if (text == NULL)
-		return error_result(error ? error->message : "javascript failed");
+		return frame_error_result(error);
 	return text_result(text);
 }
 
@@ -242,6 +330,8 @@ tool_execute_javascript(McpServer *s, const gchar *name, JsonObject *args, gpoin
 		? json_object_get_string_member(args, "code") : NULL;
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *result = NULL;
+	g_autofree gchar *frame = NULL;
+	g_autofree gchar *why = NULL;
 
 	if (view == NULL)
 		return gsurf_mcp_gerror(verr, "no active view");
@@ -249,10 +339,39 @@ tool_execute_javascript(McpServer *s, const gchar *name, JsonObject *args, gpoin
 		return error_result(verr->message);
 	if (code == NULL)
 		return error_result("missing 'code'");
-	result = run_js_sync(view, code, &error);
+	if (!frame_arg(args, &frame, &why))
+		return error_result(why);
+	result = run_js_in_frame_sync(view, frame, NULL, code, NULL, &error);
 	if (result == NULL && error != NULL)
-		return error_result(error->message);
+		return frame != NULL ? frame_error_result(error) : error_result(error->message);
 	return text_result(result ? result : "null");
+}
+
+static McpToolResult *
+tool_list_frames(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
+{
+	g_autoptr(GError) verr = NULL;
+	GsurfView *view = gsurf_mcp_target_view(args, &verr);
+	JsCtx c = { 0 };
+
+	if (view == NULL)
+		return gsurf_mcp_gerror(verr, "no active view");
+	c.view = view;
+	c.loop = g_main_loop_new(NULL, FALSE);
+	gsurf_view_list_frames_async(view, NULL, frames_listed, &c);
+	g_main_loop_run(c.loop);
+	g_main_loop_unref(c.loop);
+	if (c.result == NULL) {
+		g_autoptr(GError) error = c.error;
+
+		return error_result(error != NULL ? error->message : "no frame list");
+	}
+	{
+		McpToolResult *result = text_result(c.result);
+
+		g_free(c.result);
+		return result;
+	}
 }
 
 static McpToolResult *
@@ -335,33 +454,56 @@ tool_click_link(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 /*
  * Where the element matching @selector is: scrolled into view, focused,
  * and its centre as view coordinates -- gsurf_view_locate_script(), the
- * same reading the control socket's page.click uses.  FALSE with
- * @error_text when nothing matches.
+ * same reading the control socket's page.click uses.  In @frame (NULL:
+ * the main frame) the point is moved to the view's, and @where (may be
+ * NULL) gets the frame: its origin and id.  FALSE with @error_text when
+ * nothing matches.
  */
 static gboolean
-locate(GsurfView *view, const gchar *selector, gdouble *x, gdouble *y,
-       gchar **error_text)
+locate(GsurfView *view, const gchar *frame, const gchar *selector, gdouble *x, gdouble *y,
+       JsCtx *where_frame, gchar **error_text)
 {
 	g_autofree gchar *script = gsurf_view_locate_script(selector);
 	g_autoptr(GError) error = NULL;
-	g_autofree gchar *where = run_js_sync(view, script, &error);
+	JsCtx at = { 0 };
+	g_autofree gchar *where = run_js_in_frame_sync(view, frame, selector, script, &at, &error);
 	g_autoptr(JsonParser) parser = json_parser_new();
 	JsonNode *root;
 	JsonArray *xy;
 
 	if (where == NULL) {
-		*error_text = g_strdup(error != NULL ? error->message : "javascript failed");
+		if (error != NULL && g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND)) {
+			g_autoptr(GString) said = g_string_new(error->message);
+
+			g_string_replace(said, "page.frames", "list_frames", 0);
+			*error_text = g_string_free(g_steal_pointer(&said), FALSE);
+		} else {
+			*error_text = g_strdup(error != NULL ? error->message : "javascript failed");
+		}
 		return FALSE;
 	}
 	if (!json_parser_load_from_data(parser, where, -1, NULL) ||
 	    (root = json_parser_get_root(parser)) == NULL || !JSON_NODE_HOLDS_ARRAY(root) ||
 	    json_array_get_length(xy = json_node_get_array(root)) != 2) {
-		*error_text = g_strdup_printf("nothing on the page matches '%s'", selector);
+		*error_text = frame != NULL
+			? g_strdup_printf("nothing in frame '%s' matches '%s'", frame, selector)
+			: g_strdup_printf("nothing on the page matches '%s'", selector);
 		return FALSE;
 	}
-	*x = json_array_get_double_element(xy, 0);
-	*y = json_array_get_double_element(xy, 1);
+	*x = json_array_get_double_element(xy, 0) + at.frame_x;
+	*y = json_array_get_double_element(xy, 1) + at.frame_y;
+	if (where_frame != NULL)
+		*where_frame = at;
 	return TRUE;
+}
+
+static void
+typed_in_frame(GObject *source, GAsyncResult *res, gpointer data)
+{
+	JsCtx *c = data;
+
+	c->typed = gsurf_view_type_in_frame_finish(c->view, res, &c->error);
+	g_main_loop_quit(c->loop);
 }
 
 static McpToolResult *
@@ -376,14 +518,21 @@ tool_click(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *why = NULL;
 	g_autofree gchar *said = NULL;
+	g_autofree gchar *frame = NULL;
+	JsCtx at = { 0 };
 	gdouble x = -1;
 	gdouble y = -1;
 
 	if (view == NULL)
 		return gsurf_mcp_gerror(verr, "no active view");
+	if (!frame_arg(args, &frame, &why))
+		return error_result(why);
+	if (frame != NULL && (selector == NULL || *selector == '\0'))
+		return error_result("with 'frame', give a 'selector' (x and y are the view's; "
+			"list_frames says where each frame is)");
 
 	if (selector != NULL && *selector != '\0') {
-		if (!locate(view, selector, &x, &y, &why))
+		if (!locate(view, frame, selector, &x, &y, &at, &why))
 			return error_result(why);
 	} else if (args && json_object_has_member(args, "x") &&
 	           json_object_has_member(args, "y")) {
@@ -393,7 +542,12 @@ tool_click(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 		return error_result("give a 'selector', or 'x' and 'y'");
 	}
 
-	if (!gsurf_view_send_click(view, x, y, (guint)CLAMP(button, 1, 3), 0, &error))
+	if (frame != NULL && at.frame_id != 0) {
+		g_free(frame);
+		frame = g_strdup_printf("%" G_GUINT64_FORMAT, at.frame_id);
+	}
+	if (!gsurf_view_send_click_in_frame(view, frame, x, y, at.frame_x, at.frame_y,
+	                                    (guint)CLAMP(button, 1, 3), 0, &error))
 		return error_result(error->message);
 	said = g_strdup_printf("clicked at %.0f, %.0f", x, y);
 	return text_result(said);
@@ -410,6 +564,8 @@ tool_type_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 		? json_object_get_string_member(args, "selector") : NULL;
 	g_autoptr(GError) error = NULL;
 	g_autofree gchar *why = NULL;
+	g_autofree gchar *frame = NULL;
+	JsCtx at = { 0 };
 	gdouble x;
 	gdouble y;
 
@@ -417,9 +573,30 @@ tool_type_text(McpServer *s, const gchar *name, JsonObject *args, gpointer ud)
 		return gsurf_mcp_gerror(verr, "no active view");
 	if (text == NULL)
 		return error_result("missing 'text'");
-	/* locating focuses the element, which is where the text goes */
-	if (selector != NULL && *selector != '\0' && !locate(view, selector, &x, &y, &why))
+	if (!frame_arg(args, &frame, &why))
 		return error_result(why);
+	/* locating focuses the element, which is where the text goes */
+	if (selector != NULL && *selector != '\0' &&
+	    !locate(view, frame, selector, &x, &y, &at, &why))
+		return error_result(why);
+	/* in a frame the field is clicked into first: a script cannot move the
+	 * focus there (gsurf_view_type_in_frame_async()) */
+	if (frame != NULL && selector != NULL && *selector != '\0') {
+		g_autofree gchar *id = g_strdup_printf("%" G_GUINT64_FORMAT, at.frame_id);
+
+		at.view = view;
+		at.loop = g_main_loop_new(NULL, FALSE);
+		gsurf_view_type_in_frame_async(view, at.frame_id != 0 ? id : frame, selector, x, y,
+			at.frame_x, at.frame_y, text, NULL, typed_in_frame, &at);
+		g_main_loop_run(at.loop);
+		g_main_loop_unref(at.loop);
+		if (!at.typed) {
+			g_autoptr(GError) failed = at.error;
+
+			return error_result(failed != NULL ? failed->message : "typing failed");
+		}
+		return text_result("typed");
+	}
 	if (!gsurf_view_send_text(view, text, &error))
 		return error_result(error->message);
 	return text_result("typed");
@@ -895,6 +1072,8 @@ tool_toggle_module(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 /* ===== tool registration ===== */
 
 #define VIEW_ARG { "view", "integer", "stable view id (list_views 'id'); default: the active view", FALSE }
+#define FRAME_ARG { "frame", "string", "a frame of the page: its id (list_frames 'id') or " \
+	"text from its URI, e.g. js.stripe.com; default: the main frame", FALSE }
 
 static const GsurfMcpToolDef page_tools[] = {
 	{ "navigate", "Load a URI in a view (default: the active view)",
@@ -906,12 +1085,18 @@ static const GsurfMcpToolDef page_tools[] = {
 	{ "reload", "Reload a view",
 	  {{ "bypass_cache", "boolean", "bypass the cache", FALSE }, VIEW_ARG }, tool_reload },
 	{ "stop", "Stop loading a view", {VIEW_ARG}, tool_stop },
-	{ "get_page_text", "Get the rendered text of a view's page", {VIEW_ARG}, tool_get_page_text },
+	{ "get_page_text", "Get the rendered text of a view's page, or of one frame of it",
+	  {FRAME_ARG, VIEW_ARG}, tool_get_page_text },
+	{ "list_frames", "List a view's frames, cross-origin ones included, main frame first, as "
+	  "JSON [{id, uri, main, parent, x, y, width, height, visible}]; needs the frames module",
+	  {VIEW_ARG}, tool_list_frames },
 	{ "get_page_html", "Get the full HTML of a view's page", {VIEW_ARG}, tool_get_page_html },
 	{ "get_links", "List the links on a view's page as JSON [{text, href}]", {VIEW_ARG},
 	  tool_get_links },
-	{ "execute_javascript", "Run JavaScript in a view's page and return the result",
-	  {{ "code", "string", "the JavaScript to run", TRUE }, VIEW_ARG }, tool_execute_javascript },
+	{ "execute_javascript", "Run JavaScript in a view's page, or in one frame of it, and "
+	  "return the result",
+	  {{ "code", "string", "the JavaScript to run", TRUE }, FRAME_ARG, VIEW_ARG },
+	  tool_execute_javascript },
 	{ "scroll", "Scroll a view's page (direction: up/down/top/bottom)",
 	  {{ "direction", "string", "scroll direction", FALSE }, VIEW_ARG }, tool_scroll },
 	{ "find_text", "Find text in a view's page",
@@ -921,16 +1106,19 @@ static const GsurfMcpToolDef page_tools[] = {
 	  {{ "index", "number", "link index", FALSE },
 	   { "selector", "string", "CSS selector", FALSE }, VIEW_ARG }, tool_click_link },
 	{ "click", "Click in a view: at the element matching a CSS selector (scrolled into view "
-	  "first) or at x, y in CSS pixels. Trusted input on GTK3",
+	  "first; in 'frame' when given) or at x, y in CSS pixels of the view. Trusted input on "
+	  "GTK3",
 	  {{ "selector", "string", "CSS selector of the element to click", FALSE },
 	   { "x", "number", "horizontal position, CSS pixels", FALSE },
 	   { "y", "number", "vertical position, CSS pixels", FALSE },
-	   { "button", "number", "1 left (default), 2 middle, 3 right", FALSE }, VIEW_ARG },
+	   { "button", "number", "1 left (default), 2 middle, 3 right", FALSE }, FRAME_ARG,
+	   VIEW_ARG },
 	  tool_click },
 	{ "type_text", "Type text into the focused element, or the one matching 'selector' "
-	  "(focused first); a newline is Enter. Trusted input on GTK3",
+	  "(focused first; in 'frame' when given, clicked into first); a newline is Enter. "
+	  "Trusted input on GTK3",
 	  {{ "text", "string", "the text to type", TRUE },
-	   { "selector", "string", "CSS selector to focus first", FALSE }, VIEW_ARG },
+	   { "selector", "string", "CSS selector to focus first", FALSE }, FRAME_ARG, VIEW_ARG },
 	  tool_type_text },
 	{ "press_key", "Press one key: Enter, Tab, Escape, Backspace, Delete, ArrowUp, Home, "
 	  "PageDown, space, ... or one character. Trusted input on GTK3",

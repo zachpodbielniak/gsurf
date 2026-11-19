@@ -47,6 +47,8 @@ static gchar *tmp_root;
 
 static SoupServer *soup;
 static guint16     port;
+static SoupServer *inner_soup;   /* a second site, for cross-origin frames */
+static guint16     inner_port;
 
 /* /p/<name>: a page titled <name>. */
 static void
@@ -118,11 +120,53 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 		return;
 	}
 
+	/* A page holding a frame from another site (localhost, another
+	 * port): the title turns "outer-ready" once the frame has loaded.
+	 * The frame sits well inside the page, behind a border and padding,
+	 * so a point read inside it has to be moved to reach the view. */
+	if (g_strcmp0(path, "/outer") == 0) {
+		body = g_strdup_printf("<!doctype html><html><head><title>outer</title></head>"
+			"<body><p>outside the frame</p><div style='height:150px'></div>"
+			"<iframe id='pay' src='http://localhost:%u/inner' "
+			"style='margin-left:80px;border:9px solid #888;padding:5px;"
+			"width:420px;height:320px' "
+			"onload=\"document.title='outer-ready'\"></iframe></body></html>",
+			inner_port);
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body,
+			strlen(body));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><p>hello %s</p></body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
 	soup_server_message_set_status(msg, 200, NULL);
 	soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body, strlen(body));
+}
+
+/* The framed site: a card field and a Save button that says what it was
+ * given and whether the click was the browser's own. */
+static void
+serve_inner(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *query,
+            gpointer user_data)
+{
+	static const gchar inner[] =
+		"<!doctype html><html><head><title>inner</title></head><body style='margin:0'>"
+		"<p>inside the frame</p>"
+		"<input id='card' autocomplete='off' style='margin:10px'>"
+		"<button id='save' style='margin:30px 0 0 60px' onclick=\""
+		"document.getElementById('out').textContent='saved:'+"
+		"document.getElementById('card').value+':'+event.isTrusted\">Save</button>"
+		"<div id='out'>unsaved</div></body></html>";
+
+	(void)srv;
+	(void)path;
+	(void)query;
+	(void)user_data;
+	soup_server_message_set_status(msg, 200, NULL);
+	soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, inner,
+		strlen(inner));
 }
 
 static gchar *
@@ -1204,6 +1248,155 @@ test_typing_settles(void)
 	h_free(&h);
 }
 
+/*
+ * A frame from another site, read and driven from outside the page:
+ * page.frames finds it by its URI, and page.text, page.eval, page.type
+ * and page.click take it as 'frame' -- the way a payment form inside a
+ * provider's iframe is reached.
+ */
+static gchar *
+frame_eval(H *h, gint64 view, const gchar *frame, const gchar *script)
+{
+	g_autoptr(JsonNode) node = NULL;
+	g_autoptr(JsonNode) literal = json_node_new(JSON_NODE_VALUE);
+	g_autofree gchar *quoted = NULL;
+
+	json_node_set_string(literal, script);
+	quoted = json_to_string(literal, FALSE);
+	node = rpcf(h, "page.eval", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,\"script\":%s}",
+		view, frame, quoted);
+	return g_strdup(JSON_NODE_HOLDS_VALUE(node) &&
+		json_node_get_value_type(node) == G_TYPE_STRING ? json_node_get_string(node) : "");
+}
+
+static void
+test_frames(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *outer = NULL;
+	g_autofree gchar *site = NULL;
+	g_autofree gchar *text = NULL;
+	g_autofree gchar *path = gsurf_webkit_test_module_path("frames");
+	GsurfView *view;
+	JsonArray *frames;
+	JsonObject *inner = NULL;
+	gint64 id;
+	gint64 inner_id = 0;
+	guint i;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+	/* The frames module carries the web-process half.  It reaches the web
+	 * processes started after it is on, so the page opens in a new view. */
+	g_assert_true(g_file_test(path, G_FILE_TEST_EXISTS));
+	use_module(&h, "frames");
+	gsurf_module_manager_activate_all(h.mgr);
+
+	outer = g_strdup_printf("http://127.0.0.1:%u/outer", port);
+	site = g_strdup_printf("\"localhost:%u\"", inner_port);
+	node = rpcf(&h, "open", 0, "{\"uri\":\"%s\"}", outer);
+	id = json_object_get_int_member(obj(node), "id");
+	g_clear_pointer(&node, json_node_unref);
+	view = gsurf_view_lookup((guint64)id);
+	g_assert_nonnull(view);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "outer-ready") == 0);
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 1. The main frame's text stops at the frame. */
+	node = rpcf(&h, "page.text", 0, "{\"view\":%" G_GINT64_FORMAT "}", id);
+	ASSERT_HAS(json_node_get_string(node), "outside the frame");
+	g_assert_null(strstr(json_node_get_string(node), "inside the frame"));
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 2. page.frames lists both, the main one first, with URIs and where
+	 *    the frame's content is in the view. */
+	node = rpcf(&h, "page.frames", 0, "{\"view\":%" G_GINT64_FORMAT "}", id);
+	g_assert_true(JSON_NODE_HOLDS_ARRAY(node));
+	frames = json_node_get_array(node);
+	g_assert_cmpuint(json_array_get_length(frames), ==, 2);
+	g_assert_true(json_object_get_boolean_member(json_array_get_object_element(frames, 0),
+		"main"));
+	for (i = 0; i < json_array_get_length(frames); i++) {
+		JsonObject *f = json_array_get_object_element(frames, i);
+
+		if (strstr(json_object_get_string_member(f, "uri"), "localhost:") != NULL)
+			inner = f;
+	}
+	g_assert_nonnull(inner);
+	g_assert_false(json_object_get_boolean_member(inner, "main"));
+	g_assert_true(json_object_get_boolean_member(inner, "visible"));
+	inner_id = json_object_get_int_member(inner, "id");
+	g_assert_cmpint(inner_id, >, 0);
+	g_assert_cmpint(json_object_get_int_member(inner, "parent"), ==,
+		json_object_get_int_member(json_array_get_object_element(frames, 0), "id"));
+	/* margin 80 + border 9 + padding 5, past the body's own margin */
+	g_assert_cmpfloat(json_object_get_double_member(inner, "x"), >=, 94);
+	g_assert_cmpfloat(json_object_get_double_member(inner, "y"), >=, 150);
+	g_assert_cmpfloat(json_object_get_double_member(inner, "width"), ==, 420);
+	g_assert_cmpfloat(json_object_get_double_member(inner, "height"), ==, 320);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 3. Its text, by a piece of its URI and by its id. */
+	node = rpcf(&h, "page.text", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s}", id, site);
+	ASSERT_HAS(json_node_get_string(node), "inside the frame");
+	g_assert_null(strstr(json_node_get_string(node), "outside the frame"));
+	g_clear_pointer(&node, json_node_unref);
+	node = rpcf(&h, "page.text", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%" G_GINT64_FORMAT
+		"}", id, inner_id);
+	ASSERT_HAS(json_node_get_string(node), "inside the frame");
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 4. Type into its field and press its button, from outside. */
+	node = rpcf(&h, "page.type", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#card\",\"text\":\"4242 zz\"}", id, site);
+	g_assert_true(json_object_get_boolean_member(obj(node), "done"));
+	g_clear_pointer(&node, json_node_unref);
+	text = frame_eval(&h, id, site, "document.getElementById('card').value");
+	g_assert_cmpstr(text, ==, "4242 zz");
+	g_clear_pointer(&text, g_free);
+
+	node = rpcf(&h, "page.click", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#save\"}", id, site);
+	/* the point is the view's: inside the frame's box */
+	g_assert_cmpfloat(json_object_get_double_member(obj(node), "x"), >, 94);
+	g_assert_cmpfloat(json_object_get_double_member(obj(node), "y"), >, 150);
+	g_clear_pointer(&node, json_node_unref);
+	for (i = 0; i < 200; i++) {
+		g_free(text);
+		text = frame_eval(&h, id, site, "document.getElementById('out').textContent");
+		if (g_str_has_prefix(text, "saved:"))
+			break;
+		gsurf_webkit_test_spin(25);
+	}
+#ifdef GSURF_BACKEND_GTK4
+	g_assert_cmpstr(text, ==, "saved:4242 zz:false");
+#else
+	/* GDK events through the frame's own box: a trusted click */
+	g_assert_cmpstr(text, ==, "saved:4242 zz:true");
+#endif
+	g_clear_pointer(&text, g_free);
+	node = rpcf(&h, "page.text", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s}", id, site);
+	ASSERT_HAS(json_node_get_string(node), "saved:4242 zz");
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 5. What is refused, and how. */
+	node = rpcf(&h, "page.text", -32001, "{\"view\":%" G_GINT64_FORMAT
+		",\"frame\":\"nowhere.example\"}", id);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpcf(&h, "page.text", -32001, "{\"view\":%" G_GINT64_FORMAT
+		",\"frame\":987654321}", id);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpcf(&h, "page.text", -32602, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":true}", id);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpcf(&h, "page.click", -32001, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#nope\"}", id, site);
+	g_clear_pointer(&node, json_node_unref);
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1219,6 +1412,9 @@ main(int argc, char *argv[])
 	soup = soup_server_new(NULL, NULL);
 	soup_server_add_handler(soup, NULL, serve, NULL, NULL);
 	port = gsurf_webkit_test_listen(soup);
+	inner_soup = soup_server_new(NULL, NULL);
+	soup_server_add_handler(inner_soup, NULL, serve_inner, NULL, NULL);
+	inner_port = gsurf_webkit_test_listen(inner_soup);
 
 	g_test_add_func("/gsurf/control/webkit/views", test_views);
 	g_test_add_func("/gsurf/control/webkit/tree-containers", test_tree_containers);
@@ -1228,9 +1424,11 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/control/webkit/input", test_input);
 	g_test_add_func("/gsurf/control/webkit/fill-secret", test_fill_secret);
 	g_test_add_func("/gsurf/control/webkit/typing-settles", test_typing_settles);
+	g_test_add_func("/gsurf/control/webkit/frames", test_frames);
 
 	ret = g_test_run();
 	g_clear_object(&soup);
+	g_clear_object(&inner_soup);
 	gsurf_test_rmtree(tmp_root);
 	g_free(tmp_root);
 	return ret;

@@ -22,6 +22,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 | =cookie_policy=  | togglecookiepolicy   | =GsurfInputHandler=             | implemented |
 | =hardening=      | (new; LibreWolf)     | =GsurfSettingProvider= + web-process extension + session policy | implemented (see [[file:hardening.org][hardening.org]]) |
 | =find_bar=       | WebKit find          | =GsurfInputHandler= + =GsurfActionHandler= | implemented |
+| =frames=         | (new; agents)        | web-process extension            | implemented (on by default; a page's frames for the control socket and MCP, see [[file:frames.org][frames.org]]) |
 
 * Tier 2 — important
 
@@ -52,7 +53,7 @@ Status: *implemented* modules ship and are tested; *planned* modules are designe
 =dlconsole= are intentionally folded into =toggles= and =downloads=
 respectively (they were redundant catalog entries).
 
-All 33 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
+All 34 modules build with =make= (the =mcp= module requires =MCP=1=), with =GTK_BACKEND=gtk3= and =GTK_BACKEND=gtk4= alike.
 
 * AI modules (deferred)
 

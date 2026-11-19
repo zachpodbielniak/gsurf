@@ -27,6 +27,7 @@ modules:
       get_title: true
       navigate: true
       get_page_text: true
+      # list_frames: true           # a page's frames (needs the frames module)
       list_views: true
       get_tab_tree: true
       wmux_status: true
@@ -45,7 +46,7 @@ On activation the module prints the socket path it is listening on. =data/defaul
 
 Every view has a process-unique id that never changes and is never reused (=gsurf_view_get_id()=). Tools take it as =view= (and =parent=, =before=, =after=, =target= where a second view is meant); =list_views= and every tool returning a view report it as =id=. Positions (=index=) change whenever tabs open, close or move; the original tools keep their =index= argument for backward compatibility, but agents should use ids.
 
-The page tools (=navigate=, =get_current_uri=, =get_title=, =go_back=, =go_forward=, =reload=, =stop=, =get_page_text=, =get_page_html=, =get_links=, =execute_javascript=, =scroll=, =find_text=, =click_link=, =screenshot=, =save_screenshot=, =get_cookies=, =set_cookie=) act on the active view unless given =view= (or =index=).
+The page tools (=navigate=, =get_current_uri=, =get_title=, =go_back=, =go_forward=, =reload=, =stop=, =get_page_text=, =list_frames=, =get_page_html=, =get_links=, =execute_javascript=, =scroll=, =find_text=, =click_link=, =screenshot=, =save_screenshot=, =get_cookies=, =set_cookie=) act on the active view unless given =view= (or =index=).
 
 Only views of the active window are addressable (gsurf runs one window per process). =reopen_in_container= replaces a view: the old id is gone afterwards and the result carries the new one.
 
@@ -84,16 +85,19 @@ Tools that change wmux panes or windows return the current wmux window's panes a
 | =go_back= / =go_forward= | =view?= | History navigation |
 | =reload= | =bypass_cache?=, =view?= | Reload |
 | =stop= | =view?= | Stop loading |
-| =get_page_text= | =view?= | Rendered =innerText= of the page |
+| =get_page_text= | =frame?=, =view?= | Rendered =innerText= of the page, or of one frame of it |
+| =list_frames= | =view?= | JSON array of the page's frames, cross-origin ones included, main frame first: ={id, uri, main, parent, x, y, width, height, visible}= (needs the =frames= module; see [[file:frames.org][frames.org]]) |
 | =get_page_html= | =view?= | Full serialized HTML |
 | =get_links= | =view?= | JSON array of ={text, href}= |
-| =execute_javascript= | =code=, =view?= | Run JS in the page, return the result |
+| =execute_javascript= | =code=, =frame?=, =view?= | Run JS in the page, or in one frame of it, return the result |
 | =scroll= | =direction=, =view?= | up / down / top / bottom |
 | =find_text= | =text=, =backward?=, =view?= | Find in page |
 | =click_link= | =index?= or =selector?=, =view?= | Click a link |
-| =click= | =selector?= or =x=, =y=; =button?=, =view?= | Click at an element (scrolled into view and focused first) or at a point in CSS pixels (since 0.5.10) |
-| =type_text= | =text=, =selector?=, =view?= | Type into the focused element, or the one matching =selector=; a newline is Enter (since 0.5.10) |
+| =click= | =selector?= or =x=, =y=; =button?=, =frame?=, =view?= | Click at an element (scrolled into view and focused first; in =frame= when given) or at a point in CSS pixels of the view (since 0.5.10) |
+| =type_text= | =text=, =selector?=, =frame?=, =view?= | Type into the focused element, or the one matching =selector= (in =frame= when given: clicked into first, since a script cannot focus inside a cross-origin frame); a newline is Enter (since 0.5.10) |
 | =press_key= | =key=, =modifiers?=, =view?= | One key by name (=Enter=, =Tab=, =Escape=, =Backspace=, =ArrowUp=, =Home=, =PageDown=, =space=, ...) or one character; =modifiers= is =ctrl+shift= style (since 0.5.10) |
+
+*Frames.* =frame= is a frame id from =list_frames= or text found in the frame's URI (="js.stripe.com"=): among several matches visible frames come first, then document order, and =click= / =type_text= take the first that has =selector=. That is how a payment form inside a provider's cross-origin iframe is read and filled. =click= with =frame= needs =selector=. No such frame is an error result that names =list_frames=; without the =frames= module, one that says to enable it.
 
 =click=, =type_text= and =press_key= return once the input is handed to the engine; the page handles it a moment later, so read the result (=get_page_text=, =execute_javascript=) rather than assuming it. On GTK3 the input is GTK's own events and the page sees it as trusted; GTK4 and LRG views dispatch DOM events from JavaScript instead.
 | =screenshot= / =save_screenshot= | (=path=), =view?= | PNG of the visible page; refused while the view has a secret hold (since 0.5.13, see [[file:control.org][control.org]]) |

@@ -100,6 +100,11 @@ typedef struct {
  * @add_cookie_async: add a cookie to the view's session cookie store and
  *   complete a #GTask whose source object is the view, returning a boolean;
  *   gsurf_view_add_cookie_finish() propagates it (since 0.5.11)
+ * @send_page_message: send a named message with parameters to the page's
+ *   web-process extensions and complete @task (taken; its source object is
+ *   the view) with the reply's parameters as a #GVariant, or with
+ *   %G_IO_ERROR_NOT_SUPPORTED when no extension handles it;
+ *   gsurf_view_send_page_message_finish() propagates it (since 0.5.15)
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
@@ -181,6 +186,11 @@ struct _GsurfViewClass
 	void         (*add_cookie_async)            (GsurfView *self, const GsurfCookie *cookie,
 	                                             GCancellable *cancellable,
 	                                             GAsyncReadyCallback callback, gpointer user_data);
+
+	/* Page messages: the UI-process end of a web-process extension's
+	 * user messages (see gsurf_view_send_page_message_async()). */
+	void         (*send_page_message)           (GsurfView *self, const gchar *name,
+	                                             GVariant *params, GTask *task);
 };
 
 /* --- Navigation --- */
@@ -547,6 +557,43 @@ void gsurf_view_add_cookie_async(GsurfView *self, const GsurfCookie *cookie,
  * Since: 0.5.11
  */
 gboolean gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **error);
+
+/**
+ * gsurf_view_send_page_message_async:
+ * @self: a #GsurfView
+ * @name: the message name a web-process extension answers
+ * @params: (nullable): the message parameters; a floating reference is sunk
+ * @cancellable: (nullable): a #GCancellable
+ * @callback: (scope async) (nullable) (closure user_data): completion callback
+ * @user_data: data for @callback
+ *
+ * Sends the message @name to the web process showing @self's page, where
+ * a web-process extension (gsurf_web_process_extension_register()) answers
+ * it.  Finish with gsurf_view_send_page_message_finish().  No extension
+ * handling @name, or a backend without web processes, completes with
+ * %G_IO_ERROR_NOT_SUPPORTED.
+ *
+ * Since: 0.5.15
+ */
+void gsurf_view_send_page_message_async(GsurfView *self, const gchar *name, GVariant *params,
+                                        GCancellable *cancellable,
+                                        GAsyncReadyCallback callback, gpointer user_data);
+
+/**
+ * gsurf_view_send_page_message_finish:
+ * @self: a #GsurfView
+ * @result: the #GAsyncResult passed to the callback
+ * @error: return location for a #GError
+ *
+ * Finishes gsurf_view_send_page_message_async().
+ *
+ * Returns: (transfer full) (nullable): the reply's parameters (an empty
+ *   tuple when the reply has none), or %NULL with @error set
+ *
+ * Since: 0.5.15
+ */
+GVariant *gsurf_view_send_page_message_finish(GsurfView *self, GAsyncResult *result,
+                                              GError **error);
 
 /**
  * gsurf_view_set_proxy:

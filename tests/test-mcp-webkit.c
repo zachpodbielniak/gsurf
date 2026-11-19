@@ -58,6 +58,8 @@ static CallToolFunc  call_tool;
 
 static SoupServer *server;
 static guint16     port;
+static SoupServer *inner_server;   /* a second site, for cross-origin frames */
+static guint16     inner_port;
 
 /* /p/<name>: a page titled <name>. */
 static void
@@ -100,11 +102,46 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 		return;
 	}
 
+	/* /outer: a page holding a frame from another site; the title turns
+	 * "outer-ready" once the frame has loaded */
+	if (g_strcmp0(path, "/outer") == 0) {
+		body = g_strdup_printf("<!doctype html><html><head><title>outer</title></head>"
+			"<body><p>outside the frame</p><div style='height:120px'></div>"
+			"<iframe src='http://localhost:%u/inner' style='margin-left:60px;"
+			"width:400px;height:300px' onload=\"document.title='outer-ready'\">"
+			"</iframe></body></html>", inner_port);
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body,
+			strlen(body));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><a href=\"/p/linked\">link</a> %s</body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
 	soup_server_message_set_status(msg, 200, NULL);
 	soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body, strlen(body));
+}
+
+/* The framed site: a field and a button that reports what it was given. */
+static void
+serve_inner(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *query,
+            gpointer user_data)
+{
+	static const gchar inner[] =
+		"<!doctype html><html><head><title>inner</title></head><body>"
+		"<p>inside the frame</p><input id='card' autocomplete='off'>"
+		"<button id='save' style='margin:30px' onclick=\"document.getElementById('out')"
+		".textContent='saved:'+document.getElementById('card').value\">Save</button>"
+		"<div id='out'>unsaved</div></body></html>";
+
+	(void)srv;
+	(void)path;
+	(void)query;
+	(void)user_data;
+	soup_server_message_set_status(msg, 200, NULL);
+	soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, inner,
+		strlen(inner));
 }
 
 static gchar *
@@ -198,7 +235,7 @@ h_init(H *h, const gchar *extra_yaml)
 		"list_panes", "wmux_command", "split_pane", "select_pane", "kill_pane", "zoom_pane",
 		"select_layout", "show_view_in_pane", "select_window", "new_window",
 		"rename_window", "kill_window", "toggle_module", "set_cookie", "click", "type_text",
-		"press_key", "execute_javascript", NULL
+		"press_key", "execute_javascript", "get_page_text", "list_frames", NULL
 	};
 	g_autoptr(GError) error = NULL;
 	g_autoptr(GString) yaml = NULL;
@@ -1028,6 +1065,103 @@ test_input(void)
 	h_free(&h);
 }
 
+/*
+ * A frame from another site through the MCP tools: list_frames finds it
+ * by URI, and get_page_text, execute_javascript, type_text and click take
+ * it as 'frame'.
+ */
+static void
+test_frames(void)
+{
+	H h;
+	g_autofree gchar *outer = NULL;
+	g_autofree gchar *site = NULL;
+	g_autofree gchar *path = gsurf_webkit_test_module_path("frames");
+	g_autoptr(JsonNode) node = NULL;
+	JsonArray *frames;
+	GsurfView *view;
+	guint64 id;
+	gchar *text;
+	guint i;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h, "  frames:\n    enabled: true\n"))
+		return;
+	/* the frames module carries the web-process half; it reaches web
+	 * processes started after it, so the page opens in a new view */
+	g_assert_true(g_file_test(path, G_FILE_TEST_EXISTS));
+	use_module(&h, "frames");
+	gsurf_module_manager_activate_all(h.mgr);
+
+	outer = g_strdup_printf("http://127.0.0.1:%u/outer", port);
+	site = g_strdup_printf("localhost:%u", inner_port);
+	node = call_jsonf(&h, "open_child_view", "{\"uri\":\"%s\"}", outer);
+	id = (guint64)json_object_get_int_member(obj(node), "id");
+	g_clear_pointer(&node, json_node_unref);
+	view = gsurf_view_lookup(id);
+	g_assert_nonnull(view);
+	g_free(callf(&h, "switch_view", FALSE, "{\"view\":%" G_GUINT64_FORMAT "}", id));
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "outer-ready") == 0);
+	g_free(call(&h, "set_mode", "{\"mode\":\"insert\"}", FALSE));
+
+	/* 1. The frames, the main one first. */
+	node = call_json(&h, "list_frames", NULL);
+	frames = json_node_get_array(node);
+	g_assert_cmpuint(json_array_get_length(frames), ==, 2);
+	g_assert_true(json_object_get_boolean_member(json_array_get_object_element(frames, 0),
+		"main"));
+	ASSERT_HAS(json_object_get_string_member(json_array_get_object_element(frames, 1), "uri"),
+		site);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 2. Text from outside and from inside. */
+	text = call(&h, "get_page_text", NULL, FALSE);
+	g_assert_null(strstr(text, "inside the frame"));
+	g_free(text);
+	text = callf(&h, "get_page_text", FALSE, "{\"frame\":\"%s\"}", site);
+	ASSERT_HAS(text, "inside the frame");
+	g_free(text);
+
+	/* 3. Type and click in the frame; read the result there. */
+	g_free(callf(&h, "type_text", FALSE,
+		"{\"frame\":\"%s\",\"selector\":\"#card\",\"text\":\"4242\"}", site));
+	/* keys are handled after the call returns: wait for them to land */
+	text = NULL;
+	for (i = 0; i < 200; i++) {
+		g_free(text);
+		text = callf(&h, "execute_javascript", FALSE, "{\"frame\":\"%s\","
+			"\"code\":\"document.getElementById('card').value\"}", site);
+		if (strstr(text, "4242") != NULL)
+			break;
+		gsurf_webkit_test_spin(25);
+	}
+	ASSERT_HAS(text, "4242");
+	g_free(text);
+	text = callf(&h, "click", FALSE, "{\"frame\":\"%s\",\"selector\":\"#save\"}", site);
+	ASSERT_HAS(text, "clicked at");
+	g_free(text);
+	text = NULL;
+	for (i = 0; i < 200; i++) {
+		g_free(text);
+		text = callf(&h, "execute_javascript", FALSE, "{\"frame\":\"%s\","
+			"\"code\":\"document.getElementById('out').textContent\"}", site);
+		if (strstr(text, "saved:") != NULL)
+			break;
+		gsurf_webkit_test_spin(25);
+	}
+	ASSERT_HAS(text, "saved:4242");
+	g_free(text);
+
+	/* 4. Refusals say what to do. */
+	text = call(&h, "get_page_text", "{\"frame\":\"nowhere.example\"}", TRUE);
+	ASSERT_HAS(text, "list_frames");
+	g_free(text);
+	text = callf(&h, "click", TRUE, "{\"frame\":\"%s\",\"selector\":\"#nope\"}", site);
+	ASSERT_HAS(text, "nothing in frame");
+	g_free(text);
+
+	h_free(&h);
+}
+
 static void
 test_modes_actions(void)
 {
@@ -1254,6 +1388,9 @@ main(int argc, char *argv[])
 	server = soup_server_new(NULL, NULL);
 	soup_server_add_handler(server, NULL, serve, NULL, NULL);
 	port = gsurf_webkit_test_listen(server);
+	inner_server = soup_server_new(NULL, NULL);
+	soup_server_add_handler(inner_server, NULL, serve_inner, NULL, NULL);
+	inner_port = gsurf_webkit_test_listen(inner_server);
 
 	g_test_add_func("/gsurf/mcp/webkit/panes", test_panes);
 	g_test_add_func("/gsurf/mcp/webkit/windows", test_windows);
@@ -1262,6 +1399,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/mcp/webkit/cookies", test_cookies);
 	g_test_add_func("/gsurf/mcp/webkit/modes-actions", test_modes_actions);
 	g_test_add_func("/gsurf/mcp/webkit/input", test_input);
+	g_test_add_func("/gsurf/mcp/webkit/frames", test_frames);
 	g_test_add_func("/gsurf/mcp/webkit/wmux-off", test_wmux_off);
 	g_test_add_func("/gsurf/mcp/webkit/socket", test_socket);
 
@@ -1269,6 +1407,7 @@ main(int argc, char *argv[])
 	if (so_handle != NULL)
 		g_module_close(so_handle);
 	g_clear_object(&server);
+	g_clear_object(&inner_server);
 	gsurf_test_rmtree(tmp);
 	return ret;
 }

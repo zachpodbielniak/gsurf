@@ -2,7 +2,7 @@
 name: gsurf
 description: >
   Drive a running gsurf browser with gsurfctl (tabs, panes, page text, events, 3D tabs via --lrg=3d);
-  configure it in YAML or config.c (33 modules, wmux, tree tabs, containers, keys);
+  configure it in YAML or config.c (34 modules, wmux, tree tabs, containers, keys);
   write modules, embed libgsurf, build, troubleshoot.
 ---
 

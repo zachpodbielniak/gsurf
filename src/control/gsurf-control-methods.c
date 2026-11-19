@@ -496,6 +496,66 @@ fail(GsurfControlInvocation *inv, GError *error)
 	g_error_free(error);
 }
 
+/* ----- Frames ----- */
+
+/*
+ * The optional 'frame' parameter of the page methods: a frame id (from
+ * page.frames) or text found in the frame's URI ("js.stripe.com").  @out
+ * is NULL when it is absent: the main frame.
+ */
+static gboolean
+arg_frame(JsonObject *params, gchar **out, GError **error)
+{
+	JsonNode *node = member(params, "frame");
+
+	*out = NULL;
+	if (node == NULL)
+		return TRUE;
+	if (JSON_NODE_HOLDS_VALUE(node)) {
+		GType type = json_node_get_value_type(node);
+
+		if (type == G_TYPE_INT64 && json_node_get_int(node) > 0) {
+			*out = g_strdup_printf("%" G_GINT64_FORMAT, json_node_get_int(node));
+			return TRUE;
+		}
+		if (type == G_TYPE_STRING && *json_node_get_string(node) != '\0') {
+			*out = g_strdup(json_node_get_string(node));
+			return TRUE;
+		}
+	}
+	g_set_error_literal(error, GSURF_CONTROL_ERROR, GSURF_CONTROL_ERROR_INVALID_PARAMS,
+		"'frame' must be a frame id (page.frames gives them) or text from the frame's URI");
+	return FALSE;
+}
+
+/* The control code for an error from gsurf_view_run_javascript_in_frame_*
+ * and gsurf_view_list_frames_*: no such frame, no frames module, or the
+ * script itself. */
+static GsurfControlError
+frame_error_code(const GError *error)
+{
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND))
+		return GSURF_CONTROL_ERROR_NOT_FOUND;
+	if (g_error_matches(error, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED))
+		return GSURF_CONTROL_ERROR_UNSUPPORTED;
+	return GSURF_CONTROL_ERROR_FAILED;
+}
+
+/* Answers @inv with a script's @error: "javascript failed: ..." unless
+ * the frame was not there or cannot be reached. */
+static void
+fail_script(GsurfControlInvocation *inv, const GError *error)
+{
+	GsurfControlError code = error != NULL ? frame_error_code(error)
+	                                       : GSURF_CONTROL_ERROR_FAILED;
+
+	if (code != GSURF_CONTROL_ERROR_FAILED)
+		gsurf_control_invocation_return_error_literal(inv, code, error->message);
+	else
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED,
+			"javascript failed: %s", error != NULL ? error->message : "no result");
+}
+
 /* Loads @input in @view, letting URI-handler modules (search engines)
  * rewrite it first, as the gsurf binary does for typed input. */
 static void
@@ -811,6 +871,7 @@ m_page_title(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 typedef struct {
 	GsurfControlInvocation *inv;
 	GsurfView              *view;     /* ref */
+	gchar                  *frame;    /* NULL: the main frame */
 	gchar                  *script;   /* the raw script, for the CSP fallback */
 	gboolean                json;     /* the result is JSON text */
 	gboolean                retried;
@@ -821,6 +882,7 @@ js_run_free(JsRun *run)
 {
 	g_clear_object(&run->inv);
 	g_clear_object(&run->view);
+	g_free(run->frame);
 	g_free(run->script);
 	g_free(run);
 }
@@ -830,7 +892,8 @@ static void js_done(GObject *source, GAsyncResult *result, gpointer user_data);
 static void
 js_start(JsRun *run, const gchar *script)
 {
-	gsurf_view_run_javascript_async(run->view, script, NULL, js_done, run);
+	gsurf_view_run_javascript_in_frame_async(run->view, run->frame, NULL, script, NULL,
+		js_done, run);
 }
 
 static void
@@ -841,7 +904,7 @@ js_done(GObject *source, GAsyncResult *result, gpointer user_data)
 	g_autofree gchar *text = NULL;
 
 	(void)source;
-	text = gsurf_view_run_javascript_finish(run->view, result, &error);
+	text = gsurf_view_run_javascript_in_frame_finish(run->view, result, NULL, NULL, NULL, &error);
 
 	/* 1. A page whose CSP forbids eval(): run the script as it is, and
 	 *    answer its value as text. */
@@ -854,8 +917,7 @@ js_done(GObject *source, GAsyncResult *result, gpointer user_data)
 		return;
 	}
 	if (text == NULL) {
-		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
-			"javascript failed: %s", error != NULL ? error->message : "no result");
+		fail_script(run->inv, error);
 		js_run_free(run);
 		return;
 	}
@@ -880,18 +942,21 @@ static void
 m_page_text(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
 {
 	GError *error = NULL;
-	GsurfView *view = target_view(server, gsurf_control_invocation_get_params(inv), NULL,
-		&error);
+	JsonObject *params = gsurf_control_invocation_get_params(inv);
+	g_autofree gchar *frame = NULL;
+	GsurfView *view;
 	JsRun *run;
 
 	(void)data;
-	if (view == NULL) {
+	if (!arg_frame(params, &frame, &error) ||
+	    (view = target_view(server, params, NULL, &error)) == NULL) {
 		fail(inv, error);
 		return;
 	}
 	run = g_new0(JsRun, 1);
 	run->inv = g_object_ref(inv);
 	run->view = g_object_ref(view);
+	run->frame = g_steal_pointer(&frame);
 	js_start(run, "document.body ? document.body.innerText : ''");
 }
 
@@ -905,10 +970,12 @@ m_page_eval(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	g_autoptr(JsonNode) literal = NULL;
 	g_autofree gchar *quoted = NULL;
 	g_autofree gchar *wrapped = NULL;
+	g_autofree gchar *frame = NULL;
 	JsRun *run;
 
 	(void)data;
 	if (!arg_string(params, "script", &script, &error) ||
+	    !arg_frame(params, &frame, &error) ||
 	    kiosk_refuses("running scripts", &error)) {
 		fail(inv, error);
 		return;
@@ -936,9 +1003,49 @@ m_page_eval(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	run = g_new0(JsRun, 1);
 	run->inv = g_object_ref(inv);
 	run->view = g_object_ref(view);
+	run->frame = g_steal_pointer(&frame);
 	run->script = g_strdup(script);
 	run->json = TRUE;
 	js_start(run, wrapped);
+}
+
+/* page.frames: the frame list, as JSON from the frames extension. */
+static void
+frames_listed(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	g_autoptr(GsurfControlInvocation) inv = user_data;
+	g_autoptr(GError) error = NULL;
+	g_autofree gchar *json = NULL;
+	g_autoptr(JsonParser) parser = json_parser_new();
+
+	json = gsurf_view_list_frames_finish(GSURF_VIEW(source), result, &error);
+	if (json == NULL) {
+		gsurf_control_invocation_return_error_literal(inv, frame_error_code(error),
+			error->message);
+		return;
+	}
+	if (!json_parser_load_from_data(parser, json, -1, &error) ||
+	    json_parser_get_root(parser) == NULL) {
+		gsurf_control_invocation_return_error(inv, GSURF_CONTROL_ERROR_FAILED,
+			"unreadable frame list: %s", error != NULL ? error->message : "empty");
+		return;
+	}
+	gsurf_control_invocation_return_value(inv, json_node_copy(json_parser_get_root(parser)));
+}
+
+static void
+m_page_frames(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer data)
+{
+	GError *error = NULL;
+	GsurfView *view = target_view(server, gsurf_control_invocation_get_params(inv), NULL,
+		&error);
+
+	(void)data;
+	if (view == NULL) {
+		fail(inv, error);
+		return;
+	}
+	gsurf_view_list_frames_async(view, NULL, frames_listed, g_object_ref(inv));
 }
 
 typedef struct {
@@ -3017,6 +3124,7 @@ input_reply(gboolean point, gdouble x, gdouble y)
 typedef struct {
 	GsurfControlInvocation *inv;
 	GsurfView              *view;      /* ref */
+	gchar                  *frame;     /* where the keys go; NULL: the main frame */
 	JsonNode               *reply;     /* sent once the keys are in */
 	gint64                  expected;  /* the page's count when they are */
 	gint64                  deadline;  /* monotonic */
@@ -3027,6 +3135,7 @@ settle_free(Settle *settle)
 {
 	g_clear_object(&settle->inv);
 	g_clear_object(&settle->view);
+	g_free(settle->frame);
 	g_clear_pointer(&settle->reply, json_node_unref);
 	g_free(settle);
 }
@@ -3041,7 +3150,7 @@ settle_counted(GObject *source, GAsyncResult *result, gpointer user_data)
 	gint64 seen;
 
 	(void)source;
-	count = gsurf_view_run_javascript_finish(settle->view, result, NULL);
+	count = gsurf_view_run_javascript_in_frame_finish(settle->view, result, NULL, NULL, NULL, NULL);
 	/* Unreadable or -1: another document, so nothing is left to type. */
 	seen = count != NULL ? g_ascii_strtoll(count, NULL, 10) : -1;
 	if (seen < 0 || seen >= settle->expected ||
@@ -3059,18 +3168,20 @@ settle_tick(gpointer user_data)
 {
 	Settle *settle = user_data;
 
-	gsurf_view_run_javascript_async(settle->view, TYPED_COUNT_SCRIPT, NULL,
-		settle_counted, settle);
+	gsurf_view_run_javascript_in_frame_async(settle->view, settle->frame, NULL,
+		TYPED_COUNT_SCRIPT, NULL, settle_counted, settle);
 	return G_SOURCE_REMOVE;
 }
 
 /*
- * Replies @reply (taken) once the page has counted @keys more keyups
- * than @baseline.  A @baseline below zero (never armed) replies now.
+ * Replies @reply (taken) once the page -- @frame of it, NULL for the
+ * main frame: keyup does not cross into the parent -- has counted @keys
+ * more keyups than @baseline.  A @baseline below zero (never armed)
+ * replies now.
  */
 static void
-reply_when_typed(GsurfControlInvocation *inv, GsurfView *view, JsonNode *reply,
-                 gint64 baseline, guint keys)
+reply_when_typed(GsurfControlInvocation *inv, GsurfView *view, const gchar *frame,
+                 JsonNode *reply, gint64 baseline, guint keys)
 {
 	Settle *settle;
 
@@ -3081,6 +3192,7 @@ reply_when_typed(GsurfControlInvocation *inv, GsurfView *view, JsonNode *reply,
 	settle = g_new0(Settle, 1);
 	settle->inv = g_object_ref(inv);
 	settle->view = g_object_ref(view);
+	settle->frame = g_strdup(frame);
 	settle->reply = reply;
 	settle->expected = baseline + keys;
 	settle->deadline = g_get_monotonic_time() + (gint64)TYPED_SETTLE_MS * 1000;
@@ -3110,6 +3222,7 @@ typedef enum { AT_CLICK, AT_TYPE } AtKind;
 typedef struct {
 	GsurfControlInvocation *inv;
 	GsurfView              *view;      /* ref */
+	gchar                  *frame;     /* NULL: the main frame */
 	AtKind                  kind;
 	guint                   button;
 	guint                   modifiers;
@@ -3123,9 +3236,27 @@ at_run_free(AtRun *run)
 {
 	g_clear_object(&run->inv);
 	g_clear_object(&run->view);
+	g_free(run->frame);
 	g_free(run->text);
 	g_free(run->selector);
 	g_free(run);
+}
+
+/* Typing into a frame: the keys are in once the field took the focus. */
+static void
+at_typed(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	AtRun *run = user_data;
+	g_autoptr(GError) error = NULL;
+
+	(void)source;
+	if (!gsurf_view_type_in_frame_finish(run->view, result, &error))
+		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED, "%s",
+			error->message);
+	else
+		reply_when_typed(run->inv, run->view, run->frame, input_reply(FALSE, 0, 0),
+			run->baseline, (guint)g_utf8_strlen(run->text, -1));
+	at_run_free(run);
 }
 
 static void
@@ -3139,12 +3270,15 @@ at_located(GObject *source, GAsyncResult *result, gpointer user_data)
 	JsonArray *xy;
 	gdouble x;
 	gdouble y;
+	gdouble frame_x = 0;
+	gdouble frame_y = 0;
+	guint64 frame_id = 0;
 
 	(void)source;
-	where = gsurf_view_run_javascript_finish(run->view, result, &error);
+	where = gsurf_view_run_javascript_in_frame_finish(run->view, result, &frame_x, &frame_y,
+		&frame_id, &error);
 	if (where == NULL) {
-		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
-			"javascript failed: %s", error != NULL ? error->message : "no result");
+		fail_script(run->inv, error);
 		goto out;
 	}
 
@@ -3152,45 +3286,66 @@ at_located(GObject *source, GAsyncResult *result, gpointer user_data)
 	if (!json_parser_load_from_data(parser, where, -1, NULL) ||
 	    (root = json_parser_get_root(parser)) == NULL || !JSON_NODE_HOLDS_ARRAY(root) ||
 	    json_array_get_length(xy = json_node_get_array(root)) != 2) {
-		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_NOT_FOUND,
-			"nothing on the page matches '%s'", run->selector);
+		if (run->frame != NULL)
+			gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+				"nothing in frame '%s' matches '%s'", run->frame, run->selector);
+		else
+			gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_NOT_FOUND,
+				"nothing on the page matches '%s'", run->selector);
 		goto out;
 	}
-	x = json_array_get_double_element(xy, 0);
-	y = json_array_get_double_element(xy, 1);
+	/* the frame's point, moved to the view's; from here on the frame is
+	 * the one found, by id */
+	x = json_array_get_double_element(xy, 0) + frame_x;
+	y = json_array_get_double_element(xy, 1) + frame_y;
+	if (run->frame != NULL && frame_id != 0) {
+		g_free(run->frame);
+		run->frame = g_strdup_printf("%" G_GUINT64_FORMAT, frame_id);
+	}
 
+	if (run->kind == AT_TYPE && run->frame != NULL) {
+		gsurf_view_type_in_frame_async(run->view, run->frame, run->selector, x, y, frame_x,
+			frame_y, run->text, NULL, at_typed, run);
+		return;
+	}
 	if (run->kind == AT_CLICK
-	        ? !gsurf_view_send_click(run->view, x, y, run->button, run->modifiers, &error)
+	        ? !gsurf_view_send_click_in_frame(run->view, run->frame, x, y, frame_x, frame_y,
+	                                          run->button, run->modifiers, &error)
 	        : !gsurf_view_send_text(run->view, run->text, &error)) {
 		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED,
 			"%s", error->message);
 		goto out;
 	}
 	if (run->kind == AT_TYPE)
-		reply_when_typed(run->inv, run->view, input_reply(FALSE, 0, 0), run->baseline,
-			(guint)g_utf8_strlen(run->text, -1));
+		reply_when_typed(run->inv, run->view, run->frame, input_reply(FALSE, 0, 0),
+			run->baseline, (guint)g_utf8_strlen(run->text, -1));
 	else
 		gsurf_control_invocation_return_value(run->inv, input_reply(TRUE, x, y));
 out:
 	at_run_free(run);
 }
 
+/* @frame: NULL for the main frame; among frames whose URI matches, the
+ * one holding @selector is chosen. */
 static void
-at_selector(GsurfControlInvocation *inv, GsurfView *view, AtKind kind, const gchar *selector,
-            guint button, guint modifiers, const gchar *text, gint64 baseline)
+at_selector(GsurfControlInvocation *inv, GsurfView *view, const gchar *frame, AtKind kind,
+            const gchar *selector, guint button, guint modifiers, const gchar *text,
+            gint64 baseline)
 {
 	AtRun *run = g_new0(AtRun, 1);
 	g_autofree gchar *script = gsurf_view_locate_script(selector);
 
 	run->inv = g_object_ref(inv);
 	run->view = g_object_ref(view);
+	run->frame = g_strdup(frame);
 	run->kind = kind;
 	run->button = button;
 	run->modifiers = modifiers;
 	run->text = g_strdup(text);
 	run->selector = g_strdup(selector);
 	run->baseline = baseline;
-	gsurf_view_run_javascript_async(view, script, NULL, at_located, run);
+	gsurf_view_run_javascript_in_frame_async(view, frame, selector, script, NULL, at_located,
+		run);
 }
 
 static void
@@ -3204,9 +3359,11 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	gdouble y = -1;
 	gint64 button = 1;
 	guint mods = 0;
+	g_autofree gchar *frame = NULL;
 
 	(void)data;
 	if (!arg_string(params, "selector", &selector, &error) ||
+	    !arg_frame(params, &frame, &error) ||
 	    !arg_double(params, "x", &x, &error) || !arg_double(params, "y", &y, &error) ||
 	    !arg_int(params, "button", &button, &error) || !arg_modifiers(params, &mods, &error) ||
 	    kiosk_refuses("driving the page", &error)) {
@@ -3216,6 +3373,13 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	if ((selector == NULL || *selector == '\0') && (!arg_has(params, "x") || !arg_has(params, "y"))) {
 		gsurf_control_invocation_return_error_literal(inv,
 			GSURF_CONTROL_ERROR_INVALID_PARAMS, "give a 'selector', or 'x' and 'y'");
+		return;
+	}
+	if (frame != NULL && (selector == NULL || *selector == '\0')) {
+		gsurf_control_invocation_return_error_literal(inv,
+			GSURF_CONTROL_ERROR_INVALID_PARAMS,
+			"with 'frame', give a 'selector' ('x' and 'y' are the view's; page.frames "
+			"says where each frame is)");
 		return;
 	}
 	if (button < 1 || button > 3) {
@@ -3230,7 +3394,7 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 	}
 
 	if (selector != NULL && *selector != '\0') {
-		at_selector(inv, view, AT_CLICK, selector, (guint)button, mods, NULL, -1);
+		at_selector(inv, view, frame, AT_CLICK, selector, (guint)button, mods, NULL, -1);
 		return;
 	}
 	if (!gsurf_view_send_click(view, x, y, (guint)button, mods, &error)) {
@@ -3246,6 +3410,7 @@ m_page_click(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer d
 typedef struct {
 	GsurfControlInvocation *inv;
 	GsurfView              *view;      /* ref */
+	gchar                  *frame;     /* NULL: the main frame */
 	gchar                  *selector;  /* NULL: the focused element */
 	gchar                  *text;
 } TypeRun;
@@ -3255,6 +3420,7 @@ type_run_free(TypeRun *run)
 {
 	g_clear_object(&run->inv);
 	g_clear_object(&run->view);
+	g_free(run->frame);
 	g_free(run->selector);
 	g_free(run->text);
 	g_free(run);
@@ -3265,23 +3431,28 @@ type_armed(GObject *source, GAsyncResult *result, gpointer user_data)
 {
 	TypeRun *run = user_data;
 	g_autofree gchar *answer = NULL;
+	g_autoptr(GError) armed = NULL;
 	g_autoptr(GError) error = NULL;
 	gint64 baseline;
 
 	(void)source;
 	/* A page that will not run the script still gets the keys; the reply
-	 * just does not wait for them (baseline -1). */
-	answer = gsurf_view_run_javascript_finish(run->view, result, NULL);
+	 * just does not wait for them (baseline -1).  A frame that is not
+	 * there, though, is the answer. */
+	answer = gsurf_view_run_javascript_in_frame_finish(run->view, result, NULL, NULL, NULL, &armed);
 	baseline = typed_baseline(answer);
 
-	if (run->selector != NULL) {
-		at_selector(run->inv, run->view, AT_TYPE, run->selector, 0, 0, run->text,
+	if (armed != NULL && run->frame != NULL &&
+	    frame_error_code(armed) != GSURF_CONTROL_ERROR_FAILED) {
+		fail_script(run->inv, armed);
+	} else if (run->selector != NULL) {
+		at_selector(run->inv, run->view, run->frame, AT_TYPE, run->selector, 0, 0, run->text,
 			baseline);
 	} else if (!gsurf_view_send_text(run->view, run->text, &error)) {
 		gsurf_control_invocation_return_error(run->inv, GSURF_CONTROL_ERROR_FAILED, "%s",
 			error->message);
 	} else {
-		reply_when_typed(run->inv, run->view, input_reply(FALSE, 0, 0), baseline,
+		reply_when_typed(run->inv, run->view, run->frame, input_reply(FALSE, 0, 0), baseline,
 			(guint)g_utf8_strlen(run->text, -1));
 	}
 	type_run_free(run);
@@ -3295,11 +3466,13 @@ m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	GsurfView *view;
 	const gchar *selector = NULL;
 	const gchar *text = NULL;
+	g_autofree gchar *frame = NULL;
 	TypeRun *run;
 
 	(void)data;
 	if (!arg_string(params, "selector", &selector, &error) ||
 	    !arg_string(params, "text", &text, &error) ||
+	    !arg_frame(params, &frame, &error) ||
 	    kiosk_refuses("driving the page", &error)) {
 		fail(inv, error);
 		return;
@@ -3318,9 +3491,12 @@ m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	run = g_new0(TypeRun, 1);
 	run->inv = g_object_ref(inv);
 	run->view = g_object_ref(view);
+	run->frame = g_steal_pointer(&frame);
 	run->selector = selector != NULL && *selector != '\0' ? g_strdup(selector) : NULL;
 	run->text = g_strdup(text);
-	gsurf_view_run_javascript_async(view, TYPED_ARM_SCRIPT, NULL, type_armed, run);
+	/* among frames whose URI matches, arm the one holding the field */
+	gsurf_view_run_javascript_in_frame_async(view, run->frame, run->selector,
+		TYPED_ARM_SCRIPT, NULL, type_armed, run);
 }
 
 static void
@@ -3498,7 +3674,7 @@ secret_located(GObject *source, GAsyncResult *result, gpointer user_data)
 	}
 	/* 4. Only once the page has the keys: the caller's next command
 	 *    must not overtake the secret's tail (see reply_when_typed()). */
-	reply_when_typed(run->inv, run->view, secret_reply(), typed_baseline(state + 3),
+	reply_when_typed(run->inv, run->view, NULL, secret_reply(), typed_baseline(state + 3),
 		(guint)g_utf8_strlen(run->text, -1) + (run->submit ? 1 : 0));
 out:
 	secret_run_free(run);
@@ -3615,6 +3791,8 @@ m_page_secret_hold(GsurfControlServer *server, GsurfControlInvocation *inv, gpoi
 }
 
 #define VIEW_DOC "view?: id, index?: int (default: the active view)"
+#define FRAME_DOC "frame?: id | string (a frame id from page.frames, or text from the " \
+	"frame's URI; default: the main frame)"
 
 typedef struct {
 	const gchar            *name;
@@ -3649,10 +3827,15 @@ static const CoreMethod core_methods[] = {
 	  m_views_close, 0 },
 	{ "page.uri", "A view's URI", "{" VIEW_DOC "}", m_page_uri, 0 },
 	{ "page.title", "A view's page title", "{" VIEW_DOC "}", m_page_title, 0 },
-	{ "page.text", "A view's rendered text (document.body.innerText)", "{" VIEW_DOC "}",
-	  m_page_text, 0 },
-	{ "page.eval", "Run JavaScript in a view's page; returns its last value as JSON. Refused "
-	  "in kiosk mode", "{script: string, " VIEW_DOC "}", m_page_eval, 0 },
+	{ "page.text", "A view's rendered text (document.body.innerText), or one frame's",
+	  "{" FRAME_DOC ", " VIEW_DOC "}", m_page_text, 0 },
+	{ "page.eval", "Run JavaScript in a view's page, or in one frame of it; returns its last "
+	  "value as JSON. Refused in kiosk mode", "{script: string, " FRAME_DOC ", " VIEW_DOC "}",
+	  m_page_eval, 0 },
+	{ "page.frames", "A view's frames, cross-origin ones included, in document order with "
+	  "the main frame first: id, uri, main, parent, x, y, width, height (the frame's content "
+	  "box in the view's CSS pixels), visible. Needs the frames module",
+	  "{" VIEW_DOC "}", m_page_frames, 0 },
 	{ "lrg.state", "The --lrg=3d scene: arrangement, environment, reading, history, "
 	  "panels, pinned tabs (with placements) and camera bookmarks", "{}", m_lrg_state, 0 },
 	{ "lrg.arrange", "Set the 3D tab arrangement (carousel, grid, free, single-panel, stack, "
@@ -3680,13 +3863,15 @@ static const CoreMethod core_methods[] = {
 	  "'inline': true; returns {path?, bytes, png_base64?}",
 	  "{path?: string, inline?: bool, " VIEW_DOC "}", m_page_screenshot, 0 },
 	{ "page.click", "Click in a view: at the element matching 'selector' (scrolled into "
-	  "view first) or at 'x', 'y' (CSS pixels). Native input where the backend has it "
-	  "(GTK3: trusted events). Refused in kiosk mode; returns {done, x, y}",
+	  "view first; in 'frame' when given) or at 'x', 'y' (CSS pixels of the view). Native "
+	  "input where the backend has it (GTK3: trusted events). Refused in kiosk mode; "
+	  "returns {done, x, y} (the view's point)",
 	  "{selector?: string, x?: number, y?: number, button?: 1|2|3, modifiers?: [string], "
-	  VIEW_DOC "}", m_page_click, 0 },
+	  FRAME_DOC ", " VIEW_DOC "}", m_page_click, 0 },
 	{ "page.type", "Type 'text' into the focused element, or into the element matching "
-	  "'selector' (focused first); a newline is Enter. Refused in kiosk mode",
-	  "{text: string, selector?: string, " VIEW_DOC "}", m_page_type, 0 },
+	  "'selector' (focused first; in 'frame' when given); a newline is Enter. Refused in "
+	  "kiosk mode", "{text: string, selector?: string, " FRAME_DOC ", " VIEW_DOC "}",
+	  m_page_type, 0 },
 	{ "page.fill_secret", "Type a secret (a password, a one-time code) into the field "
 	  "matching 'selector' as key input, replacing its contents; 'submit' presses Enter "
 	  "after. Puts a secret hold on the view first: page.screenshot, page.eval and "

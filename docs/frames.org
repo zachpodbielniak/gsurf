@@ -1,0 +1,82 @@
+#+title: Frames (frames module)
+#+description: Read and drive a page's frames, cross-origin ones included, from the control socket and MCP
+
+* Overview
+
+WebKit's UI-process API reads and scripts a page's *main frame* only. A form inside an =<iframe>= from another site -- a payment provider's card fields, Stripe Checkout's whole form on =js.stripe.com= -- was out of reach: =page.text= stopped at the frame, =page.eval= could not see into it, and =page.click= / =page.type= could not find its fields.
+
+The =frames= module ships the other half: a web-process extension that lists a page's frames and runs a script in any one of them. With it on:
+
+- =page.frames= (control) and =list_frames= (MCP) list the frames, the main one first;
+- =page.text=, =page.eval=, =page.click= and =page.type= (control), and =get_page_text=, =execute_javascript=, =click= and =type_text= (MCP), take a =frame=.
+
+It is on in the default configuration. Site isolation and web security stay as they are: the extension runs inside WebKit's web process with the engine's own access to each frame.
+
+#+begin_src yaml
+modules:
+  frames:
+    enabled: true
+    # web_process_extension: ~/lib/gsurf-frames-webext.so   # default: next to frames.so
+#+end_src
+
+The extension reaches the web processes started *after* the module is on, so put it in the config at startup; a view opened before it was switched on reaches its frames once it gets a new web process.
+
+* Naming a frame
+
+=frame= is either
+
+- a frame *id*, as =page.frames= reports it (an integer); or
+- *text found in the frame's URI*, e.g. ="js.stripe.com"=. Among several frames whose URI contains it, visible ones come first, then document order; a method given a =selector= (=page.click=, =page.type=) picks the first of those that has an element matching it. So a page with a hidden controller frame and a visible form frame on the same host reaches the form without guessing an index.
+
+Nothing matches: error -32001 (MCP: an error result naming =list_frames=). Without the module: -32002.
+
+* =page.frames=
+
+#+begin_src json
+[{"id": 4, "uri": "https://shop.example/checkout", "main": true, "parent": null,
+  "x": 0, "y": 0, "width": 412, "height": 915, "visible": true},
+ {"id": 9, "uri": "https://js.stripe.com/v3/elements-inner-card.html#...", "main": false,
+  "parent": 4, "x": 16, "y": 233, "width": 380, "height": 44, "visible": true}]
+#+end_src
+
+In document order, depth first, the main frame first. =x=, =y=, =width=, =height= is the frame's content box (inside its border and padding) in the view's CSS pixels; for the main frame, its viewport. =visible= is false when the frame element, or an ancestor frame, is =display: none=, =visibility: hidden= or has no area. Frames no longer in the page (removed elements) are left out.
+
+* Reading and driving a frame
+
+#+begin_src sh
+gsurfctl call page.frames
+gsurfctl call page.text frame=js.stripe.com
+gsurfctl call page.eval frame=js.stripe.com script='document.title'
+gsurfctl call page.type frame=js.stripe.com selector='input[name=cardnumber]' text='4242424242424242'
+gsurfctl call page.click frame=js.stripe.com selector='button[type=submit]'
+#+end_src
+
+- =page.text= / =page.eval= run in the frame's own page world, as they do in the main frame.
+- =page.click= finds the element in the frame (scrolled into view) and clicks the view at that point: the frame's offset is added, so the reply's ={x, y}= are the view's. On GTK3 the click is GTK's own event, trusted by the page.
+- =page.type= with a =selector= *clicks the field first*, then types. A script cannot move the focus into a cross-origin frame (WebKit wants a user gesture), and WebKit queues clicks and keys apart, so the keys wait until the field has the focus (up to two seconds; then -32000 and nothing typed). The caret is where the click put it -- the end of an empty field, the usual case. The reply waits for every key, as in the main frame. Without =selector= the text goes to whatever has the focus.
+- =page.click= with =frame= needs a =selector=: =x=, =y= are always the view's, and =page.frames= says where each frame is.
+
+On a backend without native input (GTK4, LRG) the click and the text are DOM events dispatched inside the frame, at the frame's own point (=isTrusted= is false there, as in the main frame).
+
+* How it works
+
+The extension (=modules/frames/webext/gsurf-frames-webext.c=) is loaded by WebKit into every web process, registered through =gsurf_web_process_extension_register()= like the adblock and hardening extensions.
+
+- WebKit has no call that lists a page's frames, so the extension notes each frame on the default script world's =window-object-cleared= (every document, every frame) and keeps weak references.
+- gsurf asks with WebKit user messages (=gsurf_view_send_page_message_async()=, answered on the page's =user-message-received=). The two messages and their types are in =src/core/gsurf-frames-protocol.h=, shared by both sides.
+- Where a frame is: each frame's =window= is handed to every other frame's probe, which finds the =<iframe>= / =<frame>= showing it (=contentWindow===w=) and measures its content box. The probes run in a private script world, so a page cannot redefine what they call. One web process has one JavaScript VM, so a value passes from one frame's context to another's directly; that is what lets a parent recognise a cross-origin child it may not otherwise read.
+- A script runs with =jsc_context_evaluate()= in the frame's page world; the frame's place is read again afterwards, since the script may have scrolled it into view.
+
+The library API, for embedders and other modules (=core/gsurf-view-frames.h=): =gsurf_view_list_frames_async()=, =gsurf_view_run_javascript_in_frame_async()= (finish gives the frame's origin and id), =gsurf_view_send_click_in_frame()= and =gsurf_view_type_in_frame_async()=.
+
+* Limits
+
+- Frames inside a shadow root are not placed (the probe looks at the document's own =iframe= and =frame= elements), so they are not listed.
+- Frames are noted when WebKit clears their window object for a new document. With JavaScript off for the page that does not happen, so expect no frame to be listed then (not tested).
+- If WebKit's site isolation is ever turned on for WebKitGTK, cross-site frames move to other web processes and this extension, which answers in the main frame's process, would no longer see them.
+- =page.fill_secret= and =page.key= take no =frame= yet: a key goes to whatever has the focus, which after =page.type= or =page.click= in a frame is that frame.
+
+* Tests
+
+- =tests/test-frames.c= (headless): the module's registration, =web_process_extension:=, reconfiguring; the view API over a fake view (replies, errors, the main-frame path, input without native input).
+- =tests/test-control-webkit.c= =/gsurf/control/webkit/frames= and =tests/test-mcp-webkit.c= =/gsurf/mcp/webkit/frames= (=make test-gui=): a page on 127.0.0.1 holding a frame from localhost on another port; read its text, find a field and a button, type and click, and read the result inside the frame.

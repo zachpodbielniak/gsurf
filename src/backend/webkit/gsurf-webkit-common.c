@@ -389,6 +389,45 @@ gsurf_webkit_common_decide_response(GsurfView *view, WebKitPolicyDecision *decis
 	return TRUE;
 }
 
+/* --- Page messages --- */
+
+static void
+page_message_replied(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	g_autoptr(GTask) task = user_data;
+	g_autoptr(WebKitUserMessage) reply = NULL;
+	GError *error = NULL;
+	GVariant *params;
+
+	reply = webkit_web_view_send_message_to_page_finish(WEBKIT_WEB_VIEW(source), result,
+		&error);
+	if (reply == NULL) {
+		if (g_error_matches(error, WEBKIT_USER_MESSAGE_ERROR,
+		                    WEBKIT_USER_MESSAGE_UNHANDLED_MESSAGE)) {
+			g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+				"no web-process extension answers '%s'",
+				(const gchar *)g_task_get_task_data(task));
+			g_error_free(error);
+			return;
+		}
+		g_task_return_error(task, error);
+		return;
+	}
+	params = webkit_user_message_get_parameters(reply);
+	g_task_return_pointer(task,
+		params != NULL ? g_variant_ref(params) : g_variant_ref_sink(g_variant_new("()")),
+		(GDestroyNotify)g_variant_unref);
+}
+
+void
+gsurf_webkit_common_send_page_message(WebKitWebView *webview, const gchar *name,
+                                      GVariant *params, GTask *task)
+{
+	g_task_set_task_data(task, g_strdup(name), g_free);
+	webkit_web_view_send_message_to_page(webview, webkit_user_message_new(name, params),
+		g_task_get_cancellable(task), page_message_replied, task);
+}
+
 /* --- Cookies --- */
 
 static void

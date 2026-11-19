@@ -731,6 +731,12 @@ lrg_view_add_cookie_async(GsurfView *view, const GsurfCookie *cookie,
 }
 
 static void
+lrg_view_send_page_message(GsurfView *view, const gchar *name, GVariant *params, GTask *task)
+{
+	gsurf_webkit_common_send_page_message(GSURF_LRG_VIEW(view)->webview, name, params, task);
+}
+
+static void
 lrg_view_set_proxy(GsurfView *view, const gchar *uri)
 {
 	GsurfLrgView *self = GSURF_LRG_VIEW(view);
@@ -1042,6 +1048,7 @@ gsurf_lrg_view_class_init(GsurfLrgViewClass *klass)
 	view_class->find_previous = lrg_view_find_previous;
 	view_class->set_cookie_accept_policy = lrg_view_set_cookie_accept_policy;
 	view_class->add_cookie_async = lrg_view_add_cookie_async;
+	view_class->send_page_message = lrg_view_send_page_message;
 	view_class->set_proxy = lrg_view_set_proxy;
 }
 

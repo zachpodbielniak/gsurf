@@ -293,6 +293,10 @@ modules:
     key_move_up: "Ctrl+Shift+Page_Up"
     key_move_down: "Ctrl+Shift+Page_Down"
 
+  frames:
+    enabled: true                   # page.frames and 'frame' on page.text/eval/click/type
+    # web_process_extension: ~/lib/gsurf-frames-webext.so   # default: next to frames.so
+
   find_bar:
     enabled: true
     key_open: "slash"
@@ -433,6 +437,7 @@ modules:
       reload: false
       stop: false
       get_page_text: false
+      list_frames: false            # a page's frames (needs the frames module)
       get_page_html: false
       get_links: false
       find_text: false

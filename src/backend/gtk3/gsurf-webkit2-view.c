@@ -560,6 +560,14 @@ gsurf_webkit2_view_add_cookie_async(GsurfView *view, const GsurfCookie *cookie,
 }
 
 static void
+gsurf_webkit2_view_send_page_message(GsurfView *view, const gchar *name, GVariant *params,
+                                     GTask *task)
+{
+	gsurf_webkit_common_send_page_message(GSURF_WEBKIT2_VIEW(view)->webview, name, params,
+		task);
+}
+
+static void
 gsurf_webkit2_view_set_proxy(GsurfView *view, const gchar *uri)
 {
 	GsurfWebkit2View *self = GSURF_WEBKIT2_VIEW(view);
@@ -909,6 +917,7 @@ gsurf_webkit2_view_class_init(GsurfWebkit2ViewClass *klass)
 	view_class->find_previous = gsurf_webkit2_view_find_previous;
 	view_class->set_cookie_accept_policy = gsurf_webkit2_view_set_cookie_accept_policy;
 	view_class->add_cookie_async = gsurf_webkit2_view_add_cookie_async;
+	view_class->send_page_message = gsurf_webkit2_view_send_page_message;
 	view_class->set_proxy = gsurf_webkit2_view_set_proxy;
 	view_class->register_script_message = gsurf_webkit2_view_register_script_message;
 	view_class->add_user_script_in_world = gsurf_webkit2_view_add_user_script_in_world;
