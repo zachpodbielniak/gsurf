@@ -424,15 +424,130 @@ is_id(const gchar *spec)
 }
 
 /*
- * The frame @spec names: the one with that id, or among the frames whose
- * URI contains @spec -- visible ones first, then in document order -- the
- * first that has @require (when given), else the first.
+ * A frame spec that is not an id names a site: "host", "host:port", or
+ * "*.host" for the host and its subdomains (a URL is read for its host
+ * and port).  It is matched against the frame URI's parsed host -- never
+ * against text in the URI, which the page chooses: a frame on
+ * evil.example/js.stripe.com/ or on notjs.stripe.com is not js.stripe.com.
+ */
+typedef struct {
+	gchar   *host;        /* lower case, no trailing dot */
+	gint     port;        /* -1: any */
+	gboolean subdomains;  /* "*.host": the host or one under it */
+} Site;
+
+static void
+site_clear(Site *site)
+{
+	g_clear_pointer(&site->host, g_free);
+}
+G_DEFINE_AUTO_CLEANUP_CLEAR_FUNC(Site, site_clear)
+
+/* @host lower-cased, a trailing dot dropped; NULL when empty. */
+static gchar *
+normal_host(const gchar *host)
+{
+	gchar *out;
+	gsize len;
+
+	if (host == NULL || *host == '\0')
+		return NULL;
+	out = g_ascii_strdown(host, -1);
+	len = strlen(out);
+	if (len > 0 && out[len - 1] == '.')
+		out[len - 1] = '\0';
+	if (*out == '\0') {
+		g_free(out);
+		return NULL;
+	}
+	return out;
+}
+
+static gboolean
+site_parse(const gchar *spec, Site *site)
+{
+	g_autofree gchar *url = NULL;
+	g_autoptr(GUri) uri = NULL;
+	const gchar *rest = spec;
+
+	site->subdomains = FALSE;
+	if (g_str_has_prefix(rest, "*.")) {
+		site->subdomains = TRUE;
+		rest += 2;
+	}
+	url = strstr(rest, "://") != NULL ? g_strdup(rest) : g_strconcat("http://", rest, NULL);
+	uri = g_uri_parse(url, G_URI_FLAGS_NONE, NULL);
+	if (uri == NULL)
+		return FALSE;
+	/* a bare spec is a site, nothing more: no path, query or user */
+	if (strstr(rest, "://") == NULL &&
+	    ((g_uri_get_path(uri)[0] != '\0' && g_strcmp0(g_uri_get_path(uri), "/") != 0) ||
+	     g_uri_get_query(uri) != NULL || g_uri_get_fragment(uri) != NULL ||
+	     g_uri_get_userinfo(uri) != NULL))
+		return FALSE;
+	site->host = normal_host(g_uri_get_host(uri));
+	site->port = g_uri_get_port(uri);
+	return site->host != NULL;
+}
+
+/* The port @uri is reached on, its scheme's default when not written. */
+static gint
+port_of(GUri *uri)
+{
+	gint port = g_uri_get_port(uri);
+
+	if (port != -1)
+		return port;
+	return g_ascii_strcasecmp(g_uri_get_scheme(uri), "https") == 0 ? 443 : 80;
+}
+
+static gboolean
+site_matches(const Site *site, const gchar *frame_uri)
+{
+	g_autoptr(GUri) uri = NULL;
+	g_autofree gchar *host = NULL;
+	const gchar *scheme;
+	gsize hl;
+	gsize sl;
+
+	if (frame_uri == NULL)
+		return FALSE;
+	uri = g_uri_parse(frame_uri, G_URI_FLAGS_NONE, NULL);
+	if (uri == NULL)
+		return FALSE;
+	/* only a document from a network site has a host to trust:
+	 * about:, data:, blob: and the like are the embedding page's */
+	scheme = g_uri_get_scheme(uri);
+	if (g_ascii_strcasecmp(scheme, "http") != 0 && g_ascii_strcasecmp(scheme, "https") != 0)
+		return FALSE;
+	host = normal_host(g_uri_get_host(uri));
+	if (host == NULL)
+		return FALSE;
+	if (site->port != -1 && port_of(uri) != site->port)
+		return FALSE;
+	if (strcmp(host, site->host) == 0)
+		return TRUE;
+	if (!site->subdomains)
+		return FALSE;
+	/* under it: ends in "." + the host, on a label boundary */
+	hl = strlen(host);
+	sl = strlen(site->host);
+	return hl > sl + 1 && host[hl - sl - 1] == '.' && strcmp(host + hl - sl, site->host) == 0;
+}
+
+/*
+ * The frame @spec names: the one with that id, or the one frame on that
+ * site (that has @require, when given).  Several such frames: the one
+ * visible frame among them, else none -- a typed card number is never
+ * sent on a guess.  NULL with @why set when there is no single answer.
  */
 static Node *
-choose(GPtrArray *nodes, const gchar *spec, const gchar *require)
+choose(GPtrArray *nodes, const gchar *spec, const gchar *require, gchar **why)
 {
 	g_autoptr(GPtrArray) candidates = g_ptr_array_new();
-	guint pass;
+	g_auto(Site) site = { NULL, -1, FALSE };
+	Node *visible = NULL;
+	guint shown = 0;
 	guint i;
 
 	if (is_id(spec)) {
@@ -441,23 +556,49 @@ choose(GPtrArray *nodes, const gchar *spec, const gchar *require)
 		for (i = 0; i < nodes->len; i++)
 			if (webkit_frame_get_id(((Node *)g_ptr_array_index(nodes, i))->frame) == id)
 				return g_ptr_array_index(nodes, i);
+		*why = g_strdup_printf("no frame %s (page.frames gives the ids)", spec);
 		return NULL;
 	}
-	for (pass = 0; pass < 2; pass++)
-		for (i = 0; i < nodes->len; i++) {
-			Node *n = g_ptr_array_index(nodes, i);
-			const gchar *uri = webkit_frame_get_uri(n->frame);
-
-			if (n->visible == (pass == 0) && uri != NULL && strstr(uri, spec) != NULL)
-				g_ptr_array_add(candidates, n);
-		}
-	if (candidates->len == 0)
+	if (!site_parse(spec, &site)) {
+		*why = g_strdup_printf("'%s' is not a frame id or a site (host, host:port or "
+			"*.host)", spec);
 		return NULL;
-	if (require != NULL && *require != '\0')
+	}
+	for (i = 0; i < nodes->len; i++) {
+		Node *n = g_ptr_array_index(nodes, i);
+
+		if (!site_matches(&site, webkit_frame_get_uri(n->frame)))
+			continue;
+		if (require != NULL && *require != '\0' && !has_selector(n, require))
+			continue;
+		g_ptr_array_add(candidates, n);
+		if (n->visible) {
+			visible = n;
+			shown++;
+		}
+	}
+	if (candidates->len == 1)
+		return g_ptr_array_index(candidates, 0);
+	if (candidates->len > 1 && shown == 1)
+		return visible;
+	if (candidates->len == 0) {
+		*why = require != NULL && *require != '\0'
+			? g_strdup_printf("no frame on '%s' has '%s' (page.frames lists them)", spec,
+				require)
+			: g_strdup_printf("no frame is on '%s' (page.frames lists them)", spec);
+		return NULL;
+	}
+	{
+		GString *ids = g_string_new(NULL);
+
 		for (i = 0; i < candidates->len; i++)
-			if (has_selector(g_ptr_array_index(candidates, i), require))
-				return g_ptr_array_index(candidates, i);
-	return g_ptr_array_index(candidates, 0);
+			g_string_append_printf(ids, "%s%" G_GUINT64_FORMAT, i > 0 ? ", " : "",
+				webkit_frame_get_id(((Node *)g_ptr_array_index(candidates, i))->frame));
+		*why = g_strdup_printf("%u frames on '%s' match (ids %s); name one by its id",
+			candidates->len, spec, ids->str);
+		g_string_free(ids, TRUE);
+	}
+	return NULL;
 }
 
 static GVariant *
@@ -477,17 +618,13 @@ eval_in_frame(WebKitWebPage *page, const gchar *spec, const gchar *script,
 	g_autoptr(JSCValue) value = NULL;
 	g_autofree gchar *text = NULL;
 	JSCException *exception;
-	Node *chosen = choose(nodes, spec, require);
+	g_autofree gchar *why = NULL;
+	Node *chosen = choose(nodes, spec, require, &why);
 	guint64 id;
 	guint i;
 
-	if (chosen == NULL) {
-		g_autofree gchar *why = g_strdup_printf(
-			is_id(spec) ? "no frame %s (page.frames gives the ids)"
-			            : "no frame's URI contains '%s' (page.frames lists them)", spec);
-
+	if (chosen == NULL)
 		return eval_reply(GSURF_FRAMES_STATUS_NO_FRAME, 0, why, 0, 0);
-	}
 	frame = g_object_ref(chosen->frame);
 	id = webkit_frame_get_id(frame);
 	g_clear_pointer(&nodes, g_ptr_array_unref);

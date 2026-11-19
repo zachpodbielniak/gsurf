@@ -1073,7 +1073,7 @@ tool_toggle_module(McpServer *s, const gchar *name, JsonObject *args, gpointer u
 
 #define VIEW_ARG { "view", "integer", "stable view id (list_views 'id'); default: the active view", FALSE }
 #define FRAME_ARG { "frame", "string", "a frame of the page: its id (list_frames 'id') or " \
-	"text from its URI, e.g. js.stripe.com; default: the main frame", FALSE }
+	"its site (host, host:port or *.host), e.g. js.stripe.com; default: the main frame", FALSE }
 
 static const GsurfMcpToolDef page_tools[] = {
 	{ "navigate", "Load a URI in a view (default: the active view)",

@@ -1156,7 +1156,7 @@ test_frames(void)
 	ASSERT_HAS(text, "list_frames");
 	g_free(text);
 	text = callf(&h, "click", TRUE, "{\"frame\":\"%s\",\"selector\":\"#nope\"}", site);
-	ASSERT_HAS(text, "nothing in frame");
+	ASSERT_HAS(text, "has '#nope'");
 	g_free(text);
 
 	h_free(&h);

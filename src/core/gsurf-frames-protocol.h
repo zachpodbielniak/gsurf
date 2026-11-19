@@ -23,10 +23,10 @@
 #define GSURF_FRAMES_MSG_LIST "gsurf-frames.list"
 
 /*
- * "gsurf-frames.eval": "(sss)" -- the frame (its id in decimal, or text
- * found in its URI), the script, and a CSS selector the frame must
- * contain to be chosen among several frames whose URI matches ("" for
- * none).  The script runs in the frame's page world.  The reply is
+ * "gsurf-frames.eval": "(sss)" -- the frame (its id in decimal, or its
+ * site: "host", "host:port" or "*.host", matched on the URI's host), the
+ * script, and a CSS selector the frame must contain to be chosen ("" for
+ * none).  Several frames left: the one visible one, else NO_FRAME.  The script runs in the frame's page world.  The reply is
  * "(utsdd)": a GSURF_FRAMES_STATUS_*, the frame's id, the value (strings
  * as-is, anything else as JSON) or the error text, and the frame's
  * content-box origin in the view, read after the script ran.

@@ -48,7 +48,7 @@ All take an optional `view` (stable id, from `list_views`) where a page is meant
 
 A view object has `index`, `id`, `uri`, `title`, `active`, `visible`, `opener_id`, `parent_id`, `container`, `container_name`, `container_color`, `container_temporary` and `pane` (`{window, index}` or `null`). Tools that change panes return the current window's panes. Numbers and booleans are read leniently (`3`, `3.0`, `"3"`; `true`, `"1"`).
 
-`click` and `type_text` (input tools) also take `frame`. `frame` is a frame id from `list_frames` or text from the frame's URI (`"js.stripe.com"`): how a form inside a cross-origin iframe (a payment provider's) is read and filled. It needs the `frames` module (on in the default config).
+`click` and `type_text` (input tools) also take `frame`. `frame` is a frame id from `list_frames` or the frame's site (`"js.stripe.com"`, `host:port`, `*.stripe.com`; the host, never text in the URI): how a form inside a cross-origin iframe (a payment provider's) is read and filled. It needs the `frames` module (on in the default config).
 
 Errors are tool error results with a hint: `unknown view 42 (… list_views gives the ids)`, `no window layout is installed: enable the wmux module …`, `re-parenting needs a tab tree: enable the tabs module …`, `input modes need the modal module …`, `kiosk mode: opening or reopening views is not allowed`.
 

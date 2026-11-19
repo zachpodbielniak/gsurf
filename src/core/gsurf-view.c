@@ -1199,6 +1199,7 @@ gsurf_view_send_click_in_frame(GsurfView *self, const gchar *frame, gdouble x, g
 
 typedef struct {
 	gchar  *frame;
+	gchar  *selector;
 	gchar  *focused;    /* the script: does the field have the focus? */
 	gchar  *text;
 	gint64  deadline;   /* monotonic */
@@ -1210,6 +1211,7 @@ frame_typing_free(gpointer data)
 	FrameTyping *typing = data;
 
 	g_free(typing->frame);
+	g_free(typing->selector);
 	g_free(typing->focused);
 	g_free(typing->text);
 	g_free(typing);
@@ -1232,10 +1234,12 @@ frame_typing_checked(GObject *source, GAsyncResult *result, gpointer user_data)
 		g_timeout_add(FRAME_FOCUS_POLL_MS, frame_typing_poll, task);
 		return;
 	}
+	/* The check and the keys are one step of this callback: nothing of
+	 * gsurf's runs between them. */
 	if (g_strcmp0(answer, "true") != 0)
 		g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
-			"the field in frame '%s' did not take the focus; nothing was typed",
-			typing->frame);
+			"the focus is not on '%s' inside frame '%s'; nothing was typed",
+			typing->selector, typing->frame);
 	else if (gsurf_view_send_text(self, typing->text, &error))
 		g_task_return_boolean(task, TRUE);
 	else
@@ -1291,9 +1295,14 @@ gsurf_view_type_in_frame_async(GsurfView *self, const gchar *frame, const gchar 
 		}
 		typing = g_new0(FrameTyping, 1);
 		typing->frame = g_strdup(frame);
+		typing->selector = g_strdup(selector);
+		/* Native keys go to whatever has the focus in the view, not to a
+		 * frame: they are sent only once this frame's document has the
+		 * focus (hasFocus() is false while the parent, or another frame,
+		 * holds it) and its focused element is the field. */
 		typing->focused = g_strdup_printf(
 			"(function(s){var e=document.querySelector(s);"
-			"return e!==null&&document.activeElement===e;})(%s)", sel);
+			"return e!==null&&document.hasFocus()&&document.activeElement===e;})(%s)", sel);
 		typing->text = g_strdup(text);
 		typing->deadline = g_get_monotonic_time() + (gint64)FRAME_FOCUS_WAIT_MS * 1000;
 		g_task_set_task_data(task, typing, frame_typing_free);

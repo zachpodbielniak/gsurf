@@ -138,6 +138,56 @@ serve(SoupServer *srv, SoupServerMessage *msg, const char *path, GHashTable *que
 		return;
 	}
 
+	/* A hostile page: before the real frame it plants a frame of its own
+	 * site whose URI contains the real frame's host and port -- in the
+	 * path and in the query -- and gives it a #card too.  ?twice=1 adds a
+	 * second real frame instead, so the real host matches twice. */
+	if (g_strcmp0(path, "/outer-decoy") == 0) {
+		g_autofree gchar *second = NULL;
+
+		if (query != NULL && g_hash_table_contains(query, "twice"))
+			second = g_strdup_printf("<iframe src='http://localhost:%u/inner' "
+				"style='width:420px;height:200px'></iframe>", inner_port);
+		body = g_strdup_printf("<!doctype html><html><head><title>outer</title></head>"
+			"<body><p>a hostile page</p>"
+			"<iframe id='decoy' src='http://127.0.0.1:%u/decoy/localhost:%u/?h=localhost:%u' "
+			"style='width:300px;height:120px'></iframe>%s"
+			"<iframe id='pay' src='http://localhost:%u/inner' "
+			"style='width:420px;height:200px' "
+			"onload=\"document.title='outer-ready'\"></iframe></body></html>",
+			port, inner_port, inner_port, second != NULL ? second : "", inner_port);
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body,
+			strlen(body));
+		return;
+	}
+	/* A page that takes the focus back whenever its frame gets it: native
+	 * keys sent after the click would land in its own #mine. */
+	if (g_strcmp0(path, "/outer-steal") == 0) {
+		body = g_strdup_printf("<!doctype html><html><head><title>outer</title></head>"
+			"<body><input id='mine' autocomplete='off'>"
+			"<iframe id='pay' src='http://localhost:%u/inner' "
+			"style='width:420px;height:200px' "
+			"onload=\"document.title='outer-ready'\"></iframe>"
+			"<script>setInterval(function(){var a=document.activeElement;"
+			"if(a&&a.tagName==='IFRAME')document.getElementById('mine').focus();},1);"
+			"</script></body></html>", inner_port);
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_COPY, body,
+			strlen(body));
+		return;
+	}
+	if (g_str_has_prefix(path, "/decoy/")) {
+		static const gchar decoy[] =
+			"<!doctype html><html><head><title>decoy</title></head><body style='margin:0'>"
+			"<input id='card' autocomplete='off'></body></html>";
+
+		soup_server_message_set_status(msg, 200, NULL);
+		soup_server_message_set_response(msg, "text/html", SOUP_MEMORY_STATIC, decoy,
+			strlen(decoy));
+		return;
+	}
+
 	body = g_strdup_printf("<!doctype html><html><head><title>%s</title></head>"
 		"<body><p>hello %s</p></body></html>",
 		g_str_has_prefix(path, "/p/") ? path + 3 : "page", path);
@@ -1397,6 +1447,152 @@ test_frames(void)
 	h_free(&h);
 }
 
+/*
+ * A page cannot steer typed text into a frame of its choosing: 'frame' is
+ * the frame's host (and port), never text found in its URI.  The decoy
+ * frame's URI holds "localhost:<port>" in its path and query and has a
+ * #card of its own; the keys must land in the real frame only.  And when
+ * the real host matches two frames that both have the selector, typing
+ * is refused rather than guessed.
+ */
+static void
+test_frames_decoy(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *outer = NULL;
+	g_autofree gchar *site = NULL;
+	g_autofree gchar *text = NULL;
+	g_autofree gchar *path = gsurf_webkit_test_module_path("frames");
+	GsurfView *view;
+	JsonArray *frames;
+	gint64 id;
+	gint64 decoy_id = 0;
+	guint i;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+	g_assert_true(g_file_test(path, G_FILE_TEST_EXISTS));
+	use_module(&h, "frames");
+	gsurf_module_manager_activate_all(h.mgr);
+
+	outer = g_strdup_printf("http://127.0.0.1:%u/outer-decoy", port);
+	site = g_strdup_printf("\"localhost:%u\"", inner_port);
+	node = rpcf(&h, "open", 0, "{\"uri\":\"%s\"}", outer);
+	id = json_object_get_int_member(obj(node), "id");
+	g_clear_pointer(&node, json_node_unref);
+	view = gsurf_view_lookup((guint64)id);
+	g_assert_nonnull(view);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "outer-ready") == 0);
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* the decoy is there, visible, and first */
+	node = rpcf(&h, "page.frames", 0, "{\"view\":%" G_GINT64_FORMAT "}", id);
+	frames = json_node_get_array(node);
+	g_assert_cmpuint(json_array_get_length(frames), ==, 3);
+	for (i = 0; i < json_array_get_length(frames); i++) {
+		JsonObject *f = json_array_get_object_element(frames, i);
+
+		if (strstr(json_object_get_string_member(f, "uri"), "/decoy/") != NULL) {
+			g_assert_cmpuint(i, ==, 1);
+			g_assert_true(json_object_get_boolean_member(f, "visible"));
+			decoy_id = json_object_get_int_member(f, "id");
+		}
+	}
+	g_assert_cmpint(decoy_id, >, 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* the keys reach the real frame, and the decoy gets nothing */
+	node = rpcf(&h, "page.type", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#card\",\"text\":\"4242\"}", id, site);
+	g_assert_true(json_object_get_boolean_member(obj(node), "done"));
+	g_clear_pointer(&node, json_node_unref);
+	text = frame_eval(&h, id, site, "document.getElementById('card').value");
+	g_assert_cmpstr(text, ==, "4242");
+	g_clear_pointer(&text, g_free);
+	node = rpcf(&h, "page.eval", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%" G_GINT64_FORMAT
+		",\"script\":\"document.getElementById('card').value\"}", id, decoy_id);
+	g_assert_cmpstr(json_node_get_string(node), ==, "");
+	g_clear_pointer(&node, json_node_unref);
+
+	/* a host is matched whole: neither a piece of it nor a path */
+	node = rpcf(&h, "page.text", -32001, "{\"view\":%" G_GINT64_FORMAT
+		",\"frame\":\"calhost:%u\"}", id, inner_port);
+	g_clear_pointer(&node, json_node_unref);
+	node = rpcf(&h, "page.text", -32001, "{\"view\":%" G_GINT64_FORMAT
+		",\"frame\":\"decoy\"}", id);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* two real frames that both have #card: refused, nothing typed */
+	g_clear_pointer(&outer, g_free);
+	outer = g_strdup_printf("http://127.0.0.1:%u/outer-decoy?twice=1", port);
+	node = rpcf(&h, "open", 0, "{\"uri\":\"%s\"}", outer);
+	id = json_object_get_int_member(obj(node), "id");
+	g_clear_pointer(&node, json_node_unref);
+	view = gsurf_view_lookup((guint64)id);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "outer-ready") == 0);
+	node = rpcf(&h, "page.type", -32001, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#card\",\"text\":\"4242\"}", id, site);
+	g_clear_pointer(&node, json_node_unref);
+
+	h_free(&h);
+}
+
+/*
+ * Native keys go wherever the view's focus is.  A parent page that takes
+ * the focus back from its frame after the click must not receive them:
+ * page.type fails, and neither the parent nor the frame gets a key.
+ * (A guard: the check runs right before the keys, so this page, which
+ * steals on a timer, is caught by it.  A steal timed between the check
+ * and the keys' arrival cannot be caught from the UI process.)
+ */
+static void
+test_frames_focus_stolen(void)
+{
+	H h;
+	g_autoptr(JsonNode) node = NULL;
+	g_autofree gchar *outer = NULL;
+	g_autofree gchar *site = NULL;
+	g_autofree gchar *text = NULL;
+	GsurfView *view;
+	gint64 id;
+
+	if (!gsurf_webkit_test_init() || !h_init(&h))
+		return;
+#ifdef GSURF_BACKEND_GTK4
+	/* no native input: the keys are put into the field inside the frame */
+	h_free(&h);
+	g_test_skip("native input only");
+	return;
+#endif
+	use_module(&h, "frames");
+	gsurf_module_manager_activate_all(h.mgr);
+
+	outer = g_strdup_printf("http://127.0.0.1:%u/outer-steal", port);
+	site = g_strdup_printf("\"localhost:%u\"", inner_port);
+	node = rpcf(&h, "open", 0, "{\"uri\":\"%s\"}", outer);
+	id = json_object_get_int_member(obj(node), "id");
+	g_clear_pointer(&node, json_node_unref);
+	view = gsurf_view_lookup((guint64)id);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "outer-ready") == 0);
+	node = rpc(&h, "mode.set", "{\"mode\":\"insert\"}", 0);
+	g_clear_pointer(&node, json_node_unref);
+
+	node = rpcf(&h, "page.type", -32000, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
+		"\"selector\":\"#card\",\"text\":\"4242\"}", id, site);
+	g_clear_pointer(&node, json_node_unref);
+	gsurf_webkit_test_spin(200);
+	node = rpcf(&h, "page.eval", 0, "{\"view\":%" G_GINT64_FORMAT
+		",\"script\":\"document.getElementById('mine').value\"}", id);
+	g_assert_cmpstr(json_node_get_string(node), ==, "");
+	g_clear_pointer(&node, json_node_unref);
+	text = frame_eval(&h, id, site, "document.getElementById('card').value");
+	g_assert_cmpstr(text, ==, "");
+
+	h_free(&h);
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -1425,6 +1621,8 @@ main(int argc, char *argv[])
 	g_test_add_func("/gsurf/control/webkit/fill-secret", test_fill_secret);
 	g_test_add_func("/gsurf/control/webkit/typing-settles", test_typing_settles);
 	g_test_add_func("/gsurf/control/webkit/frames", test_frames);
+	g_test_add_func("/gsurf/control/webkit/frames-decoy", test_frames_decoy);
+	g_test_add_func("/gsurf/control/webkit/frames-focus-stolen", test_frames_focus_stolen);
 
 	ret = g_test_run();
 	g_clear_object(&soup);

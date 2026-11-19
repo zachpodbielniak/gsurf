@@ -500,7 +500,7 @@ fail(GsurfControlInvocation *inv, GError *error)
 
 /*
  * The optional 'frame' parameter of the page methods: a frame id (from
- * page.frames) or text found in the frame's URI ("js.stripe.com").  @out
+ * page.frames) or the frame's site ("js.stripe.com", matched on the host).  @out
  * is NULL when it is absent: the main frame.
  */
 static gboolean

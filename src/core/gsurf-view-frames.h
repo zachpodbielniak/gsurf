@@ -50,11 +50,12 @@ gchar *gsurf_view_list_frames_finish(GsurfView *self, GAsyncResult *result, GErr
  * gsurf_view_run_javascript_in_frame_async:
  * @self: a #GsurfView
  * @frame: (nullable): the frame: its id (decimal, from
- *   gsurf_view_list_frames_async()) or text found in its URI; %NULL is the
- *   main frame
- * @require: (nullable): a CSS selector: among several frames whose URI
- *   contains @frame, the first (visible ones first, then in document
- *   order) with an element matching it is chosen
+ *   gsurf_view_list_frames_async()) or its site ("host", "host:port" or
+ *   "*.host", matched against the host of the frame's URI, never text in
+ *   it); %NULL is the main frame.  Several frames on the site: the one
+ *   visible frame among them, else %G_IO_ERROR_NOT_FOUND naming their ids
+ * @require: (nullable): a CSS selector: only frames on the site with an
+ *   element matching it are considered
  * @script: JavaScript to evaluate in the frame's page world
  * @cancellable: (nullable): a #GCancellable
  * @callback: (scope async) (nullable) (closure user_data): completion callback

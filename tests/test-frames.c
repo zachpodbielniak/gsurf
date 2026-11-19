@@ -326,12 +326,12 @@ test_view_frame_replies(void)
 
 	/* 3. No such frame: NOT_FOUND, in the extension's words. */
 	set_reply(fake, g_variant_new(GSURF_FRAMES_EVAL_REPLY,
-		(guint)GSURF_FRAMES_STATUS_NO_FRAME, (guint64)0, "no frame's URI contains 'x'", 0.0,
+		(guint)GSURF_FRAMES_STATUS_NO_FRAME, (guint64)0, "no frame is on 'x' (page.frames lists them)", 0.0,
 		0.0));
 	text = run_in(view, "x", NULL, "1", NULL, NULL, NULL, &error);
 	g_assert_null(text);
 	g_assert_error(error, G_IO_ERROR, G_IO_ERROR_NOT_FOUND);
-	g_assert_cmpstr(error->message, ==, "no frame's URI contains 'x'");
+	g_assert_cmpstr(error->message, ==, "no frame is on 'x' (page.frames lists them)");
 	g_clear_error(&error);
 
 	/* 4. The script threw: FAILED, with the exception. */

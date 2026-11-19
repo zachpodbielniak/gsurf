@@ -26,9 +26,13 @@ The extension reaches the web processes started *after* the module is on, so put
 =frame= is either
 
 - a frame *id*, as =page.frames= reports it (an integer); or
-- *text found in the frame's URI*, e.g. ="js.stripe.com"=. Among several frames whose URI contains it, visible ones come first, then document order; a method given a =selector= (=page.click=, =page.type=) picks the first of those that has an element matching it. So a page with a hidden controller frame and a visible form frame on the same host reaches the form without guessing an index.
+- a *site*: the frame's host, e.g. ="js.stripe.com"=; =host:port= to name the port too; =*.stripe.com= for the host and any host under it (=js.stripe.com=, =m.stripe.com=, not =notstripe.com=). A URL is read for its host and port. Only =http= and =https= frames have a site.
 
-Nothing matches: error -32001 (MCP: an error result naming =list_frames=). Without the module: -32002.
+A site is matched against the host of the frame's URI, never against text in the URI. The page chooses its frames' URIs: a frame on =https://evil.example/js.stripe.com/= or =https://notjs.stripe.com/= is not on =js.stripe.com=, so a page cannot plant a frame that takes text meant for the provider's.
+
+Among the frames on the site, a method given a =selector= (=page.click=, =page.type=) keeps those with an element matching it. One frame left: that one. Several: the one visible frame among them; if more than one is visible, or none is, the call is refused with the ids, and the caller names one. A typed card number is never sent on a guess. So a page with a hidden controller frame and a visible form frame on the same host reaches the form; two visible fields that both match need an id.
+
+No single frame: error -32001 (MCP: an error result naming =list_frames=). Without the module: -32002.
 
 * =page.frames=
 
