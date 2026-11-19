@@ -181,8 +181,7 @@ struct _GsurfViewClass
 	                                             guint modifiers, const gchar *text,
 	                                             GError **error);
 
-	/* Cookies: add one to the view's session (see gsurf_view_add_cookie_async()).
-	 * Takes the last padding slot, so the class size is unchanged. */
+	/* Cookies: add one to the view's session (see gsurf_view_add_cookie_async()). */
 	void         (*add_cookie_async)            (GsurfView *self, const GsurfCookie *cookie,
 	                                             GCancellable *cancellable,
 	                                             GAsyncReadyCallback callback, gpointer user_data);
@@ -191,6 +190,11 @@ struct _GsurfViewClass
 	 * user messages (see gsurf_view_send_page_message_async()). */
 	void         (*send_page_message)           (GsurfView *self, const gchar *name,
 	                                             GVariant *params, GTask *task);
+
+	/* Room to grow: a new vfunc takes a slot (and the padding shrinks by
+	 * one) so the class size stays the same.  send_page_message had no
+	 * slot left and grew the class; this restores the original 8. */
+	gpointer padding[8];
 };
 
 /* --- Navigation --- */
