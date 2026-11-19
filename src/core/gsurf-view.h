@@ -104,7 +104,7 @@ typedef struct {
  *   web-process extensions and complete @task (taken; its source object is
  *   the view) with the reply's parameters as a #GVariant, or with
  *   %G_IO_ERROR_NOT_SUPPORTED when no extension handles it;
- *   gsurf_view_send_page_message_finish() propagates it (since 0.5.15)
+ *   gsurf_view_send_page_message_finish() propagates it (since 0.6.0)
  *
  * Virtual table for #GsurfView. Backend subclasses fill this in.
  */
@@ -577,7 +577,7 @@ gboolean gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GEr
  * handling @name, or a backend without web processes, completes with
  * %G_IO_ERROR_NOT_SUPPORTED.
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 void gsurf_view_send_page_message_async(GsurfView *self, const gchar *name, GVariant *params,
                                         GCancellable *cancellable,
@@ -594,7 +594,7 @@ void gsurf_view_send_page_message_async(GsurfView *self, const gchar *name, GVar
  * Returns: (transfer full) (nullable): the reply's parameters (an empty
  *   tuple when the reply has none), or %NULL with @error set
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 GVariant *gsurf_view_send_page_message_finish(GsurfView *self, GAsyncResult *result,
                                               GError **error);

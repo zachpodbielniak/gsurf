@@ -24,7 +24,7 @@ G_BEGIN_DECLS
  * web-process extension; without it the call completes with
  * %G_IO_ERROR_NOT_SUPPORTED.  Finish with gsurf_view_list_frames_finish().
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 void gsurf_view_list_frames_async(GsurfView *self, GCancellable *cancellable,
                                   GAsyncReadyCallback callback, gpointer user_data);
@@ -42,7 +42,7 @@ void gsurf_view_list_frames_async(GsurfView *self, GCancellable *cancellable,
  *   (the frame's content box in the view's CSS pixels), visible}, or
  *   %NULL with @error set
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 gchar *gsurf_view_list_frames_finish(GsurfView *self, GAsyncResult *result, GError **error);
 
@@ -67,7 +67,7 @@ gchar *gsurf_view_list_frames_finish(GsurfView *self, GAsyncResult *result, GErr
  * extension with %G_IO_ERROR_NOT_SUPPORTED.  Finish with
  * gsurf_view_run_javascript_in_frame_finish().
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 void gsurf_view_run_javascript_in_frame_async(GsurfView *self, const gchar *frame,
                                               const gchar *require, const gchar *script,
@@ -95,7 +95,7 @@ void gsurf_view_run_javascript_in_frame_async(GsurfView *self, const gchar *fram
  * Returns: (transfer full) (nullable): the value as a string (strings
  *   as-is, anything else as JSON), or %NULL with @error set
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 gchar *gsurf_view_run_javascript_in_frame_finish(GsurfView *self, GAsyncResult *result,
                                                  gdouble *x, gdouble *y, guint64 *frame_id,
@@ -123,7 +123,7 @@ gchar *gsurf_view_run_javascript_in_frame_finish(GsurfView *self, GAsyncResult *
  *
  * Returns: %TRUE when the click was handed over
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 gboolean gsurf_view_send_click_in_frame(GsurfView *self, const gchar *frame, gdouble x,
                                         gdouble y, gdouble frame_x, gdouble frame_y,
@@ -153,7 +153,7 @@ gboolean gsurf_view_send_click_in_frame(GsurfView *self, const gchar *frame, gdo
  * events are dispatched in @frame, at the field.  Completes once the keys
  * are handed over; finish with gsurf_view_type_in_frame_finish().
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 void gsurf_view_type_in_frame_async(GsurfView *self, const gchar *frame, const gchar *selector,
                                     gdouble x, gdouble y, gdouble frame_x, gdouble frame_y,
@@ -170,7 +170,7 @@ void gsurf_view_type_in_frame_async(GsurfView *self, const gchar *frame, const g
  *
  * Returns: %TRUE when the text was handed over
  *
- * Since: 0.5.15
+ * Since: 0.6.0
  */
 gboolean gsurf_view_type_in_frame_finish(GsurfView *self, GAsyncResult *result, GError **error);
 
