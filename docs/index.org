@@ -29,6 +29,7 @@ gsurf is a GLib/GObject web browser — a library-first port of suckless surf.
 - [[file:lrg-3d.org][3D tab space]] — =gsurf --lrg=3d=: every tab a live panel in a 3D scene (arrangements, environments, reading mode, history depth).
 - [[file:form-autofill.org][Form autofill]] — identity, address and card profiles filled from an isolated script world.
 - [[file:hardening.org][Privacy hardening]] — LibreWolf-style protections with per-site exemptions.
+- [[file:frames.org][Frames]] — reading and driving a page's frames, cross-origin ones included (payment forms).
 - [[file:control.org][Control socket]] — the JSON-RPC protocol, methods, events, the provider interface and security.
 - [[file:mcp.org][MCP server]] — AI agent control of the browser.
 - [[file:embedding.org][Embedding]] — using libgsurf in another application.

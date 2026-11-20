@@ -265,18 +265,15 @@ install-modules:
 	@for mod in $(OUTDIR)/modules/*.so; do \
 		if [ -f "$$mod" ]; then $(INSTALL_DATA) "$$mod" $(DESTDIR)$(MODULEDIR)/; fi \
 	done
-	@# The adblock web-process extension must sit next to adblock.so.
-	@if [ -f $(OUTDIR)/modules/adblock-webext/gsurf-adblock-webext.so ]; then \
-		$(MKDIR_P) $(DESTDIR)$(MODULEDIR)/adblock-webext; \
-		$(INSTALL_DATA) $(OUTDIR)/modules/adblock-webext/gsurf-adblock-webext.so \
-			$(DESTDIR)$(MODULEDIR)/adblock-webext/; \
-	fi
-	@# Likewise the hardening web-process extension next to hardening.so.
-	@if [ -f $(OUTDIR)/modules/hardening-webext/gsurf-hardening-webext.so ]; then \
-		$(MKDIR_P) $(DESTDIR)$(MODULEDIR)/hardening-webext; \
-		$(INSTALL_DATA) $(OUTDIR)/modules/hardening-webext/gsurf-hardening-webext.so \
-			$(DESTDIR)$(MODULEDIR)/hardening-webext/; \
-	fi
+	@# A module's web-process extension (modules/<name>-webext/) must sit
+	@# next to <name>.so: the module finds it relative to itself.
+	@for ext in $(OUTDIR)/modules/*-webext/*.so; do \
+		if [ -f "$$ext" ]; then \
+			dir=$$(basename "$$(dirname "$$ext")"); \
+			$(MKDIR_P) $(DESTDIR)$(MODULEDIR)/$$dir; \
+			$(INSTALL_DATA) "$$ext" $(DESTDIR)$(MODULEDIR)/$$dir/; \
+		fi \
+	done
 
 install-gsurf-mcp: gsurf-mcp
 	$(MKDIR_P) $(DESTDIR)$(BINDIR)

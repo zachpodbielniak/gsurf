@@ -8,6 +8,7 @@
 #include "util/gsurf-kiosk.h"
 #include "util/gsurf-runtime-dir.h"
 #include "core/gsurf-view.h"
+#include "core/gsurf-view-frames.h"
 #include "core/gsurf-container-registry.h"
 #include "config/gsurf-config.h"
 
@@ -1167,6 +1168,170 @@ gsurf_view_send_text(GsurfView *self, const gchar *text, GError **error)
 	return send_input(self, GSURF_VIEW_INPUT_TEXT, 0, 0, 0, 0, text, error);
 }
 
+/* --- Input into a frame (gsurf-view-frames.h) --- */
+
+gboolean
+gsurf_view_send_click_in_frame(GsurfView *self, const gchar *frame, gdouble x, gdouble y,
+                               gdouble frame_x, gdouble frame_y, guint button,
+                               guint modifiers, GError **error)
+{
+	g_autofree gchar *script = NULL;
+
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+
+	if (frame == NULL || GSURF_VIEW_GET_CLASS(self)->send_input != NULL)
+		return gsurf_view_send_click(self, x, y, button, modifiers, error);
+	if (x < frame_x || y < frame_y || button < 1 || button > 3) {
+		g_set_error(error, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"a click needs a point inside the frame and a button of 1, 2 or 3 "
+			"(got %g, %g, %u)", x, y, button);
+		return FALSE;
+	}
+	script = fallback_script(GSURF_VIEW_INPUT_CLICK, x - frame_x, y - frame_y, button,
+		modifiers, NULL);
+	gsurf_view_run_javascript_in_frame_async(self, frame, NULL, script, NULL, NULL, NULL);
+	return TRUE;
+}
+
+/* Typing into a frame: the field's focus, polled after the click. */
+#define FRAME_FOCUS_POLL_MS (15)
+#define FRAME_FOCUS_WAIT_MS (2000)
+
+typedef struct {
+	gchar  *frame;
+	gchar  *selector;
+	gchar  *focused;    /* the script: does the field have the focus? */
+	gchar  *text;
+	gint64  deadline;   /* monotonic */
+} FrameTyping;
+
+static void
+frame_typing_free(gpointer data)
+{
+	FrameTyping *typing = data;
+
+	g_free(typing->frame);
+	g_free(typing->selector);
+	g_free(typing->focused);
+	g_free(typing->text);
+	g_free(typing);
+}
+
+static gboolean frame_typing_poll(gpointer user_data);
+
+static void
+frame_typing_checked(GObject *source, GAsyncResult *result, gpointer user_data)
+{
+	GTask *task = user_data;
+	GsurfView *self = g_task_get_source_object(task);
+	FrameTyping *typing = g_task_get_task_data(task);
+	g_autofree gchar *answer = NULL;
+	GError *error = NULL;
+
+	(void)source;
+	answer = gsurf_view_run_javascript_in_frame_finish(self, result, NULL, NULL, NULL, NULL);
+	if (g_strcmp0(answer, "true") != 0 && g_get_monotonic_time() < typing->deadline) {
+		g_timeout_add(FRAME_FOCUS_POLL_MS, frame_typing_poll, task);
+		return;
+	}
+	/* The check and the keys are one step of this callback: nothing of
+	 * gsurf's runs between them. */
+	if (g_strcmp0(answer, "true") != 0)
+		g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_TIMED_OUT,
+			"the focus is not on '%s' inside frame '%s'; nothing was typed",
+			typing->selector, typing->frame);
+	else if (gsurf_view_send_text(self, typing->text, &error))
+		g_task_return_boolean(task, TRUE);
+	else
+		g_task_return_error(task, error);
+	g_object_unref(task);
+}
+
+static gboolean
+frame_typing_poll(gpointer user_data)
+{
+	GTask *task = user_data;
+	FrameTyping *typing = g_task_get_task_data(task);
+
+	gsurf_view_run_javascript_in_frame_async(g_task_get_source_object(task), typing->frame,
+		NULL, typing->focused, g_task_get_cancellable(task), frame_typing_checked, task);
+	return G_SOURCE_REMOVE;
+}
+
+void
+gsurf_view_type_in_frame_async(GsurfView *self, const gchar *frame, const gchar *selector,
+                               gdouble x, gdouble y, gdouble frame_x, gdouble frame_y,
+                               const gchar *text, GCancellable *cancellable,
+                               GAsyncReadyCallback callback, gpointer user_data)
+{
+	GTask *task;
+	FrameTyping *typing;
+	GError *error = NULL;
+	g_autofree gchar *sel = NULL;
+	g_autofree gchar *literal = NULL;
+	g_autofree gchar *script = NULL;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(frame != NULL && selector != NULL);
+
+	task = g_task_new(self, cancellable, callback, user_data);
+	g_task_set_source_tag(task, gsurf_view_type_in_frame_async);
+	if (text == NULL || !g_utf8_validate(text, -1, NULL)) {
+		g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_INVALID_ARGUMENT,
+			"text must be UTF-8");
+		g_object_unref(task);
+		return;
+	}
+	sel = js_literal(selector);
+
+	/* 1. Native input: the click gives the field the focus; the keys
+	 *    follow once it has it. */
+	if (GSURF_VIEW_GET_CLASS(self)->send_input != NULL) {
+		if (!gsurf_view_send_click_in_frame(self, frame, x, y, frame_x, frame_y, 1, 0,
+		                                    &error)) {
+			g_task_return_error(task, error);
+			g_object_unref(task);
+			return;
+		}
+		typing = g_new0(FrameTyping, 1);
+		typing->frame = g_strdup(frame);
+		typing->selector = g_strdup(selector);
+		/* Native keys go to whatever has the focus in the view, not to a
+		 * frame: they are sent only once this frame's document has the
+		 * focus (hasFocus() is false while the parent, or another frame,
+		 * holds it) and its focused element is the field. */
+		typing->focused = g_strdup_printf(
+			"(function(s){var e=document.querySelector(s);"
+			"return e!==null&&document.hasFocus()&&document.activeElement===e;})(%s)", sel);
+		typing->text = g_strdup(text);
+		typing->deadline = g_get_monotonic_time() + (gint64)FRAME_FOCUS_WAIT_MS * 1000;
+		g_task_set_task_data(task, typing, frame_typing_free);
+		frame_typing_poll(task);
+		return;
+	}
+
+	/* 2. Otherwise the field itself, inside the frame. */
+	literal = js_literal(text);
+	script = g_strdup_printf(
+		"(function(s,t){var e=document.querySelector(s);if(!e)return false;"
+		"try{e.focus();}catch(x){}"
+		"if(document.activeElement===e&&document.execCommand('insertText',false,t))return true;"
+		"if('value' in e){e.value+=t;e.dispatchEvent(new Event('input',{bubbles:true}));"
+		"return true;}return false;})(%s,%s)", sel, literal);
+	gsurf_view_run_javascript_in_frame_async(self, frame, NULL, script, NULL, NULL, NULL);
+	g_task_return_boolean(task, TRUE);
+	g_object_unref(task);
+}
+
+gboolean
+gsurf_view_type_in_frame_finish(GsurfView *self, GAsyncResult *result, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), FALSE);
+	g_return_val_if_fail(g_task_is_valid(result, self), FALSE);
+
+	return g_task_propagate_boolean(G_TASK(result), error);
+}
+
 /* --- Embedding --- */
 
 gpointer
@@ -1357,6 +1522,42 @@ gsurf_view_add_cookie_finish(GsurfView *self, GAsyncResult *result, GError **err
 	g_return_val_if_fail(g_task_is_valid(result, self), FALSE);
 
 	return g_task_propagate_boolean(G_TASK(result), error);
+}
+
+void
+gsurf_view_send_page_message_async(GsurfView *self, const gchar *name, GVariant *params,
+                                   GCancellable *cancellable,
+                                   GAsyncReadyCallback callback, gpointer user_data)
+{
+	GsurfViewClass *klass;
+	g_autoptr(GVariant) owned = NULL;
+	GTask *task;
+
+	g_return_if_fail(GSURF_IS_VIEW(self));
+	g_return_if_fail(name != NULL && *name != '\0');
+
+	if (params != NULL)
+		owned = g_variant_ref_sink(params);
+	task = g_task_new(self, cancellable, callback, user_data);
+	g_task_set_source_tag(task, gsurf_view_send_page_message_async);
+	klass = GSURF_VIEW_GET_CLASS(self);
+	if (klass->send_page_message != NULL) {
+		klass->send_page_message(self, name, owned, task);
+		return;
+	}
+	g_task_return_new_error(task, G_IO_ERROR, G_IO_ERROR_NOT_SUPPORTED,
+		"this backend has no web processes to message");
+	g_object_unref(task);
+}
+
+/* Every path completes the #GTask made above (source object @self). */
+GVariant *
+gsurf_view_send_page_message_finish(GsurfView *self, GAsyncResult *result, GError **error)
+{
+	g_return_val_if_fail(GSURF_IS_VIEW(self), NULL);
+	g_return_val_if_fail(g_task_is_valid(result, self), NULL);
+
+	return g_task_propagate_pointer(G_TASK(result), error);
 }
 
 void

@@ -72,6 +72,13 @@ void     gsurf_webkit_common_add_cookie_async(GsurfView *view, WebKitCookieManag
                                               GAsyncReadyCallback callback,
                                               gpointer user_data);
 
+/* Send @name with @params (may be NULL) to @webview's page, where a
+ * web-process extension answers, and complete @task (taken) with the
+ * reply's parameters (gsurf_view_send_page_message_finish()); a message
+ * nobody handles is G_IO_ERROR_NOT_SUPPORTED. */
+void     gsurf_webkit_common_send_page_message(WebKitWebView *webview, const gchar *name,
+                                               GVariant *params, GTask *task);
+
 /* The focus tracker content script (document start, every frame). Each
  * frame posts {f: frame token, t: is top frame, e: editable focused} to
  * the "gsurfFocus" message handler whenever focus moves inside it; see

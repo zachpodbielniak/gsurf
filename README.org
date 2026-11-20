@@ -40,7 +40,7 @@ Working today:
   config via crispy).
 - Module system: =GsurfModule= base, =GsurfModuleManager= (GModule loading,
   interface auto-detection, priority hook dispatch), 8 hook interfaces.
-- *33 modules* covering the common surf patches + an MCP server — search engines,
+- *34 modules* covering the common surf patches + an MCP server — search engines,
   history, homepage, vim modal navigation, tabs (strip + Sidebery-style tree sidebar: links opened from a tab nest under it, drag and drop to re-parent, a per-tab context menu, grouped by wmux window with wmux on), an address bar, adblock,
   LibreWolf-style privacy hardening, cookie policy, toggles, find, downloads, userscripts,
   site styles, per-URI params, useragent, certificate exceptions, bookmarks, omnibar, externalpipe,

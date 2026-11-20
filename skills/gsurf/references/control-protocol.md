@@ -64,8 +64,10 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `views.list` | | view objects in window order |
 | `views.activate` | `view` or `index` | the view |
 | `views.close` | `view?`/`index?` | `{closed: id}`; never the last view |
-| `page.uri`, `page.title`, `page.text` | `view?`/`index?` | a string |
-| `page.eval` | `script`, `view?`/`index?` | the last value as JSON (`undefined` → null); kiosk refuses |
+| `page.uri`, `page.title` | `view?`/`index?` | a string |
+| `page.text` | `frame?`, `view?`/`index?` | a string: the main frame's text, or `frame`'s |
+| `page.eval` | `script`, `frame?`, `view?`/`index?` | the last value as JSON (`undefined` → null), run in the main frame or `frame`; kiosk refuses |
+| `page.frames` | `view?`/`index?` | `[{id, uri, main, parent, x, y, width, height, visible}]`: every frame, cross-origin too, main first; the box is the view's CSS pixels; needs the `frames` module (-32002) |
 | `page.screenshot` | `path`, `view?`/`index?` | `{path, bytes}`; relative to gsurf's launch directory |
 | `page.fill_secret` | `selector`, `text`, `submit?`, `host?`, `view?`/`index?` | `{done, secret_hold}`: types a secret into the field as key input (old contents replaced); sets the secret hold first; with `host`, refused (-32003) unless the page is still there; never echoes `text`; replies once the page has every key (0.5.14); kiosk refuses |
 | `page.secret_hold` | `hold?` (only `true`), `view?`/`index?` | `{view, secret_hold}`; only navigating away lifts a hold (`hold: false` is -32003) |
@@ -95,6 +97,8 @@ Views are addressed by `view` (stable id) or, where noted, `index`; without eith
 | `lrg.unpin_all` | | the state |
 | `lrg.camera` | `op`: `orbit` {`yaw`, `pitch`}, `zoom` {`factor` > 0}, `reset`, `overview`, `save`/`restore` {`name`} | the state; unknown bookmark -32001, bad params -32602 |
 | `lrg.screenshot` | `path` | `{path, bytes}` once the next frame is written (relative to gsurf's launch directory) |
+
+`frame` (on `page.text`, `page.eval`, `page.click`, `page.type`) is a frame id from `page.frames` or the frame's site (`"js.stripe.com"`, `host:port`, `*.stripe.com`), matched on the host of the frame's URI, never on text in it; with a `selector` only frames that have it count, and when several remain the one visible frame is taken, else -32001 with their ids. A payment form in a provider's cross-origin iframe is reached this way, never by clicking screen coordinates. `page.type` with `frame` clicks the field first (a script cannot focus inside a cross-origin frame); `page.click` with `frame` needs `selector` and answers the view's point. No such frame: -32001. The `frames` module must be on at startup (a config file that lists `modules:` without it leaves it off).
 
 `layout.*` go through the `GsurfWindowLayout` vfuncs: without a layout they fail -32002, in kiosk mode -32003.
 

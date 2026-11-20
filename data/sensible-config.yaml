@@ -196,6 +196,12 @@ modules:
     key_next: "n"
     key_prev: "N"
 
+  # A page's frames, cross-origin ones included (page.frames; frame on
+  # page.text, page.eval, page.click and page.type). It reaches web
+  # processes started after it is on, so it belongs in the config at startup.
+  frames:
+    enabled: true
+
   # Cookie policy with @Aa-style cycle toggle.
   cookie_policy:
     enabled: true

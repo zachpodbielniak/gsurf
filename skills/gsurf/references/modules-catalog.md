@@ -1,6 +1,6 @@
 # Modules catalog
 
-All 33 modules, what they do, and every key each one reads under `modules.<name>`. "On" means the shipped default config sets `enabled: true`; a module with no `enabled: true` in the merged config stays off. `gsurf --list-modules` prints the same names. Keys are read at startup (each `configure()` call); restart after editing.
+All 34 modules, what they do, and every key each one reads under `modules.<name>`. "On" means the shipped default config sets `enabled: true`; a module with no `enabled: true` in the merged config stays off. `gsurf --list-modules` prints the same names. Keys are read at startup (each `configure()` call); restart after editing.
 
 **Unread keys.** `data/default-config.yaml` lists some keys that no code reads. They are marked *unread* below: setting them changes nothing. Do not suggest them as fixes.
 
@@ -20,6 +20,8 @@ Key strings use the syntax in [keybindings-and-modes.md](keybindings-and-modes.m
   - *Unread:* `hint_alpha`.
 - **find_bar** (on). Find in page; performs `find`.
   - `key_open` (`slash`), `key_next` (`n`), `key_prev` (`N`), `match_case` (`false`). *Unread:* `wrap_around`, `highlight_color`.
+- **frames** (on). A page's frames, cross-origin ones included, for the control socket (`page.frames`; `frame` on `page.text`/`eval`/`click`/`type`) and MCP (`list_frames`; `frame` on `get_page_text`/`execute_javascript`/`click`/`type_text`). Ships a web-process extension next to `frames.so`; reaches web processes started after it is on.
+  - `web_process_extension` (path; default: `frames-webext/` next to `frames.so`).
 - **toggles** (on). Keys that flip engine settings at runtime.
   - `notify_on_toggle` (`true`: log "gsurf: NAME on/off"), `keys`: `SETTING: "KEY"`.
   - Working setting names: `javascript`, `images`, `webgl`, `webaudio`, `media_stream`, `webrtc`, `plugins`, `smooth_scrolling`, `caret_browsing`, `site_quirks`, `developer_extras`, and `dark_mode` (forwarded to the dark_mode toggle).

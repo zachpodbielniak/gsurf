@@ -57,6 +57,7 @@ modules:
   modal:          { enabled: true, start_mode: normal, hint_font_size: 13 }
   chromebar:      { enabled: true }
   find_bar:       { enabled: true }
+  frames:         { enabled: true }   # page.frames; frame on text/eval/click/type
   homepage:       { enabled: true, uri: "about:blank" }
   history:        { enabled: true, log_titles: true }
   downloads:      { enabled: true, dir: "~/Downloads" }
@@ -95,6 +96,4 @@ modules:
         skip: [https_only]
   wmux:
     enabled: false                   # true: C-b % splits; C-h/j/k/l move
-  session:
-    enabled: false
-    key_save: "Ctrl+Alt+s"
+  session:        { enabled: false, key_save: "Ctrl+Alt+s" }

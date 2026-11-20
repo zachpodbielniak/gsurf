@@ -381,6 +381,13 @@ gsurf_webkit6_view_add_cookie_async(GsurfView *v, const GsurfCookie *cookie,
 }
 
 static void
+gsurf_webkit6_view_send_page_message(GsurfView *v, const gchar *name, GVariant *params,
+                                     GTask *task)
+{
+	gsurf_webkit_common_send_page_message(GSURF_WEBKIT6_VIEW(v)->webview, name, params, task);
+}
+
+static void
 gsurf_webkit6_view_set_proxy(GsurfView *v, const gchar *uri)
 {
 	WebKitNetworkSession *ns = webkit_web_view_get_network_session(GSURF_WEBKIT6_VIEW(v)->webview);
@@ -742,6 +749,7 @@ gsurf_webkit6_view_class_init(GsurfWebkit6ViewClass *klass)
 	vc->find_previous = gsurf_webkit6_view_find_previous;
 	vc->set_cookie_accept_policy = gsurf_webkit6_view_set_cookie_policy;
 	vc->add_cookie_async = gsurf_webkit6_view_add_cookie_async;
+	vc->send_page_message = gsurf_webkit6_view_send_page_message;
 	vc->set_proxy = gsurf_webkit6_view_set_proxy;
 	vc->get_snapshot_async = gsurf_webkit6_view_get_snapshot_async;
 	vc->get_snapshot_finish = gsurf_webkit6_view_get_snapshot_finish;

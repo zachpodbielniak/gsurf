@@ -38,7 +38,7 @@ All take an optional `view` (stable id, from `list_views`) where a page is meant
 
 | Group | Tools |
 |---|---|
-| Page | `navigate {uri}`, `get_current_uri`, `get_title`, `go_back`, `go_forward`, `reload {bypass_cache?}`, `stop`, `get_page_text`, `get_page_html`, `get_links`, `execute_javascript {code}`, `scroll {direction}`, `find_text {text, backward?}`, `click_link {index? \| selector?}`, `screenshot`, `save_screenshot {path}`, `get_history {limit?}`, `get_cookies` |
+| Page | `navigate {uri}`, `get_current_uri`, `get_title`, `go_back`, `go_forward`, `reload {bypass_cache?}`, `stop`, `get_page_text {frame?}`, `list_frames`, `get_page_html`, `get_links`, `execute_javascript {code, frame?}`, `scroll {direction}`, `find_text {text, backward?}`, `click_link {index? \| selector?}`, `screenshot`, `save_screenshot {path}`, `get_history {limit?}`, `get_cookies` |
 | Config | `get_config`, `set_config`, `set_setting {key, value}`, `list_modules`, `toggle_module {name, enabled?}` |
 | Views | `list_views`, `switch_view`, `open_view {uri?, container?}`, `close_view`, `open_child_view {parent?, uri?, background?, container?}` |
 | Tab tree | `get_tab_tree`, `move_view {view, parent \| before \| after \| index}`, `set_collapsed {view, collapsed?}` |
@@ -47,6 +47,8 @@ All take an optional `view` (stable id, from `list_views`) where a page is meant
 | wmux | `wmux_status`, `list_wmux_windows`, `list_panes {window?}`, `wmux_command {command}`, `split_pane {direction?, uri?, duplicate?, ratio?, background?}`, `select_pane`, `kill_pane`, `zoom_pane`, `select_layout {name}`, `show_view_in_pane {view, pane, zone?}`, `select_window {index \| which}`, `new_window {name?, uri?}`, `rename_window {name, index?}`, `kill_window {index?}` |
 
 A view object has `index`, `id`, `uri`, `title`, `active`, `visible`, `opener_id`, `parent_id`, `container`, `container_name`, `container_color`, `container_temporary` and `pane` (`{window, index}` or `null`). Tools that change panes return the current window's panes. Numbers and booleans are read leniently (`3`, `3.0`, `"3"`; `true`, `"1"`).
+
+`click` and `type_text` (input tools) also take `frame`. `frame` is a frame id from `list_frames` or the frame's site (`"js.stripe.com"`, `host:port`, `*.stripe.com`; the host, never text in the URI): how a form inside a cross-origin iframe (a payment provider's) is read and filled. It needs the `frames` module (on in the default config).
 
 Errors are tool error results with a hint: `unknown view 42 (… list_views gives the ids)`, `no window layout is installed: enable the wmux module …`, `re-parenting needs a tab tree: enable the tabs module …`, `input modes need the modal module …`, `kiosk mode: opening or reopening views is not allowed`.
 

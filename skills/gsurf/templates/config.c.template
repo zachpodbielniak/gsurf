@@ -24,6 +24,7 @@ static const char *MODULES_YAML =
 "    hint_font_size: 13\n"
 "  chromebar: { enabled: true }\n"
 "  find_bar: { enabled: true }\n"
+"  frames: { enabled: true }\n"
 "  homepage: { enabled: true }\n"
 "  history: { enabled: true }\n"
 "  downloads:\n"

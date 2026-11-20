@@ -12,7 +12,7 @@ The skill follows the house layout of the agent-skills repository (the =/skill-s
 | Path | What it holds |
 |------+---------------|
 | =skills/gsurf/SKILL.md= | Frontmatter (=name: gsurf=, =description:=), then =# Skill: gsurf= with the sections When to Use, Prerequisites, Instructions (a decision map to the references), Output Format, Examples and Constraints. At most 500 lines. |
-| =skills/gsurf/references/*.md= | One topic each, at most 200 lines: =gsurfctl.md=, =control-protocol.md=, =configuration-yaml.md=, =configuration-c.md=, =modules-catalog.md= (all 33 modules, the keys each one reads, and the keys of the default config that nothing reads), =writing-modules.md=, =wmux.md=, =tabs-and-containers.md=, =keybindings-and-modes.md=, =mcp.md=, =embedding.md=, =building.md=, =troubleshooting.md=. |
+| =skills/gsurf/references/*.md= | One topic each, at most 200 lines: =gsurfctl.md=, =control-protocol.md=, =configuration-yaml.md=, =configuration-c.md=, =modules-catalog.md= (all 34 modules, the keys each one reads, and the keys of the default config that nothing reads), =writing-modules.md=, =wmux.md=, =tabs-and-containers.md=, =keybindings-and-modes.md=, =mcp.md=, =embedding.md=, =building.md=, =troubleshooting.md=. |
 | =skills/gsurf/templates/*.template= | Files to copy and adapt, at most 100 lines (see "Size exceptions"): =config.yaml.template= (a complete YAML config), =config.c.template= (a complete C config with the embedded modules YAML), =module.c.template= and =module.mk.template= (a working =GsurfUriHandler= module and its Makefile), =gsurfctl-session.sh.template= (a ShellCheck-clean session script). |
 
 The references are Markdown because agents read Markdown; this document and the rest of =docs/= stay in org-mode.

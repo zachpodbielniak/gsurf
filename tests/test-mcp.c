@@ -40,7 +40,7 @@ typedef gchar *(*ListToolsFunc) (GsurfModule *module);
 /* Every tool, in the module's table order. */
 static const gchar *const all_tools[] = {
 	"navigate", "get_current_uri", "get_title", "go_back", "go_forward", "reload", "stop",
-	"get_page_text", "get_page_html", "get_links", "execute_javascript", "scroll",
+	"get_page_text", "list_frames", "get_page_html", "get_links", "execute_javascript", "scroll",
 	"find_text", "click_link", "screenshot", "save_screenshot", "get_history",
 	"get_cookies", "set_cookie", "get_config", "set_config", "set_setting", "list_modules",
 	"toggle_module",
@@ -1276,6 +1276,39 @@ test_secret_hold(void)
 	h_free(&h);
 }
 
+/* Frames on a view that has no web processes: the tools say what is
+ * missing, and a 'frame' of the wrong kind is refused before anything
+ * runs.  The real thing is in test-mcp-webkit.c. */
+static void
+test_frames(void)
+{
+	H h = { 0 };
+	g_autofree gchar *yaml = config_yaml(TRUE, "      click: true\n");
+	gchar *text;
+
+	if (!h_mcp(&h, yaml))
+		return;
+	h_window(&h);
+
+	text = call(&h, "list_frames", NULL, TRUE);
+	ASSERT_HAS(text, "frames module");
+	g_free(text);
+	text = call(&h, "get_page_text", "{\"frame\":\"js.stripe.com\"}", TRUE);
+	ASSERT_HAS(text, "frames module");
+	g_free(text);
+	text = call(&h, "get_page_text", "{\"frame\":true}", TRUE);
+	ASSERT_HAS(text, "'frame' must be");
+	ASSERT_HAS(text, "site");
+	g_free(text);
+	text = call(&h, "get_page_text", "{\"frame\":1.5}", TRUE);
+	ASSERT_HAS(text, "site");
+	g_free(text);
+	text = call(&h, "click", "{\"frame\":\"js.stripe.com\",\"x\":1,\"y\":1}", TRUE);
+	ASSERT_HAS(text, "give a 'selector'");
+	g_free(text);
+	h_free(&h);
+}
+
 /* list_containers: registry containers with the containers module's
  * configured host rules (matched by id, or by name without one). */
 static void
@@ -1427,6 +1460,7 @@ main(int argc, char *argv[])
 	g_test_add_func("/mcp/containers", test_containers);
 	g_test_add_func("/mcp/cookies", test_cookies);
 	g_test_add_func("/mcp/secret-hold", test_secret_hold);
+	g_test_add_func("/mcp/frames", test_frames);
 
 	ret = g_test_run();
 	if (so_handle != NULL)
