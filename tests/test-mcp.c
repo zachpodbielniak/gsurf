@@ -1298,6 +1298,10 @@ test_frames(void)
 	g_free(text);
 	text = call(&h, "get_page_text", "{\"frame\":true}", TRUE);
 	ASSERT_HAS(text, "'frame' must be");
+	ASSERT_HAS(text, "site");
+	g_free(text);
+	text = call(&h, "get_page_text", "{\"frame\":1.5}", TRUE);
+	ASSERT_HAS(text, "site");
 	g_free(text);
 	text = call(&h, "click", "{\"frame\":\"js.stripe.com\",\"x\":1,\"y\":1}", TRUE);
 	ASSERT_HAS(text, "give a 'selector'");

@@ -5,7 +5,7 @@
  * Copyright (C) 2026 Zach Podbielniak
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Private to libgsurf (gsurf-frames.c) and modules/frames/webext/: both
+ * Private to libgsurf (gsurf-view-frames.c) and modules/frames/webext/: both
  * sides of one WebKit user-message exchange, so they cannot drift apart.
  * Constants only (nothing for the introspection scanner).
  */

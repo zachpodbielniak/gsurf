@@ -8,7 +8,7 @@ description: >
 
 # Skill: gsurf
 
-gsurf is a library-first web browser written in C on GLib/GObject: a port of suckless surf where nearly everything lives in `libgsurf.so`, the `gsurf` binary is a thin `main.c`, and surf's patches are runtime-loaded `.so` modules (33 of them). A running gsurf is driven from outside with `gsurfctl` over a per-process control socket, or by AI agents over the optional MCP module. This skill covers using and scripting a running browser, writing YAML and C configs, picking and tuning modules, wmux panes, tree tabs and containers, the `--lrg=3d` 3D tab space (every tab a live panel in a libregnum scene), writing new modules, embedding libgsurf, and building and testing the source tree.
+gsurf is a library-first web browser written in C on GLib/GObject: a port of suckless surf where nearly everything lives in `libgsurf.so`, the `gsurf` binary is a thin `main.c`, and surf's patches are runtime-loaded `.so` modules (34 of them). A running gsurf is driven from outside with `gsurfctl` over a per-process control socket, or by AI agents over the optional MCP module. This skill covers using and scripting a running browser, writing YAML and C configs, picking and tuning modules, wmux panes, tree tabs and containers, the `--lrg=3d` 3D tab space (every tab a live panel in a libregnum scene), writing new modules, embedding libgsurf, and building and testing the source tree.
 
 ## When to Use
 
@@ -72,7 +72,7 @@ gsurf is a library-first web browser written in C on GLib/GObject: a port of suc
    - **A `modules:` block replaces the previous one; it is not merged.** Core sections (`browser`, `webkit`, `keybinds`, …) merge key by key, but a YAML file or C string that contains `modules:` drops every module it does not list, and those turn off. Always edit inside the user's complete `modules:` block; never write a file or string that lists only the module you are changing.
    - **If `config.c` exists, edit it, not the YAML.** A C config usually embeds the whole `modules:` block as a YAML string passed to `gsurf_config_load_from_data()`, and it runs last. Read [references/configuration-c.md](references/configuration-c.md) before touching one.
    - YAML users: start from [templates/config.yaml.template](templates/config.yaml.template) or `gsurf --generate-yaml-config`. C users: [templates/config.c.template](templates/config.c.template) or `gsurf --generate-c-config`.
-   - Module options live under `modules.<name>`. Every module is **off unless its section says `enabled: true`**; the shipped defaults enable search_engines, chromebar, history, homepage, toggles, cookie_policy, tabs, find_bar, modal, downloads, site_styles and notifications.
+   - Module options live under `modules.<name>`. Every module is **off unless its section says `enabled: true`**; the shipped defaults enable search_engines, chromebar, history, homepage, toggles, cookie_policy, tabs, find_bar, frames, modal, downloads, site_styles and notifications.
    - Only keys a module actually reads have an effect. Several keys in the shipped default config are placeholders that nothing reads; [references/modules-catalog.md](references/modules-catalog.md) marks them. Do not "fix" behaviour by setting one.
    - Most configuration is read at startup. After editing, restart gsurf (or ask the user to). A running instance can be checked with `gsurfctl config KEY` and `gsurfctl modules`, and a module toggled for this run with `gsurfctl module NAME on|off`.
 

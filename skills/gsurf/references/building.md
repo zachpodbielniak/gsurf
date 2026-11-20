@@ -78,7 +78,7 @@ Plus `make MCP=1 all test` and `make LRG_BACKEND=1 all test` (and `make LRG_BACK
 
 ## Headless GUI testing without Xvfb
 
-A wrapper named `xvfb-run` first on `PATH` can run the command under `dbus-run-session` inside `mutter --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display=<unique>`, exporting `WAYLAND_DISPLAY`, `GDK_BACKEND=wayland`, `NO_AT_BRIDGE=1`, `GTK_A11Y=none`. GTK4 runs under it print harmless xdg-desktop-portal screencast errors and, rarely, a flaky "Duplicate call to gdk_frame_timings_presented()" abort that passes on a rerun.
+A wrapper named `xvfb-run` first on `PATH` can run the command under `dbus-run-session` inside `mutter --headless --wayland --no-x11 --virtual-monitor 1280x800 --wayland-display=<unique>`, exporting `WAYLAND_DISPLAY`, `GDK_BACKEND=wayland`, `NO_AT_BRIDGE=1`, `GTK_A11Y=none`. Export `WAYLAND_DISPLAY` as the absolute socket path: several GUI tests point `XDG_RUNTIME_DIR` at a private directory, and a relative name is then not found. GTK4 runs under it print harmless xdg-desktop-portal screencast errors and, rarely, a flaky "Duplicate call to gdk_frame_timings_presented()" abort that passes on a rerun.
 
 ## Running from the tree
 

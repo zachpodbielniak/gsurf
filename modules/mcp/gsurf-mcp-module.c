@@ -135,18 +135,27 @@ frame_arg(JsonObject *args, gchar **out, gchar **error_text)
 	if (JSON_NODE_HOLDS_VALUE(node)) {
 		GType type = json_node_get_value_type(node);
 
-		if ((type == G_TYPE_INT64 || type == G_TYPE_DOUBLE) &&
-		    json_node_get_double(node) >= 1) {
-			*out = g_strdup_printf("%" G_GINT64_FORMAT, (gint64)json_node_get_double(node));
+		if (type == G_TYPE_INT64 && json_node_get_int(node) > 0) {
+			*out = g_strdup_printf("%" G_GINT64_FORMAT, json_node_get_int(node));
 			return TRUE;
+		}
+		/* A whole number that did not fit in an int64 still names an id.
+		 * A fraction does not: truncating it would select a different frame. */
+		if (type == G_TYPE_DOUBLE) {
+			gdouble n = json_node_get_double(node);
+
+			if (n >= 1 && n < (gdouble)G_MAXINT64 && n == (gdouble)(gint64)n) {
+				*out = g_strdup_printf("%" G_GINT64_FORMAT, (gint64)n);
+				return TRUE;
+			}
 		}
 		if (type == G_TYPE_STRING && *json_node_get_string(node) != '\0') {
 			*out = g_strdup(json_node_get_string(node));
 			return TRUE;
 		}
 	}
-	*error_text = g_strdup("'frame' must be a frame id (list_frames gives them) or text "
-		"from the frame's URI");
+	*error_text = g_strdup("'frame' must be a frame id (list_frames gives them) or a site: "
+		"host, host:port or *.host");
 	return FALSE;
 }
 

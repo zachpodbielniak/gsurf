@@ -1388,7 +1388,7 @@ test_frames(void)
 	g_assert_cmpfloat(json_object_get_double_member(inner, "height"), ==, 320);
 	g_clear_pointer(&node, json_node_unref);
 
-	/* 3. Its text, by a piece of its URI and by its id. */
+	/* 3. Its text, by its site (host:port) and by its id. */
 	node = rpcf(&h, "page.text", 0, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s}", id, site);
 	ASSERT_HAS(json_node_get_string(node), "inside the frame");
 	g_assert_null(strstr(json_node_get_string(node), "outside the frame"));
@@ -1442,6 +1442,27 @@ test_frames(void)
 	g_clear_pointer(&node, json_node_unref);
 	node = rpcf(&h, "page.click", -32001, "{\"view\":%" G_GINT64_FORMAT ",\"frame\":%s,"
 		"\"selector\":\"#nope\"}", id, site);
+	g_clear_pointer(&node, json_node_unref);
+
+	/* 6. The next document has no frame of its own.  The main frame is
+	 *    noted for the life of the page and sits first, so a sweep that
+	 *    stops when it sees that frame would leave the dead child in the
+	 *    list and page.frames would still report it. */
+	node = rpcf(&h, "navigate", 0, "{\"view\":%" G_GINT64_FORMAT
+		",\"uri\":\"http://127.0.0.1:%u/form\"}", id, port);
+	g_clear_pointer(&node, json_node_unref);
+	WAIT_UNTIL(g_strcmp0(gsurf_view_get_title(view), "form") == 0);
+	for (i = 0; i < 80; i++) {
+		g_clear_pointer(&node, json_node_unref);
+		node = rpcf(&h, "page.frames", 0, "{\"view\":%" G_GINT64_FORMAT "}", id);
+		if (json_array_get_length(json_node_get_array(node)) == 1)
+			break;
+		gsurf_webkit_test_spin(25);
+	}
+	frames = json_node_get_array(node);
+	g_assert_cmpuint(json_array_get_length(frames), ==, 1);
+	g_assert_true(json_object_get_boolean_member(
+		json_array_get_object_element(frames, 0), "main"));
 	g_clear_pointer(&node, json_node_unref);
 
 	h_free(&h);

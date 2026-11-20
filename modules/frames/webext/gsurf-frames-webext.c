@@ -10,7 +10,7 @@
  * page's other frames -- cross-origin ones included -- can be reached:
  *   - "window-object-cleared" notes every frame of every page as its
  *     document starts (WebKit has no call that lists a page's frames);
- *   - "user-message-received" answers gsurf (src/core/gsurf-frames.c)
+ *   - "user-message-received" answers gsurf (src/core/gsurf-view-frames.c)
  *     with the frame list, or with a script's value run in one frame.
  * The messages are defined once, in src/core/gsurf-frames-protocol.h.
  *
@@ -110,9 +110,16 @@ on_window_object_cleared(WebKitScriptWorld *world, WebKitWebPage *page, WebKitFr
 {
 	GPtrArray *list = frames_of(page, TRUE);
 	GWeakRef *ref;
+	gboolean seen = FALSE;
 	guint i = 0;
 
-	/* drop the frames that are gone; stop at this one if it is known */
+	/*
+	 * Drop every frame that is gone, then keep this one if it is already
+	 * noted.  The main frame's WebKitFrame lives for the page and sits at
+	 * the front of the list, and window-object-cleared fires for it on
+	 * every navigation: stopping at it would leave the dead children
+	 * after it in the list for the life of the page.
+	 */
 	while (i < list->len) {
 		GObject *known = g_weak_ref_get(g_ptr_array_index(list, i));
 
@@ -120,11 +127,13 @@ on_window_object_cleared(WebKitScriptWorld *world, WebKitWebPage *page, WebKitFr
 			g_ptr_array_remove_index(list, i);
 			continue;
 		}
-		g_object_unref(known);
 		if (known == (GObject *)frame)
-			return;
+			seen = TRUE;
+		g_object_unref(known);
 		i++;
 	}
+	if (seen)
+		return;
 	ref = g_new0(GWeakRef, 1);
 	g_weak_ref_init(ref, frame);
 	g_ptr_array_add(list, ref);
@@ -518,7 +527,8 @@ site_matches(const Site *site, const gchar *frame_uri)
 	/* only a document from a network site has a host to trust:
 	 * about:, data:, blob: and the like are the embedding page's */
 	scheme = g_uri_get_scheme(uri);
-	if (g_ascii_strcasecmp(scheme, "http") != 0 && g_ascii_strcasecmp(scheme, "https") != 0)
+	if (scheme == NULL ||
+	    (g_ascii_strcasecmp(scheme, "http") != 0 && g_ascii_strcasecmp(scheme, "https") != 0))
 		return FALSE;
 	host = normal_host(g_uri_get_host(uri));
 	if (host == NULL)
