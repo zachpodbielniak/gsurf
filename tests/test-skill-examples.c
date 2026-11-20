@@ -629,15 +629,19 @@ skill_commands(
 				g_auto(GStrv) cells = g_strsplit(line, "|", 3);
 				guint k;
 
-				for (k = 1; parts[k] != NULL; k += 2) {
+				/* glib 2.90: g_strsplit() of "" is { NULL }, one slot.
+				 * The odd spans start at index 1, so stop on the previous
+				 * NULL instead of reading off the end of that array. */
+				for (k = 1; parts[k - 1] != NULL && parts[k] != NULL; k += 2) {
 					collect_commands(parts[k], names);
 					if (parts[k + 1] == NULL)
 						break;
 				}
-				if (in_commands && g_str_has_prefix(line, "| `") && cells[1] != NULL) {
+				if (in_commands && g_str_has_prefix(line, "| `") &&
+				    cells[0] != NULL && cells[1] != NULL) {
 					g_auto(GStrv) first = g_strsplit(cells[1], "`", -1);
 
-					for (k = 1; first[k] != NULL; k += 2) {
+					for (k = 1; first[k - 1] != NULL && first[k] != NULL; k += 2) {
 						g_autofree gchar *call = g_strconcat("gsurfctl ", first[k], NULL);
 
 						collect_commands(call, names);
