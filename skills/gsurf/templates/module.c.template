@@ -16,16 +16,18 @@ struct _GsurfQuicklinksModule
 	GHashTable  *links;       /* alias (gchar *) -> uri (gchar *) */
 };
 
-/* GsurfUriHandler::rewrite_uri: the alias's URI, or NULL to let others try. */
+/* GsurfUriHandler::rewrite_uri: the alias's URI, or NULL to let others try.
+ * g_strstrip() can return past the start of the copy; autofree owns `owned`. */
 static gchar *
 gsurf_quicklinks_rewrite_uri(
 	GsurfUriHandler	*handler,
 	const gchar	*input
 ){
 	GsurfQuicklinksModule *self = GSURF_QUICKLINKS_MODULE(handler);
-	g_autofree gchar *key = g_strstrip(g_strdup(input != NULL ? input : ""));
+	g_autofree gchar *owned = g_strdup(input != NULL ? input : "");
+	const gchar *key = g_strstrip(owned);
 
-	return (gchar *)g_strdup(g_hash_table_lookup(self->links, key));
+	return g_strdup(g_hash_table_lookup(self->links, key));
 }
 
 static void
