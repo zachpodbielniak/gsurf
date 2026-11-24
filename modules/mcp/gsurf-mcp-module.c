@@ -83,7 +83,7 @@ js_done(GObject *source, GAsyncResult *res, gpointer data)
 
 /*
  * Run JS in @frame of @view (NULL: the main frame; @require picks among
- * frames whose URI matches) and return its (string/JSON) value
+ * frames on that site) and return its (string/JSON) value
  * synchronously via a nested main loop; @c (may be NULL) gets where the
  * frame is.  Returns newly-allocated text, or %NULL on error.
  */
@@ -119,9 +119,10 @@ run_js_sync(GsurfView *view, const gchar *script, GError **error)
 }
 
 /*
- * The optional 'frame' argument: a frame id (list_frames 'id') or text
- * from the frame's URI.  NULL in @out when absent; FALSE with @error_text
- * when it is something else.
+ * The optional 'frame' argument: a frame id (list_frames 'id') or a site
+ * (host, host:port or *.host), matched on the frame URI's host, never on
+ * text in the URI.  NULL in @out when absent; FALSE with @error_text when
+ * it is something else.
  */
 static gboolean
 frame_arg(JsonObject *args, gchar **out, gchar **error_text)

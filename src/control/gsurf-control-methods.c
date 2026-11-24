@@ -3326,8 +3326,8 @@ out:
 	at_run_free(run);
 }
 
-/* @frame: NULL for the main frame; among frames whose URI matches, the
- * one holding @selector is chosen. */
+/* @frame: NULL for the main frame; among frames on that site, the one
+ * holding @selector is chosen. */
 static void
 at_selector(GsurfControlInvocation *inv, GsurfView *view, const gchar *frame, AtKind kind,
             const gchar *selector, guint button, guint modifiers, const gchar *text,
@@ -3495,7 +3495,7 @@ m_page_type(GsurfControlServer *server, GsurfControlInvocation *inv, gpointer da
 	run->frame = g_steal_pointer(&frame);
 	run->selector = selector != NULL && *selector != '\0' ? g_strdup(selector) : NULL;
 	run->text = g_strdup(text);
-	/* among frames whose URI matches, arm the one holding the field */
+	/* among frames on that site, arm the one holding the field */
 	gsurf_view_run_javascript_in_frame_async(view, run->frame, run->selector,
 		TYPED_ARM_SCRIPT, NULL, type_armed, run);
 }
